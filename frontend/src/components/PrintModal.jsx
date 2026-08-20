@@ -151,20 +151,21 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   });
 
   const [printType, setPrintType] = useState('labels');
-
+    const [errorMessage, setErrorMessage] = useState('');
   // פונקציה שמטפלת במעבר משלב 1 לשלב 2
   const handleNextStep = () => {
     if (printType === 'labels') {
       setStep(2);
     } else {
       // 🌟 שימוש בפונקציית הטקסט הדינמית מהקבועים
-      alert(MODAL_TEXTS.NOT_AVAILABLE_ALERT(printType));
+        setErrorMessage(MODAL_TEXTS.NOT_AVAILABLE_ALERT(printType));
     }
   };
 
   const handlePrint = () => {
     // אותו דף הדפסה בדיוק כמו מה"תצוגה מקדימה" - רק עם דגל שגורם לו לפתוח את חלון
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
+
     navigate('/print-preview', {
       state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, autoPrint: true },
     });
@@ -196,7 +197,11 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
               <FormControlLabel value="envelopes" control={<Radio />} label={MODAL_TEXTS.ENVELOPES_OPTION} />
               <FormControlLabel value="lists" control={<Radio />} label={MODAL_TEXTS.LISTS_OPTION} />
             </RadioGroup>
-            
+              {errorMessage && (
+                  <Typography color="error" sx={{ mt: 2 }}>
+                      {errorMessage}
+                  </Typography>
+              )}
             <Stack direction="row" spacing={2} justifyContent="flex-end" mt={3}>
               <Button onClick={onClose} color="inherit">{MODAL_TEXTS.BUTTON_CANCEL}</Button>
               <Button variant="contained" onClick={handleNextStep}>{MODAL_TEXTS.BUTTON_NEXT}</Button>

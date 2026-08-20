@@ -147,7 +147,13 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
               הדפס מדבקות
             </Button>
 
-            <Button variant="text" onClick={() => navigate('/dashboard')}>
+              <Button
+                  variant="text"
+                  onClick={() => {
+                      sessionStorage.setItem('returnFromPreview', 'true');
+                      navigate('/dashboard');
+                  }}
+              >
               ביטול וחזרה
             </Button>
           </Stack>
