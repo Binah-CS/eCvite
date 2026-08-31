@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -69,37 +70,49 @@ public class RecipientController {
 
         List<Recipients> incoming = request.getRecipients();
 
-        // יצירת hash לכל שורה שחסר לה - בזיכרון, לא פונה ל-DB
+        // Rows that already have a hashCode are persisted records.  Preserve that
+        // stable identity so edits to identity fields do not create a new recipient.
+        List<Recipients> existingRows = new ArrayList<>();
+        List<Recipients> newRows = new ArrayList<>();
         for (Recipients r : incoming) {
             if (r.getHashCode() == null || r.getHashCode().isEmpty()) {
+                newRows.add(r);
+            } else {
+                existingRows.add(r);
+            }
+        }
+
+        List<Recipients> savedRecipients = new ArrayList<>();
+
+        if (!existingRows.isEmpty()) {
+            savedRecipients.addAll(recipientRepository.saveAll(existingRows));
+        }
+
+        if (!newRows.isEmpty()) {
+            for (Recipients r : newRows) {
                 r.setHashCode(r.generateRowHashCode());
             }
-        }
 
-        // שאילתה אחת שמביאה בבת אחת את כל הנמענים שכבר קיימים (לפי hash) - במקום
-        // שאילתה נפרדת לכל שורה בלולאה, שהייתה הופכת שמירה של רשימה גדולה (מאות
-        // שורות, למשל אחרי ייבוא אקסל) לאיטית מאוד (מאות round-trip-ים ל-Neon)
-        List<String> hashCodes = incoming.stream()
-                .map(Recipients::getHashCode)
-                .distinct()
-                .toList();
-        Map<String, Recipients> existingByHash = recipientRepository.findAllById(hashCodes).stream()
-                .collect(Collectors.toMap(Recipients::getHashCode, r -> r));
+            List<String> hashCodes = newRows.stream()
+                    .map(Recipients::getHashCode)
+                    .distinct()
+                    .toList();
+            Map<String, Recipients> existingByHash = recipientRepository.findAllById(hashCodes).stream()
+                    .collect(Collectors.toMap(Recipients::getHashCode, r -> r));
 
-        List<Recipients> toInsert = new ArrayList<>();
-        List<Recipients> savedRecipients = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        for (Recipients r : incoming) {
-            if (!seen.add(r.getHashCode())) continue; // כפילות בתוך אותה בקשה
-            Recipients existing = existingByHash.get(r.getHashCode());
-            if (existing != null) {
-                savedRecipients.add(existing);
-            } else {
-                toInsert.add(r);
+            List<Recipients> toSave = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            for (Recipients r : newRows) {
+                if (!seen.add(r.getHashCode())) {
+                    continue;
+                }
+                Recipients existing = existingByHash.get(r.getHashCode());
+                if (existing != null) {
+                    r.setBelongsTo(mergeBelongsTo(existing.getBelongsTo(), r.getBelongsTo()));
+                }
+                toSave.add(r);
             }
-        }
-        if (!toInsert.isEmpty()) {
-            savedRecipients.addAll(recipientRepository.saveAll(toInsert));
+            savedRecipients.addAll(recipientRepository.saveAll(toSave));
         }
 
         // שאילתה אחת שמביאה רק את ה-hash-ים הקיימים (לא את הישויות המלאות - זה היה
@@ -128,7 +141,20 @@ public class RecipientController {
 
         activityLogService.log(request.getPhone(), "RECIPIENTS_SAVED", "Recipient rows submitted: " + incoming.size());
 
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(savedRecipients);
+    }
+
+    private String mergeBelongsTo(String existing, String incoming) {
+        Set<String> values = new LinkedHashSet<>();
+        for (String value : (existing == null ? "" : existing).split(",")) {
+            String trimmed = value.trim();
+            if (!trimmed.isEmpty()) values.add(trimmed);
+        }
+        for (String value : (incoming == null ? "" : incoming).split(",")) {
+            String trimmed = value.trim();
+            if (!trimmed.isEmpty()) values.add(trimmed);
+        }
+        return String.join(", ", values);
     }
 
 

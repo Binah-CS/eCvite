@@ -1,9 +1,13 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { Accordion, AccordionDetails, AccordionSummary, Box, Button, List, ListItem, ListItemText, Typography } from '@mui/material';
+import { Accordion, AccordionDetails, AccordionSummary, Avatar, Box, IconButton, List, ListItem, ListItemText, Menu, MenuItem, Typography } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
+import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
+import { useNavigate } from 'react-router-dom';
 import DataTable from '../components/DataTable';
 import api from '../services/api';
-import PrintModal from '../components/PrintModal'; // ייבוא המודאל החדש
+import PrintModal from '../components/PrintModal';
+import { parseColumnPreferences } from '../utils/columnPreferences';
 
 const DEFAULT_PRINTABLE_FIELDS = ['prefix', 'man', 'woman', 'lastName', 'suffix', 'street', 'houseNo', 'city', 'country'];
 const INTERNAL_PRINT_FIELD_KEYS = new Set(['id', 'hashCode', 'changed', 'changeDate', 'changeBy', 'createdBy', 'print', 'printFields']);
@@ -13,6 +17,13 @@ const INTERNAL_PRINT_FIELD_KEYS = new Set(['id', 'hashCode', 'changed', 'changeD
 function getLoggedUser() {
   const raw = localStorage.getItem('user');
   return raw ? JSON.parse(raw) : null;
+}
+
+function getInitials(name) {
+  const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0][0];
+  return `${parts[0][0]}${parts[1][0]}`;
 }
 
 function getLocalRecords(phone) {
@@ -135,6 +146,7 @@ function cloneRows(rows) {
 }
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -142,6 +154,7 @@ export default function DashboardPage() {
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [selectedRows, setSelectedRows] = useState([]); // 🌟 רק הגדרה אחת, נקייה ותקינה!
   const [isTableDirty, setIsTableDirty] = useState(false);
+  const [profileMenuAnchor, setProfileMenuAnchor] = useState(null);
   const [activityLogs, setActivityLogs] = useState([]);
   const hasTrackedDashboardVisit = useRef(false);
   const pendingDeletedHashCodes = useRef(getPendingDeletedHashCodes(user?.phone));
@@ -386,9 +399,9 @@ export default function DashboardPage() {
     try {
       console.log("2. שולח לבקאנד:", updatedRows);
 
-      const cleanRows = updatedRows.map(
-          ({ id, hashCode, printFields, ...rest }) => rest
-      );
+      // Keep hashCode for persisted rows: it is the stable database identity used
+      // by the backend to update the intended recipient even if name/address changes.
+      const cleanRows = updatedRows.map(({ id, printFields, ...rest }) => rest);
 
       console.log("2. שולח לבקאנד אחרי ניקוי:", cleanRows);
 
@@ -398,17 +411,17 @@ export default function DashboardPage() {
         recipients: cleanRows
       });
 
-      const response = await api.saveRecords(
-          user.phone,
-          cleanRows
-      );
-
       const hashCodesToDelete = [...pendingDeletedHashCodes.current];
       if (hashCodesToDelete.length) {
         await api.deleteRecipients(user.phone, hashCodesToDelete);
         pendingDeletedHashCodes.current.clear();
         clearPendingDeletedHashCodes(user.phone);
       }
+
+      const response = await api.saveRecords(
+          user.phone,
+          cleanRows
+      );
 
 
 
@@ -493,58 +506,107 @@ export default function DashboardPage() {
 
     return 'ערב טוב';
   };
-  return (
-      <Box sx={{ width: '100%', px: 2, pt: 0.5, pb: 1 }}>
+  const profileMenu = (
+    <Box sx={{ display: 'inline-flex' }}>
+      <IconButton onClick={(e) => setProfileMenuAnchor(e.currentTarget)} size="small">
+        <Avatar sx={{ width: 30, height: 30, bgcolor: '#1e3a8a', fontSize: '0.9rem' }}>
+          {getInitials(user?.firstNameMan || user?.firstNameWoman || 'משתמש')}
+        </Avatar>
+      </IconButton>
+      <Menu
+        anchorEl={profileMenuAnchor}
+        open={Boolean(profileMenuAnchor)}
+        onClose={() => setProfileMenuAnchor(null)}
+        transitionDuration={0}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'center' }}
+        PaperProps={{
+          sx: {
+            mt: 1,
+            width: 320,
+            borderRadius: 4,
+            boxShadow: '0 8px 28px rgba(15, 23, 42, 0.18)',
+            p: 3,
+          },
+        }}
+        MenuListProps={{ sx: { p: 0 } }}
+      >
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pb: 2 }}>
+          <Avatar sx={{ width: 72, height: 72, bgcolor: '#1e3a8a', fontSize: '2rem' }}>
+            {getInitials(user?.firstNameMan || user?.firstNameWoman || 'משתמש')}
+          </Avatar>
+          <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', mt: 1.5 }}>
+            {getGreeting()}, {user?.firstNameMan || user?.firstNameWoman || 'משתמש'}!
+          </Typography>
+        </Box>
 
-
-
-        <Typography
-            variant="h8"
-            sx={{
-              fontWeight: 700,
-              color: '#1e3a8a',
-              textAlign: 'right',
-              transform: 'translateY(-30px)',
+        <Box sx={{ bgcolor: '#f8fafc', borderRadius: 3, p: 0.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          <MenuItem
+            onClick={() => {
+              setProfileMenuAnchor(null);
+              navigate('/settings');
             }}
-        >
+            sx={{ borderRadius: 2.5, py: 1.25, px: 2, gap: 1.5, '&:hover': { bgcolor: '#eef2f7' } }}
+          >
+            <SettingsOutlinedIcon fontSize="small" sx={{ color: '#475569' }} />
+            <Typography variant="body2" sx={{ fontWeight: 600, color: '#1e293b' }}>הגדרות</Typography>
+          </MenuItem>
+          <MenuItem
+            onClick={handleLogout}
+            sx={{ borderRadius: 2.5, py: 1.25, px: 2, gap: 1.5, '&:hover': { bgcolor: '#eef2f7' } }}
+          >
+            <LogoutOutlinedIcon fontSize="small" sx={{ color: '#475569' }} />
+            <Typography variant="body2" sx={{ fontWeight: 600, color: '#1e293b' }}>יציאה</Typography>
+          </MenuItem>
+        </Box>
+      </Menu>
+    </Box>
+  );
 
-          <Box display="flex" justifyContent="space-between" mb={0.25} >
+  // סדר העמודות שהמשתמשת גררה נשמר מיד לשרת, בלי לחכות ללחיצה על "שמור שינויים" -
+  // זה שונה במפורש מהצג/הדפס (שנשמרים רק בלחיצה על שמור), כי הגרירה קורית בטבלה
+  // עצמה, לא במסך ההגדרות. נשמר יחד עם אותה עמודה/מבנה JSON שכבר קיים להצג/הדפס,
+  // בתוך מפתח נפרד (__order), כדי לא לפתוח עמודה חדשה בנאון בשביל זה
+  const handleColumnOrderChange = async (order) => {
+    const currentPrefs = parseColumnPreferences(user?.columnPreferences);
+    const columnPreferences = JSON.stringify({ ...currentPrefs, __order: order });
+    let updatedUser = { ...user, columnPreferences };
+    try {
+      const response = await api.updateColumnPreferences(user.phone, columnPreferences);
+      updatedUser = response.data;
+    } catch {
+      // אם קריאת השרת נכשלה, שומרים לפחות מקומית כדי שהשינוי לא ילך לאיבוד בטעות
+    }
+    sessionStorage.setItem('user', JSON.stringify(updatedUser));
+  };
 
-            {getGreeting()}, {user?.firstNameMan || user?.firstNameWoman || 'משתמש'}
-            <Button
-                variant="outlined"
-                size="small"
-                onClick={handleLogout}
-                sx={{ textTransform: 'none', px: 2, borderRadius: 2 }}
-
-            >
-              יציאה
-
-            </Button>
-
-          </Box>
-        </Typography>
-
+  return (
+      <Box sx={{ width: '100%', height: '100vh', px: 2, pt: 0.5, pb: 1, display: 'flex', flexDirection: 'column' }}>
         {error && (
             <Typography color="error" variant="body2" mb={1}>
               {error}
             </Typography>
         )}
 
-        <DataTable
-            records={records}
-            loading={loading}
-            onSave={handleSave}
-            onAutoSave={handleAutoSaveLocal}
-            onSelectionChange={setSelectedRows}
-            onDeleteRows={handleDeleteRows}
-            initialSelectedIds={initialSelectedIds}
-            onImport={handleImport}
-            onOpenPrint={() => {
-              setIsPrintModalOpen(true);
-              trackActivity('PRINT_MODAL_OPENED', `Selected rows: ${selectedRows.length}`);
-            }}
-        />
+        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <DataTable
+              records={records}
+              loading={loading}
+              onSave={handleSave}
+              onAutoSave={handleAutoSaveLocal}
+              onSelectionChange={setSelectedRows}
+              onDeleteRows={handleDeleteRows}
+              initialSelectedIds={initialSelectedIds}
+              onImport={handleImport}
+              onOpenPrint={() => {
+                setIsPrintModalOpen(true);
+                trackActivity('PRINT_MODAL_OPENED', `Selected rows: ${selectedRows.length}`);
+              }}
+              columnPreferences={parseColumnPreferences(user?.columnPreferences)}
+              profileMenu={profileMenu}
+              onColumnOrderChange={handleColumnOrderChange}
+          />
+        </Box>
 
         {/* רנדור המודאל והעברת הרשומות המסומנות אליו */}
         <PrintModal
