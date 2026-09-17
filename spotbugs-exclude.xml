@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  משתיק את קטגוריית EI_EXPOSE_REP / EI_EXPOSE_REP2 ("חושף ייצוג פנימי") בכל הפרויקט -
+  אזהרה על getters/setters של רשימות שלא מחזירים/שומרים עותק מוגן. זו אזהרה תקפה
+  באופן כללי, אבל כאן היא חלה רק על DTOs/ישויות פנימיות (לא נחשפות לגורם חיצוני
+  זדוני), והתיקון האמיתי (עותק מוגן בכל getter/setter של List) מוסיף הרבה קוד חוזר
+  בלי ערך אמיתי לאפליקציה הזו - ר' סבב הבדיקה מ-27.8.2026
+-->
+<FindBugsFilter>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+</FindBugsFilter>

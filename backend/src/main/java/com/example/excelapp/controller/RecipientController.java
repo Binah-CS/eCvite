@@ -5,7 +5,6 @@ import com.example.excelapp.entity.UserRecipients;
 import com.example.excelapp.entity.Recipients;
 import com.example.excelapp.repository.RecipientsRepository;
 import com.example.excelapp.dto.SaveRecipientsRequest;
-import com.example.excelapp.dto.DeleteRecipientsRequest;
 import com.example.excelapp.repository.UserRecipientsRepository;
 import com.example.excelapp.repository.UserRepository;
 import com.example.excelapp.service.ExcelService;
@@ -13,8 +12,12 @@ import com.example.excelapp.service.ExcelService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,6 +39,19 @@ public class RecipientController {
     @Autowired
     private ExcelService excelService;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    // "מציגה" למסד הנתונים מי המשתמשת המבצעת את הפעולה הנוכחית, כדי שהטריגרים
+    // ששומרים היסטוריית שינויים בטבלת הנמענים (recipients_history) ידעו למי לייחס
+    // כל שינוי/מחיקה - חייבת לרוץ באותה טרנזקציה (@Transactional) של הפעולה עצמה,
+    // אחרת ה-DB "ישכח" את זה לפני שהשמירה/מחיקה בפועל קורית
+    private void stampCurrentUserForHistory(String userIdentity) {
+        entityManager
+                .createNativeQuery("SELECT set_config('app.current_user', :val, true)")
+                .setParameter("val", userIdentity)
+                .getSingleResult();
+    }
 
     public RecipientController(
             RecipientsRepository recipientRepository,
@@ -49,6 +65,7 @@ public class RecipientController {
 
 
     @PostMapping("/save")
+    @Transactional
     public ResponseEntity<?> saveRecipients(
             @RequestBody SaveRecipientsRequest request
     ) {
@@ -62,6 +79,18 @@ public class RecipientController {
             return ResponseEntity
                     .status(HttpStatus.NOT_FOUND)
                     .body("User not found");
+        }
+
+        stampCurrentUserForHistory(user.getHashCode());
+
+        // מוחקים (מנתקים) קודם, לפני השמירה - לא אחריה. אם המחיקה הייתה רצה אחרי
+        // השמירה, נמען שנמחק ואז יובא/נוסף מחדש עם אותה זהות היה מקבל hash זהה לנמען
+        // הישן שעדיין מקושר אליך באותו רגע, והמחיקה שרצה רק אחר כך הייתה מנתקת
+        // בטעות גם את מה שכרגע נשמר. באותה בקשה/טרנזקציה של השמירה עצמה (לא בקשת
+        // HTTP נפרדת) - חוסך round-trip שלם לשרת בכל שמירה שכוללת גם מחיקה
+        List<String> hashCodesToDelete = request.getHashCodesToDelete();
+        if (hashCodesToDelete != null && !hashCodesToDelete.isEmpty()) {
+            deleteUserRecipientLinks(user, hashCodesToDelete);
         }
 
         List<Recipients> incoming = request.getRecipients();
@@ -272,31 +301,55 @@ public class RecipientController {
     }
 
 
-    @PostMapping("/delete")
-    public ResponseEntity<?> deleteRecipients(
-            @RequestBody DeleteRecipientsRequest request
-    ) {
-
-        User user = userRepository.findByPhone(request.getPhone());
-
-        if (user == null) {
-            return ResponseEntity
-                    .status(HttpStatus.NOT_FOUND)
-                    .body("User not found");
-        }
-
-        List<String> hashCodes = request.getHashCodes();
-
-        // מוחקים רק את הקישור (user_recipients) בין המשתמש הזה לנמענים שנבחרו -
-        // לא את שורת ה-Recipients עצמה, כי אותו hashCode (נגזר משם+טלפון) יכול
-        // להיות משותף/מקושר גם למשתמשים אחרים, ומחיקה ישירה הייתה מוחקת להם בטעות.
-        // שאילתה אחת ממוקדת (JOIN + IN) - לא טוענים את כל הקישורים של המשתמש
-        // (יכולים להיות מאות) רק כדי לסנן בזיכרון בשביל כמה שנבחרו למחיקה
+    // מוחקת רק את הקישור (user_recipients) בין המשתמש הזה לנמענים שנבחרו - לא את
+    // שורת ה-Recipients עצמה, כי אותו hashCode (נגזר משם+טלפון+כתובת) יכול להיות
+    // משותף/מקושר גם למשתמשים אחרים, ומחיקה ישירה הייתה מוחקת להם בטעות. שאילתה
+    // אחת ממוקדת (JOIN + IN) - לא טוענים את כל הקישורים של המשתמש (יכולים להיות
+    // מאות) רק כדי לסנן בזיכרון בשביל כמה שנבחרו למחיקה. נקראת מתוך saveRecipients
+    // (מחיקה משולבת בבקשת save)
+    private void deleteUserRecipientLinks(User user, List<String> hashCodes) {
         List<UserRecipients> linksToDelete =
                 userRecipientsRepository.findByUserAndRecipient_HashCodeIn(user, hashCodes);
-
         userRecipientsRepository.deleteAll(linksToDelete);
+    }
 
-        return ResponseEntity.ok().build();
+    // כל ההסטוריה השמורה לנמען ספציפי (recipients_history) - מכל המשתמשות שאי-פעם
+    // שינו אותו, לא רק המשתמשת הנוכחית. מחזירה שאילתה גולמית (לא ישות JPA) כדי לא
+    // להתעסק עם מיפוי טיפוס jsonb - old_data מוחזר כמחרוזת JSON גולמית, שהפרונט
+    // כבר יודע לפרש (JSON.parse), ו"מי שינה" גם כשם תצוגה (לא רק הקוד הטכני)
+    @SuppressWarnings("unchecked")
+    @GetMapping("/{hashCode}/history")
+    public ResponseEntity<?> getRecipientHistory(@PathVariable String hashCode, @RequestParam String phone) {
+        User user = userRepository.findByPhone(phone);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found");
+        }
+        // בדיקת ההרשאה (רק משתמשת שהנמען הזה בפועל ברשימה שלה) משולבת ישירות בתוך
+        // השאילתה עצמה (EXISTS על user_recipients) במקום קריאה נפרדת לפני - חוסך
+        // round-trip שלם לשרת ה-DB בכל פתיחת היסטוריה. אם אין קישור, השאילתה פשוט
+        // לא מחזירה כלום, בדיוק כמו נמען בלי היסטוריה בכלל - לא חושף למי שאין לו
+        // הרשאה אם ה-hashCode בכלל קיים
+        List<Object[]> rows = entityManager.createNativeQuery(
+                "SELECT h.changed_by, h.change_date, h.operation, CAST(h.old_data AS text), " +
+                        "COALESCE(NULLIF(u.first_name_man, ''), NULLIF(u.first_name_woman, ''), 'משתמשת לא ידועה') AS changed_by_name " +
+                        "FROM recipients_history h " +
+                        "LEFT JOIN users u ON u.hash_code = h.changed_by " +
+                        "WHERE h.recipient_hash_code = :hashCode " +
+                        "AND EXISTS (SELECT 1 FROM user_recipients ur WHERE ur.user_id = :userHashCode AND ur.recipient_id = :hashCode) " +
+                        "ORDER BY h.change_date DESC"
+        ).setParameter("hashCode", hashCode).setParameter("userHashCode", user.getHashCode()).getResultList();
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            Map<String, Object> entry = new java.util.LinkedHashMap<>();
+            entry.put("changedBy", row[0]);
+            entry.put("changeDate", row[1]);
+            entry.put("operation", row[2]);
+            entry.put("oldData", row[3]);
+            entry.put("changedByName", row[4]);
+            result.add(entry);
+        }
+
+        return ResponseEntity.ok(result);
     }
 }
