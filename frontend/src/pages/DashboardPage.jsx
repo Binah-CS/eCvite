@@ -87,8 +87,18 @@ export default function DashboardPage() {
   }, [user?.phone]);
 
   useEffect(() => {
+    const returnFromPreview = sessionStorage.getItem('returnFromPreview');
+
+    if (returnFromPreview === 'true') {
+      sessionStorage.removeItem('returnFromPreview');
+
+      const local = getLocalRecords(user?.phone);
+      setRecords(local);
+      return;
+    }
+
     loadRecords();
-  }, [loadRecords]);
+  }, [loadRecords, user?.phone]);
 
   // 🌟 פותח את המודאל אוטומטית אם המשתמש לחץ על "שינוי הגדרות" בתצוגה המקדימה
   useEffect(() => {
@@ -139,12 +149,33 @@ export default function DashboardPage() {
   // את כל המוזמנים" (handleSave), יחד עם שאר השינויים. המזהה האמיתי של שורה שמורה
   // הוא ה-hashCode (מחרוזת) - id מספרי טהור הוא שורה חדשה שעוד לא נשמרה בשרת בכלל
   // (ר' handleAddRow/handleImport), ולכן אין מה למחוק בשבילה
-  const [pendingDeleteHashCodes, setPendingDeleteHashCodes] = useState([]);
 
-  const handleDeleteRows = (idsToDelete) => {
-    const realIds = idsToDelete.filter((id) => !(typeof id === 'number' || /^\d+$/.test(String(id))));
+  const handleDeleteRows = async (idsToDelete) => {
+    if (!user?.phone) return;
+
+    const realIds = idsToDelete.filter(
+        (id) => !(typeof id === 'number' || /^\d+$/.test(String(id)))
+    );
+
     if (!realIds.length) return;
-    setPendingDeleteHashCodes((prev) => Array.from(new Set([...prev, ...realIds])));
+
+    try {
+      await api.deleteRecipients(user.phone, realIds);
+
+      console.log('✅ הרשומות נמחקו מהשרת:', realIds);
+
+      const currentRows = getLocalRecords(user.phone);
+
+      const updatedRows = currentRows.filter(
+          (row) => !realIds.includes(row.hashCode)
+      );
+
+      saveLocalRecords(user.phone, updatedRows);
+
+    } catch (err) {
+      console.error('❌ שגיאה במחיקת הרשומות:', err);
+      setError('לא ניתן למחוק את הרשומות מהשרת.');
+    }
   };
   const handleSave = async (updatedRows) => {
     console.log("1. כפתור שמור נלחץ בדאשבורד!");
@@ -155,20 +186,6 @@ export default function DashboardPage() {
     }
 
     try {
-      // מוחקים בשרת קודם, לפני השמירה - לא אחריה. אם המחיקה הייתה רצה אחרי השמירה,
-      // נמען שנמחק ואז יובא/נוסף מחדש עם אותה זהות (שם+טלפון+כתובת) היה מקבל hash
-      // זהה לנמען הישן שעדיין מקושר אליך באותו רגע (המחיקה עוד לא רצה) - והמחיקה
-      // שרצה רק אחר כך הייתה מנתקת בטעות גם את מה שכרגע נשמר
-      if (pendingDeleteHashCodes.length > 0) {
-        try {
-          await api.deleteRecipients(user.phone, pendingDeleteHashCodes);
-          setPendingDeleteHashCodes([]);
-        } catch (deleteErr) {
-          console.error('❌ שגיאה במחיקה מהבקאנד:', deleteErr);
-          setError('לא ניתן היה למחוק חלק מהשורות מהשרת.');
-        }
-      }
-
       console.log("2. שולח לבקאנד:", updatedRows);
 
       // hashCode כן נשלח (רק id המקומי-לתצוגה מוסר) - שורה עם hashCode היא נמען שכבר
