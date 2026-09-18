@@ -56,9 +56,10 @@ const api = {
           `/recipient-columns/${encodeURIComponent(technicalName)}/aliases`,
           { alias }
       ),
-
-  updateColumnPreferences: (phone, columnPreferences) =>
-      apiClient.put('/auth/column-preferences', { phone, columnPreferences }),
+  getActivityLogs: (phone) =>
+      apiClient.get('/activity-logs', { params: { phone } }),
+  createActivityLog: (phone, action, details = '') =>
+      apiClient.post('/activity-logs', { phone, action, details }),
 };
 
 export default api;
