@@ -241,12 +241,12 @@ export default function ExcelImport({ onImport }) {
         return;
       }
 
-      const mappedRows = applyDefaultCountry(remapRows(json, matched));
+      const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, matched)));
       finish(mappedRows);
     } catch (err) {
       console.error('לא ניתן היה לטעון את הגדרות השדות מהשרת:', err);
       setMatchError('לא ניתן היה להתאים עמודות אוטומטית (השרת לא זמין) - הקובץ יובא כמו שהוא.');
-      finish(json);
+      finish(normalizePrintField(applyDefaultCountry(json)));
     }
   };
 
@@ -257,8 +257,17 @@ export default function ExcelImport({ onImport }) {
     setFileNames((prev) => [...prev, fileName]);
     setMatchError('');
 
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data);
+    let workbook;
+    try {
+      const data = await file.arrayBuffer();
+      workbook = XLSX.read(data);
+    } catch (err) {
+      console.error('לא ניתן לקרוא את קובץ ה-Excel:', err);
+      setMatchError('לא ניתן לקרוא את קובץ ה-Excel. ודא שהקובץ תקין ונסה שוב.');
+      event.target.value = '';
+      return;
+    }
+    event.target.value = '';
 
     // קוראים את כל הגליונות בקובץ (לא רק את הראשון) - כדי לא לפספס גליון נוסף
     // (למשל גליון של כתובות בארץ וגליון נפרד של כתובות בחו"ל) - כולם מיובאים לאותה טבלה

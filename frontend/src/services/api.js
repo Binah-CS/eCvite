@@ -40,6 +40,12 @@ const api = {
   deleteRecipients: (phone, hashCodes) =>
       apiClient.post('/recipients/delete', { phone, hashCodes }),
 
+  getActivityLogs: (phone) =>
+      apiClient.get('/activity-logs', { params: { phone } }),
+
+  createActivityLog: (phone, action, details = '') =>
+      apiClient.post('/activity-logs', { phone, action, details }),
+
   importRecipients: (phone, recipients) =>
       apiClient.post('/recipients/import', { phone, recipients }),
 
