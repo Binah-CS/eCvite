@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,} from '@mui/material';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
@@ -8,6 +9,10 @@ import { DataGrid, useGridApiRef } from '@mui/x-data-grid';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
 import ExcelJS from 'exceljs';
+// הוסף את זה אחרי import ExcelImport:
+import Popover from '@mui/material/Popover';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
 // מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
 const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
 
@@ -21,13 +26,33 @@ const systemColumns = [
 ];
 
 const SYSTEM_FIELDS_HIDDEN_BY_DEFAULT = {
+    // הוסף בשורה 32, אחרי SYSTEM_FIELDS_HIDDEN_BY_DEFAULT:
+
+
   hashCode: false,
   changed: false,
   changeDate: false,
   changeBy: false,
   createdBy: false,
 };
+const DEFAULT_PRINTABLE_FIELDS = ['prefix', 'man', 'woman', 'lastName', 'suffix', 'street', 'houseNo', 'city', 'country'];
+const INTERNAL_PRINT_FIELD_KEYS = new Set(['id', 'hashCode', 'changed', 'changeDate', 'changeBy', 'createdBy', 'print', 'printFields']);
 
+function normalizePrintFields(row) {
+    const fields = row?.printFields || {};
+    const allFields = [...DEFAULT_PRINTABLE_FIELDS];
+
+    Object.keys(row || {}).forEach((key) => {
+        if (!INTERNAL_PRINT_FIELD_KEYS.has(key) && !allFields.includes(key)) {
+            allFields.push(key);
+        }
+    });
+
+    return Object.fromEntries(allFields.map((field) => [
+        field,
+        fields[field] ?? false
+    ]));
+}
 // עמודות כתובת - מהן אפשר להעביר ערך שלא מתאים לעמודת "הערת כתובת" (קליק ימני על התא)
 const ADDRESS_FIELDS = ['country', 'city', 'neighborhood', 'street', 'houseNo'];
 
@@ -519,6 +544,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         />
       </Box>
     );
+
   }, [updateCellValue]);
 
     const handleInputChange = (e) => {
@@ -1199,6 +1225,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     </Box>
   );
 }
+
+
 
 
 

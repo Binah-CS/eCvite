@@ -151,6 +151,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const user = getLoggedUser();
+  console.log("👤 USER FROM LOCALSTORAGE:", user);
+  console.log("📞 USER PHONE:", user?.phone);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [selectedRows, setSelectedRows] = useState([]); // 🌟 רק הגדרה אחת, נקייה ותקינה!
   const [isTableDirty, setIsTableDirty] = useState(false);
@@ -420,7 +422,7 @@ export default function DashboardPage() {
 
       const response = await api.saveRecords(
           user.phone,
-          cleanRows
+          updatedRows
       );
 
 
