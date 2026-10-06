@@ -141,6 +141,15 @@ export default function ExcelImport({ onImport }) {
   const [belongsToPrompt, setBelongsToPrompt] = useState(null); // { matchingSheets, checked, resume }
   const [, setColumns] = useState([]);
 
+  // מסירה את שם הקובץ מהרשימה שמוצגת ליד הכפתור - משותפת לכל "ביטול" אמיתי (שום
+  // שורה לא נכנסת לטבלה), כדי שלא ייראה כאילו הקובץ עדיין מיובא
+  const removeFileName = (fileName) => {
+    setFileNames((prev) => {
+      const index = prev.lastIndexOf(fileName);
+      return index === -1 ? prev : [...prev.slice(0, index), ...prev.slice(index + 1)];
+    });
+  };
+
   // אם חוזרים לכאן אחרי שנלחץ "להגדרות נוספות על העמודות" מתוך מסך התאמת העמודות
   // (ולא נכנסו להגדרות בדרך הרגילה) - פותחים מחדש בדיוק את אותו מסך עם אותו קובץ,
   // כדי שלא יצטרכו להתחיל את הייבוא מההתחלה
@@ -302,10 +311,7 @@ export default function ExcelImport({ onImport }) {
   const handleBelongsToCancel = () => {
     const { fileName } = belongsToPrompt;
     setBelongsToPrompt(null);
-    setFileNames((prev) => {
-      const index = prev.lastIndexOf(fileName);
-      return index === -1 ? prev : [...prev.slice(0, index), ...prev.slice(index + 1)];
-    });
+    removeFileName(fileName);
   };
 
   const toggleBelongsToSheet = (sheetName, shouldFill) => {
@@ -358,10 +364,7 @@ export default function ExcelImport({ onImport }) {
   const handleDialogCancel = () => {
     const { fileName } = pending;
     setPending(null);
-    setFileNames((prev) => {
-      const index = prev.lastIndexOf(fileName);
-      return index === -1 ? prev : [...prev.slice(0, index), ...prev.slice(index + 1)];
-    });
+    removeFileName(fileName);
   };
 
   return (
