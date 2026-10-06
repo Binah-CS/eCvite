@@ -8,6 +8,7 @@ import LocalPrintshopOutlinedIcon from '@mui/icons-material/LocalPrintshopOutlin
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import AddIcon from '@mui/icons-material/Add';
 import { DataGrid, useGridApiRef } from '@mui/x-data-grid';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
@@ -260,24 +261,69 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // כפתור מחיקה צף שנשאר תמיד באותו קצה קבוע של המסך (לא בתוך עמודה של הטבלה עצמה) -
   // כי ה-DataGrid בגרסה הזו ממקם את התאים שלו בעצמו (position אבסולוטי), וזה מתנגש עם
   // ניסיון להצמיד עמודה רגילה. במקום זה עוקבים אחרי מיקום השורה שבריחוף ומציירים מעליה.
-  const [hoveredRow, setHoveredRow] = useState(null); // { id, top, height }
+  const [hoveredRow, setHoveredRow] = useState(null); // { id, top, height, inGutter, edge }
+  // גודל האזור (בפיקסלים) ליד הגבול העליון/תחתון של שורה שבו "+" להוספת שורה
+  // מופיע - קטן מספיק שלא יפריע לריחוף הרגיל על השורה (שמציג מחיקה/היסטוריה),
+  // גדול מספיק להיות לחיץ בנוחות על שורה בגובה 32px (ר' rowHeight)
+  const ROW_EDGE_ZONE_PX = 6;
+  // המיקום (Y) והקשר האחרונים של העכבר, נשמרים גם מחוץ ל-useEffect של ה-mousemove
+  // (ר' למטה) - כדי שאפשר יהיה "לחשב מחדש" את hoveredRow מול מיקום עדכני של השורות
+  // בלי שהעכבר יזוז בפועל (ר' useEffect השני, על rows, שמשתמש בזה אחרי מחיקה)
+  const lastMouseRef = useRef({ clientY: null, inGutter: false });
+
+  // מזהה שורה לפי גובה נתון (Y) מול המלבן של כל שורה, לא לפי "מעל איזה אלמנט ה-DOM
+  // העכבר נמצא" - כי השוליים השמורים לאייקונים (ROW_ICON_GUTTER_PX) הם שטח ריק מחוץ
+  // לרינדור של ה-DataGrid עצמו, בלי שום .MuiDataGrid-row שם. בדיקה לפי אלמנט DOM
+  // הייתה מאפסת את הריחוף (ורק אז מסתירה את האייקונים) ברגע שהעכבר עוזב את תא
+  // הטבלה ונכנס לשוליים - מה שמנע גלישה ישירה מהטבלה אל האייקונים באותה תנועה.
+  // פונקציה משותפת (לא רק inline בתוך handleMouseMove) כדי שגם ה-useEffect השני,
+  // שמחשב מחדש אחרי שינוי ב-rows בלי תנועת עכבר אמיתית, ישתמש באותה לוגיקה בדיוק
+  const computeHoveredRowAt = (clientY, inGutter) => {
+    const container = gridContainerRef.current;
+    if (!container || clientY === null) return null;
+    const containerRect = container.getBoundingClientRect();
+    const rowEls = container.querySelectorAll('.MuiDataGrid-row');
+    for (const rowEl of rowEls) {
+      const rect = rowEl.getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) {
+        const id = rowEl.getAttribute('data-id');
+        const top = rect.top - containerRect.top;
+        const height = rect.height;
+        // קרוב לגבול העליון/תחתון של השורה הזו - "+" להוספת שורה מעל/מתחת. שתי
+        // שורות סמוכות נוגעות זו בזו (אין רווח ביניהן), אז ה-Y בדיוק על הגבול
+        // תמיד ייפול תוך כדי הלולאה למעלה על השורה הראשונה שתואמת (סדר ה-DOM) -
+        // כלומר "תחתית" השורה העליונה, לא "ראש" השורה התחתונה. זה עקבי ומספיק
+        let edge = null;
+        if (clientY - rect.top <= ROW_EDGE_ZONE_PX) edge = 'top';
+        else if (rect.bottom - clientY <= ROW_EDGE_ZONE_PX) edge = 'bottom';
+        return { id, top, height, inGutter, edge };
+      }
+    }
+    return null;
+  };
+
+  // אחרי שרשימת השורות משתנה (בעיקר: מחיקת שורה דרך אייקון הפח) - hoveredRow עדיין
+  // מצביע על המיקום/מזהה *הישנים* (מחושב רק ב-mousemove אמיתי, לא בשינוי תוכן מתחת
+  // לעכבר שלא זז בפועל) - בלי זה, מחיקת שתי שורות ברצף מאותו מיקום עכבר (בלי להזיז
+  // אותו בין הלחיצות) "מפספסת" את השנייה: האייקון מצויר נכון (במיקום הנכון ויזואלית,
+  // כי זה פשוט המקום של השורה הבאה עכשיו), אבל ה-id ששמור ב-hoveredRow עדיין שייך
+  // לשורה שכבר נמחקה - מחיקה "בלי אפקט" של מזהה שכבר לא קיים. מחשבים מחדש כאן מול
+  // המיקום האחרון הידוע של העכבר (לא אירוע mousemove חדש) ברגע שה-DOM כבר התעדכן
+  useEffect(() => {
+    if (lastMouseRef.current.clientY === null) return;
+    setHoveredRow(computeHoveredRowAt(lastMouseRef.current.clientY, lastMouseRef.current.inGutter));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
 
   useEffect(() => {
     const container = gridContainerRef.current;
     if (!container) return undefined;
 
-    // מזהה שורה לפי גובה העכבר (Y) מול המלבן של כל שורה, לא לפי "מעל איזה אלמנט
-    // ה-DOM העכבר נמצא" - כי השוליים השמורים לאייקונים (ROW_ICON_GUTTER_PX) הם שטח
-    // ריק מחוץ לרינדור של ה-DataGrid עצמו, בלי שום .MuiDataGrid-row שם. בדיקה לפי
-    // אלמנט DOM הייתה מאפסת את הריחוף (ורק אז מסתירה את האייקונים) ברגע שהעכבר עוזב
-    // את תא הטבלה ונכנס לשוליים - מה שמנע גלישה ישירה מהטבלה אל האייקונים באותה
-    // תנועה. השוואת Y מול מלבן השורה עובדת גם מעל השוליים, כל עוד הגובה מתאים
     // querySelectorAll + getBoundingClientRect על כל שורה הוא חישוב layout יקר (כופה
     // reflow) - להריץ אותו בכל אירוע mousemove בנפרד (יכול לירות הרבה יותר מ-60 בשנייה)
     // גורם לעומס שמעכב את הצביעה הטבעית (CSS :hover) של השורה עצמה, בדיוק העיכוב/קפיצה
     // שתוארה. requestAnimationFrame מגביל את החישוב לכל היותר פעם אחת לפריים
     let rafId = null;
-    let latestClientY = 0;
     // האם העכבר נמצא כרגע מעל שורה אמיתית ב-DOM, או בשוליים הריקים (מחוץ לרינדור
     // של ה-DataGrid) - נקבע לפי event.target, לא לפי חישוב Y. חשוב כי app-row-hovered
     // (למטה, ב-getRowClassName) חייב לפעול אך ורק בשוליים: hoveredRow מתעדכן דרך
@@ -286,41 +332,21 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     // אחרי ה-hover הטבעי (מיידי, ללא עיכוב בכלל) של הדפדפן - וזה נראה כמו שורה תקועה
     // שנשארת צבועה רגע אחרי שעוזבים אותה. בתוך שורה אמיתית, ה-hover הטבעי (:hover)
     // כבר מטפל בצביעה בלי שום מעורבות של ה-state הזה, ולכן בלי שום פיגור אפשרי
-    let latestInGutter = false;
     const handleMouseMove = (event) => {
-      if (event.target.closest('[data-row-delete-icon], [data-row-history-icon]')) return;
+      if (event.target.closest('[data-row-delete-icon], [data-row-history-icon], [data-row-insert-icon]')) return;
       // תמיד מעדכן את המיקום העדכני ביותר, גם כשכבר יש פריים ממתין - כדי שהחישוב
       // בפועל (למטה) יריץ מול מיקום העכבר האמיתי ברגע שהפריים רץ, לא מול המיקום
       // שהיה כשה-mousemove *הראשון* בפריים הזה תזמן אותו (שהיה נשאר "תקוע" לולא זה)
-      latestClientY = event.clientY;
-      latestInGutter = !event.target.closest('.MuiDataGrid-row');
+      lastMouseRef.current = { clientY: event.clientY, inGutter: !event.target.closest('.MuiDataGrid-row') };
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        const clientY = latestClientY;
-        const inGutter = latestInGutter;
-        const containerRect = container.getBoundingClientRect();
-        const rowEls = container.querySelectorAll('.MuiDataGrid-row');
-        let matchedRowEl = null;
-        let matchedRowRect = null;
-        for (const rowEl of rowEls) {
-          const rect = rowEl.getBoundingClientRect();
-          if (clientY >= rect.top && clientY <= rect.bottom) {
-            matchedRowEl = rowEl;
-            matchedRowRect = rect;
-            break;
-          }
-        }
-        if (!matchedRowEl) {
-          setHoveredRow((prev) => (prev === null ? prev : null));
-          return;
-        }
-        const id = matchedRowEl.getAttribute('data-id');
-        const top = matchedRowRect.top - containerRect.top;
-        const height = matchedRowRect.height;
+        const { clientY, inGutter } = lastMouseRef.current;
         setHoveredRow((prev) => {
-          if (prev && String(prev.id) === String(id) && prev.top === top && prev.height === height && prev.inGutter === inGutter) return prev;
-          return { id, top, height, inGutter };
+          const next = computeHoveredRowAt(clientY, inGutter);
+          if (prev && next && String(prev.id) === String(next.id) && prev.top === next.top && prev.height === next.height && prev.inGutter === next.inGutter && prev.edge === next.edge) return prev;
+          if (prev === null && next === null) return prev;
+          return next;
         });
       });
     };
@@ -330,6 +356,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         cancelAnimationFrame(rafId);
         rafId = null;
       }
+      lastMouseRef.current = { clientY: null, inGutter: false };
       setHoveredRow(null);
     };
 
@@ -383,7 +410,13 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key).push(row);
     });
-    return Array.from(byKey.values()).filter((group) => group.length > 1);
+    // קבוצה שבה לכל השורות כבר יש hashCode משלה - כבר נפתרה בעבר (למשל "השאר את
+    // שתיהן" בשמירה קודמת, שנתנה לכל שורה hash נפרד) - אין מה לשאול עליה שוב בכל
+    // שמירה. רק קבוצה עם לפחות שורה אחת חדשה/לא-שמורה (בלי hashCode) היא באמת
+    // התנגשות שממתינה להחלטה
+    return Array.from(byKey.values()).filter(
+      (group) => group.length > 1 && group.some((row) => !row.hashCode)
+    );
   };
 
   // מעביר את מזהי המחיקה ישירות לפונקציית השמירה (onSave) במקום להסתמך על ה-state
@@ -497,11 +530,12 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     apiRef.current.exportDataAsCsv({ utf8WithBom: true });
   };
 
-  const handleAddRow = () => {
-    // חלק מה-id-ים הם hashCode (מחרוזת, לא מספר) - מתעלמים מהם בחישוב המספר הבא
-    const numericIds = rows.map((row) => Number(row.id)).filter((n) => Number.isFinite(n));
+  // שורה חדשה וריקה, עם id מקומי-לתצוגה בלבד (לא hashCode אמיתי - ר' handleSave)
+  // - חלק מה-id-ים הקיימים הם hashCode (מחרוזת, לא מספר), מתעלמים מהם בחישוב הבא
+  const buildBlankRow = (currentRows) => {
+    const numericIds = currentRows.map((row) => Number(row.id)).filter((n) => Number.isFinite(n));
     const nextId = numericIds.length ? Math.max(...numericIds) + 1 : 1;
-    const newRow = {
+    return {
       id: nextId,
       prefix: '',
       man: '',
@@ -522,13 +556,31 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       belongsTo: '',
       print: false,
     };
-    setRows((prevRows) => [newRow, ...prevRows]);
+  };
+
+  const handleAddRow = () => {
+    setRows((prevRows) => [buildBlankRow(prevRows), ...prevRows]);
 
     // גוללים לשורה החדשה (תמיד נוספת בראש הרשימה) - אם המשתמשת גוללה למטה בטבלה
     // לפני שהוסיפה שורה, שלא תצטרך לחפש ידנית איפה היא נוספה
     setTimeout(() => {
       apiRef.current?.scrollToIndexes({ rowIndex: 0, colIndex: 0 });
     }, 0);
+  };
+
+  // הוספת שורה ריקה ממש לפני/אחרי שורה ספציפית - נקרא מה"+" שמופיע ליד הגבול
+  // העליון/תחתון של שורה בריחוף (ר' hoveredRow). "לפני/אחרי" מתייחס למיקום
+  // הנוכחי במערך rows (כלומר כפי שמוצג כרגע) - אם יש מיון/סינון פעיל, זה המיקום
+  // בתצוגה הממוינת/מסוננת, לא בהכרח סדר הייבוא המקורי
+  const handleInsertRowAt = (targetId, position) => {
+    setRows((prevRows) => {
+      const idx = prevRows.findIndex((row) => String(row.id) === String(targetId));
+      if (idx === -1) return [buildBlankRow(prevRows), ...prevRows];
+      const insertIdx = position === 'before' ? idx : idx + 1;
+      const next = prevRows.slice();
+      next.splice(insertIdx, 0, buildBlankRow(prevRows));
+      return next;
+    });
   };
 
   const handleDeleteRows = () => {
@@ -1152,7 +1204,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           // של האפקט למטה: הקפיצה עצמה מטופלת כאן ישירות, רק כשיצאו עם Enter
           suppressNextJumpRef.current = true;
           if (remaining.length === 0 && prev.length > 0) {
-            onSave(rowsRef.current);
+            // pendingExtraDeleteIdsRef כבר תמיד ריק בנקודה הזו (handleFixProblemsNow
+            // מאפס אותו לפני שמגיעים לכאן בכלל) - משלבים אותו במפורש בכל זאת, כדי
+            // שכל קריאה ל-onSave בקובץ הזה תשלח את שני הפרמטרים באותו אופן, בלי
+            // להסתמך על ברירת המחדל של handleSave לשמור על התנהגות נכונה
+            onSave(rowsRef.current, pendingExtraDeleteIdsRef.current);
           }
           setProblemQueue(remaining);
         }
@@ -1977,6 +2033,49 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         >
           <HistoryOutlinedIcon className="row-history-icon-svg" fontSize="small" sx={{ color: '#94a3b8', transition: 'color 0.15s' }} />
         </IconButton>
+      )}
+      {hoveredRow?.edge && (
+        // קו דק + "+" לאורך הגבול העליון/תחתון של השורה שבריחוף - מופיע רק כש-
+        // hoveredRow.edge מחושב (קרוב לגבול, ר' ROW_EDGE_ZONE_PX למעלה). מתחיל אחרי
+        // עמודת ה-checkbox (כדי לא לחפוף אותה) וקצר בכוונה (לא לאורך כל השורה) -
+        // כדי שירגיש כסמן עדין, לא כפס כבד על פני הטבלה. חי בתוך שטח התאים עצמו
+        // (לא בשוליים השמורים לאייקוני מחיקה/היסטוריה) כדי לא להתנגש אתם מרחבית
+        <Box
+          data-row-insert-icon="true"
+          onClick={() => handleInsertRowAt(hoveredRow.id, hoveredRow.edge === 'top' ? 'before' : 'after')}
+          title="הוסף שורה כאן"
+          sx={{
+            position: 'absolute',
+            top: (hoveredRow.edge === 'top' ? hoveredRow.top : hoveredRow.top + hoveredRow.height) - 1,
+            insetInlineStart: 48,
+            insetInlineEnd: `${ROW_ICON_GUTTER_PX}px`,
+            height: '1px',
+            bgcolor: '#93c5fd',
+            zIndex: 6,
+            cursor: 'pointer',
+            '&:hover': { bgcolor: '#3b82f6' },
+          }}
+        >
+          <Box
+            sx={{
+              position: 'absolute',
+              insetInlineStart: -2,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 13,
+              height: 13,
+              borderRadius: '50%',
+              bgcolor: '#3b82f6',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            <AddIcon sx={{ fontSize: 10 }} />
+          </Box>
+        </Box>
       )}
    </Box>
 

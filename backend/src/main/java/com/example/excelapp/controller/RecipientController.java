@@ -72,8 +72,14 @@ public class RecipientController {
 
         User user = userRepository.findByPhone(request.getPhone());
 
+        // recipients יכול להיות null בבקשת "מחיקה בלבד" (hashCodesToDelete בלי שורות
+        // לשמירה) - לא ניגשים ל-size()/ללולאה על ה-request הגולמי לפני שמוודאים את זה
+        List<Recipients> incoming = request.getRecipients() != null
+                ? request.getRecipients()
+                : new ArrayList<>();
+
         System.out.println("SAVE RECIPIENTS START - PHONE: " + request.getPhone()
-                + " COUNT: " + request.getRecipients().size());
+                + " COUNT: " + incoming.size());
 
         if (user == null) {
             return ResponseEntity
@@ -92,8 +98,6 @@ public class RecipientController {
         if (hashCodesToDelete != null && !hashCodesToDelete.isEmpty()) {
             deleteUserRecipientLinks(user, hashCodesToDelete);
         }
-
-        List<Recipients> incoming = request.getRecipients();
 
         // הפרדה לפי מה שהפרונט כבר יודע: שורה עם hashCode היא נמען קיים שמזוהה
         // במפורש - מעדכנים אותה ישירות, בלי לחפש/להשוות לאף נמען אחר (בדיוק השורה
@@ -173,6 +177,17 @@ public class RecipientController {
         if (!links.isEmpty()) {
             userRecipientsRepository.saveAll(links);
         }
+
+        // save()/saveAll() על ישות עם @Id שכבר מוגדר (המצב תמיד כאן - ה-hash מחושב
+        // מראש) מבצע merge(), לא persist() - וה-merge מחזיר אובייקט "רענן" שכולל רק
+        // שדות ממופים ל-DB. duplicateSalt הוא @Transient (לא שדה DB בכלל) ולכן נשמט
+        // מהאובייקט שחוזר מ-saveAll, גם אם הוא הגיע עם ערך בבקשה המקורית - "מצמידים"
+        // אותו בחזרה כאן לפי hashCode, מתוך הבקשה המקורית (incoming), כדי שהפרונט
+        // (DashboardPage.jsx, savedByIdentity) יוכל להמשיך להשתמש בו לזיהוי השורה
+        Map<String, String> saltByHash = incoming.stream()
+                .filter(r -> r.getHashCode() != null && r.getDuplicateSalt() != null)
+                .collect(Collectors.toMap(Recipients::getHashCode, Recipients::getDuplicateSalt, (a, b) -> a));
+        savedRecipients.forEach(r -> r.setDuplicateSalt(saltByHash.get(r.getHashCode())));
 
         // מחזירים את הנתונים המעודכנים בפועל (כולל hashCode טרי לנמענים חדשים, ו"שייך
         // ל" אחרי איחוד) - כדי שהפרונט יוכל לעדכן את הטבלה מיד מהתשובה הזו, בלי לבקש
