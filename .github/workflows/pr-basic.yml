@@ -1,0 +1,99 @@
+name: PR basics
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-basics-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  frontend:
+    name: Frontend build and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --watchAll=false --passWithNoTests
+        env:
+          CI: true
+
+      - name: Build production bundle
+        run: npm run build
+
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Run Maven tests
+        run: mvn --batch-mode test
+
+  basics:
+    name: Basic PR review checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whitespace errors
+        run: git diff --check "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+
+      - name: Check unresolved merge markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed_files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")
+          if [ -z "$changed_files" ]; then
+            echo "No changed files found."
+            exit 0
+          fi
+
+          if grep -nH -E '^(<<<<<<<|=======|>>>>>>>)' $changed_files; then
+            echo "Unresolved merge-conflict markers were found in changed files."
+            exit 1
+          fi
+
+      - name: Write review summary
+        run: |
+          {
+            echo '## Basic PR review checklist'
+            echo ''
+            echo '- [x] Changed files have no Git whitespace errors.'
+            echo '- [x] Changed files have no unresolved merge-conflict markers.'
+            echo '- [ ] Frontend tests and production build pass.'
+            echo '- [ ] Backend Maven tests pass.'
+            echo ''
+            echo 'This workflow is a first-pass check only; it does not replace human review of behavior, security, or database migrations.'
+          } >> "$GITHUB_STEP_SUMMARY"

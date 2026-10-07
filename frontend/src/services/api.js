@@ -32,13 +32,12 @@ const api = {
                 }
             }
         ),
-    saveRecords: (phone, rows) =>
+    saveRecords: (phone, rows, hashCodesToDelete) =>
         apiClient.post('/recipients/save', {
             phone: phone,
-            recipients: rows
+            recipients: rows,
+            hashCodesToDelete
         }),
-  deleteRecipients: (phone, hashCodes) =>
-      apiClient.post('/recipients/delete', { phone, hashCodes }),
 
   getActivityLogs: (phone) =>
       apiClient.get('/activity-logs', { params: { phone } }),
@@ -65,6 +64,9 @@ const api = {
 
   updateColumnPreferences: (phone, columnPreferences) =>
       apiClient.put('/auth/column-preferences', { phone, columnPreferences }),
+
+  getRecipientHistory: (hashCode, phone) =>
+      apiClient.get(`/recipients/${encodeURIComponent(hashCode)}/history`, { params: { phone } }),
 };
 
 export default api;

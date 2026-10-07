@@ -1,12 +1,10 @@
 package com.example.excelapp.entity;
 
+import com.example.excelapp.util.HashUtil;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.util.Objects;
 
@@ -71,34 +69,29 @@ public class Recipients {
     // שום סימן נראה בטקסט של הערת הכתובת עצמה. לא מוצג בטבלה כעמודה בכלל
     @Column(name = "address_note_sources")
     private String addressNoteSources;
+
+    // "מלח" אופציונלי - לא שדה אמיתי של הנמען, לא נשמר ב-DB בכלל (@Transient). נשלח
+    // מהפרונט רק כשהמשתמשת בוחרת במפורש "השאר את שתיהן" מול נמען קיים עם אותה זהות
+    // בדיוק (ר' handleConfirmDuplicates ב-DataTable.jsx) - כדי לכפות hash שונה בכוונה
+    // ולמנוע מיזוג לא-רצוי לאותה רשומה, למרות שכל שאר השדות הגלויים זהים לחלוטין
+    @Transient
+    private String duplicateSalt;
+
     // כולל גם כתובת (עיר/רחוב/מספר בית) ולא רק שם+טלפון - כדי שלא יתבלבל בין שני
     // נמענים שונים בעלי אותו שם שאין להם טלפון שמור (למשל "משה כהן" בלי טלפון,
     // פעמיים, בכתובות שונות) ויחשוב שזה אותו נמען. משפיע רק על נמענים חדשים - לנמען
     // שכבר קיים ומזוהה לפי ה-hashCode שלו, ה-hash הישן שלו לא מחושב מחדש
     public String generateRowHashCode() {
-        try {
-            String data =
-                    Objects.toString(man, "") +
-                            Objects.toString(woman, "") +
-                            Objects.toString(lastName, "") +
-                            Objects.toString(phone, "") +
-                            Objects.toString(city, "") +
-                            Objects.toString(street, "") +
-                            Objects.toString(houseNo, "");
-
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(data.getBytes(StandardCharsets.UTF_8));
-
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-
-            return sb.toString();
-
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("Error generating hash", e);
-        }
+        String data =
+                Objects.toString(man, "") +
+                        Objects.toString(woman, "") +
+                        Objects.toString(lastName, "") +
+                        Objects.toString(phone, "") +
+                        Objects.toString(city, "") +
+                        Objects.toString(street, "") +
+                        Objects.toString(houseNo, "") +
+                        Objects.toString(duplicateSalt, "");
+        return HashUtil.sha256Hex(data);
     }
 
     public void setUser(User user) {

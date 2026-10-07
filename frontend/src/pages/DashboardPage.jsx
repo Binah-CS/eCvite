@@ -388,7 +388,11 @@ export default function DashboardPage() {
       setError('לא ניתן למחוק את הרשומות מהשרת.');
     }
   };
-  const handleSave = async (updatedRows) => {
+  // extraDeleteHashCodes - מזהים למחיקה שהתקבלו ישירות מהקורא (למשל handleConfirmDuplicates
+  // ב-DataTable, אחרי שהמשתמשת פתרה שורות כפולות) ולא דרך pendingDeleteHashCodes (state) -
+  // כי כשקוראים למחיקה ולשמירה ברצף באותה קריאה סינכרונית, ה-state ההוא עוד לא מספיק
+  // להתעדכן לפני שה-handleSave הזה כבר רץ (stale closure), וההעברה במפורש פותרת את זה
+  const handleSave = async (updatedRows, extraDeleteHashCodes = []) => {
     console.log("1. כפתור שמור נלחץ בדאשבורד!");
 
     if (!user?.phone) {
@@ -408,7 +412,8 @@ export default function DashboardPage() {
 
       console.log("SENDING TO BACKEND:", {
         phone: user.phone,
-        recipients: cleanRows
+        recipients: cleanRows,
+        hashCodesToDelete
       });
 
       const hashCodesToDelete = [...pendingDeletedHashCodes.current];
@@ -420,7 +425,8 @@ export default function DashboardPage() {
 
       const response = await api.saveRecords(
           user.phone,
-          cleanRows
+          cleanRows,
+          hashCodesToDelete
       );
 
 
@@ -570,14 +576,7 @@ export default function DashboardPage() {
   const handleColumnOrderChange = async (order) => {
     const currentPrefs = parseColumnPreferences(user?.columnPreferences);
     const columnPreferences = JSON.stringify({ ...currentPrefs, __order: order });
-    let updatedUser = { ...user, columnPreferences };
-    try {
-      const response = await api.updateColumnPreferences(user.phone, columnPreferences);
-      updatedUser = response.data;
-    } catch {
-      // אם קריאת השרת נכשלה, שומרים לפחות מקומית כדי שהשינוי לא ילך לאיבוד בטעות
-    }
-    sessionStorage.setItem('user', JSON.stringify(updatedUser));
+    await saveColumnPreferences(user, columnPreferences);
   };
 
   return (
@@ -605,6 +604,7 @@ export default function DashboardPage() {
               columnPreferences={parseColumnPreferences(user?.columnPreferences)}
               profileMenu={profileMenu}
               onColumnOrderChange={handleColumnOrderChange}
+              phone={user?.phone}
           />
         </Box>
 
