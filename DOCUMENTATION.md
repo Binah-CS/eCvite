@@ -64,6 +64,17 @@
 - `getScaledLabelSizes(targetContentWidth)` — משנה את מידות המדבקות ביחס לרוחב תצוגה, עבור ההדמיה בחלון ההדפסה.
 - `REAL_LABEL_SIZES`, `REAL_PAGE_CONTENT_WIDTH`, `REAL_GAP_PX` — קבועי המידות הפיזיות.
 
+### `frontend/src/utils/inputValidation.js`
+
+מרכז את כללי אימות הקלט המשותפים להרשמה ולטבלת הנמענים.
+
+- `isBlank(value)` — מזהה ערך חסר, כולל מחרוזת שמכילה רווחים בלבד.
+- `isValidIsraeliPhone(phone)` — מאמת מספר טלפון ישראלי בפורמט הנתמך בטופס ההרשמה.
+- `isValidGmail(email)` — מאמת כתובת Gmail תקינה.
+- `isValidPersonName(name)` — מאפשר אותיות בעברית ובשפות אחרות, רווחים, מקפים וגרשים; ספרות ותווים מיוחדים אחרים נדחים.
+- `isRecipientValueInvalid(field, value)` — מפעיל את כלל האימות המתאים לשם נמען או למספר בית. מספר בית יכול להיות ספרות בלבד או ספרות עם אות אחת בסוף.
+- `findInvalidRecipientCells(rows, fieldDefinitions)` — מחזיר את כל תאי החובה הריקים והתאים עם ערך שאינו תקין.
+
 ### `frontend/src/pages/HardCodePage.jsx`
 
 מרכז טקסטים וקבועים של ממשק ההדפסה.
@@ -178,6 +189,15 @@
 - `findProblemCells(rows)` — מאתר תאים חסרים או בלתי תקינים, בעיקר בשדות חובה.
 - `handleAddSecondarySort(field)` / `handleRemoveSecondarySort(field)` — מנהלים סדרי מיון משניים.
 - קריאות `useMemo` ו-`useEffect` מחשבות עמודות, מסננים ותאים בעייתיים, ומשחזרות נראות עמודות ומיקוד בתיקון שגיאות.
+
+### טסטי Frontend
+
+הטסטים נכתבו ב-Jest, שמגיע עם `react-scripts`. אפשר להריץ אותם מתיקיית `frontend` בעזרת `npm.cmd test -- --watchAll=false` ב-PowerShell, או `npm test -- --watchAll=false` בסביבה שבה הפעלת סקריפטים מותרת.
+
+- `utils/excelColumnMatcher.test.js` — בודק התאמת כותרות לפי שם, תווית וכינוי; התאמה לפי ערכי תאים; ומיפוי שורות, כולל איחוד ערכים לאותו שדה.
+- `utils/labelSheetLayout.test.js` — בודק חישוב מספר מדבקות בשורה, גודל ברירת מחדל והקטנת מידות לתצוגה מקדימה.
+- `utils/inputValidation.test.js` — בודק טלפונים ואימיילים תקינים וחריגים, שמות עם אותיות בלבד, פורמט מספר בית, ושדות חובה ריקים בטבלת הנמענים.
+- `services/excelColumnsCache.test.js` — בודק שהמטמון מבצע בקשת API יחידה ושאיפוס המטמון גורם לטעינה חדשה.
 
 ## Backend
 
