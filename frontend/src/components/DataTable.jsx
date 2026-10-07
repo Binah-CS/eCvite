@@ -8,8 +8,7 @@ import { DataGrid, useGridApiRef } from '@mui/x-data-grid';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
 import ExcelJS from 'exceljs';
-// מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
-const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
+import { isBlank, isRecipientValueInvalid } from '../utils/inputValidation';
 
 // שדות מערכת/ביקורת (לא "פרטי אורח") - לא מנוהלים דרך excel_columns, נשארים קבועים בקוד
 const systemColumns = [
@@ -578,16 +577,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     [fieldDefs]
   );
 
-  // בדיקת מדינה/עיר מול ה-API החיצוני הוסרה - הרשימה שם רק באנגלית, בעוד הנתונים כאן
-  // בעברית, כך שכל ערך אמיתי היה נפסל בטעות. נשארה רק בדיקת הפורמט של מספר בית.
-  const isValueInvalid = (field, value) => {
-    if (!value) return false;
-    const text = String(value).trim();
-    if (!text) return false;
-    if (field === 'houseNo') return !HOUSE_NO_PATTERN.test(text);
-    return false;
-  };
-
   // ברמת שורה (editMode="row") השורה כולה נשארת פתוחה לעריכה עד שעוזבים אותה לגמרי -
   // כדי שהצביעה על שדה מסוים תיעלם ברגע שעוזבים אותו (גם עם העכבר, לא רק Enter/Tab),
   // מאזינים ישירות לאירוע focusout הטבעי של הדפדפן (לא תלוי באיך בדיוק עזבו את התא)
@@ -609,7 +598,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       // רק אחרי שבאמת סיימו לערוך אותו
       setTimeout(() => {
         const value = apiRef.current.getCellValue(id, field);
-        const stillInvalid = (requiredFields.has(field) && !value) || isValueInvalid(field, value);
+        const stillInvalid = (requiredFields.has(field) && isBlank(value)) || isRecipientValueInvalid(field, value);
         if (stillInvalid) return;
         setProblemQueue((prev) => {
           const remaining = prev.filter((p) => !(String(p.id) === String(id) && p.field === field));
@@ -642,8 +631,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     rowsToCheck.forEach((row) => {
       orderedFieldNames.forEach((field) => {
         const value = row[field];
-        const isRequiredEmpty = requiredFields.has(field) && !value;
-        if (isRequiredEmpty || isValueInvalid(field, value)) {
+        const isRequiredEmpty = requiredFields.has(field) && isBlank(value);
+        if (isRequiredEmpty || isRecipientValueInvalid(field, value)) {
           problems.push({ id: row.id, field });
         }
       });
