@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Button,
   Typography,
@@ -16,6 +17,7 @@ import * as XLSX from 'xlsx';
 import api from '../services/api';
 import { getExcelColumns, invalidateExcelColumnsCache } from '../services/excelColumnsCache';
 import { matchExcelHeaders, matchByValues, remapRows } from '../utils/excelColumnMatcher';
+import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import ColumnMatchDialog, { IGNORE_VALUE } from './ColumnMatchDialog';
 
 // הופכת אינדקס עמודה (0,1,2...) לאות עמודה כמו באקסל (A, B, ... Z, AA, AB...)
@@ -73,6 +75,13 @@ function applyRenameMap(rows, renameMap) {
   });
 }
 
+// שורה שאין בה שום ערך אמיתי באף עמודה (לפעמים אקסל "זוכר" שורה כחלק מהגליון גם
+// אחרי שהתוכן נמחק ממנה, למשל אם הייתה בה פעם עיצוב/גבול) - לא אמורה להיכנס לטבלה
+// בכלל, לא בתור "מוזמן ריק"
+function isBlankRow(row) {
+  return Object.values(row).every((value) => String(value ?? '').trim() === '');
+}
+
 // שורה שאין בה כלום בעמודת מדינה - כנראה כי לא כתבו שם משהו במיוחד - מקבלת כברירת מחדל "ישראל"
 function applyDefaultCountry(rows) {
   return rows.map((row) =>
@@ -103,19 +112,76 @@ function applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets) {
   });
 }
 
+// כשאותו נמען (לפי buildIdentityKey) מופיע כמה פעמים באותו ייבוא - למשל בשני גליונות
+// שונים באותו קובץ - ממזגים לשורה אחת, עם כל ערכי "שייך ל" מכל המופעים ביחד, במקום
+// ליצור שתי שורות נפרדות לאותו אדם בפועל. שורות ללא שום פרט זהות (כל השדות ריקים)
+// לא ממוזגות זו עם זו - כל אחת נשארת שורה נפרדת משלה
+function mergeDuplicateIdentities(rows) {
+  const map = new Map();
+  const order = [];
+  rows.forEach((row, index) => {
+    const key = buildIdentityKey(row);
+    const mapKey = key.replace(/\|/g, '') === '' ? `__blank__${index}` : key;
+    if (!map.has(mapKey)) {
+      map.set(mapKey, { ...row });
+      order.push(mapKey);
+    } else {
+      const existing = map.get(mapKey);
+      existing.belongsTo = mergeBelongsToValues(existing.belongsTo, row.belongsTo);
+    }
+  });
+  return order.map((mapKey) => map.get(mapKey));
+}
+
 export default function ExcelImport({ onImport }) {
-  const [fileName, setFileName] = useState('');
+  const navigate = useNavigate();
+  const [fileNames, setFileNames] = useState([]); // כל הקבצים שהועלו בסשן הזה (לא רק האחרון)
   const [matchError, setMatchError] = useState('');
   const [pending, setPending] = useState(null);
   const [belongsToPrompt, setBelongsToPrompt] = useState(null); // { matchingSheets, checked, resume }
   const [, setColumns] = useState([]);
 
+  // אם חוזרים לכאן אחרי שנלחץ "להגדרות נוספות על העמודות" מתוך מסך התאמת העמודות
+  // (ולא נכנסו להגדרות בדרך הרגילה) - פותחים מחדש בדיוק את אותו מסך עם אותו קובץ,
+  // כדי שלא יצטרכו להתחיל את הייבוא מההתחלה
+  useEffect(() => {
+    if (sessionStorage.getItem('reopenColumnMatch') !== 'true') return;
+    sessionStorage.removeItem('reopenColumnMatch');
+    const saved = sessionStorage.getItem('excelImportPending');
+    sessionStorage.removeItem('excelImportPending');
+    if (!saved) return;
+    try {
+      const parsed = JSON.parse(saved);
+      setPending({
+        ...parsed,
+        confirmedSheets: parsed.confirmedSheets ? new Set(parsed.confirmedSheets) : parsed.confirmedSheets,
+      });
+    } catch (err) {
+      console.error('לא ניתן היה לשחזר את מסך התאמת העמודות:', err);
+    }
+  }, []);
+
+  // שומרת את כל מצב הייבוא הנוכחי (הקובץ, ההתאמות) לפני המעבר להגדרות, כדי שהחזרה
+  // משם תוכל לפתוח מחדש בדיוק את אותו מסך - Set לא נשמר כמו שהוא ב-JSON, ממירים למערך
+  const handleOpenColumnSettings = () => {
+    sessionStorage.setItem(
+      'excelImportPending',
+      JSON.stringify({
+        ...pending,
+        confirmedSheets: pending.confirmedSheets ? [...pending.confirmedSheets] : pending.confirmedSheets,
+      })
+    );
+    sessionStorage.setItem('settingsReturnTo', 'columnMatch');
+    navigate('/settings');
+  };
+
   // ממשיכה את זרימת הייבוא הרגילה (התאמת עמודות אוטומטית / מסך ידני) - עוטפת כל אחת
   // מנקודות היציאה שלה (onImport) בהחלת "שייך ל" לפי הגליון, כדי שזה יחול תמיד,
   // גם אם היה צריך גם מסך התאמת עמודות וגם את השאלה על "שייך ל".
   // confirmedSheets === null אומר "עוד לא שאלנו" - אחרי שהמשתמשת עונה זה הופך ל-Set אמיתי
-  const runColumnMatching = async (json, rowSheetNames, headerLabels, confirmedSheets) => {
-    const finish = (rows) => onImport(applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set()));
+  const runColumnMatching = async (json, rowSheetNames, headerLabels, confirmedSheets, fileName) => {
+    const finish = (rows) =>
+      onImport(mergeDuplicateIdentities(applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set())));
 
     try {
       const loadedColumns = await getExcelColumns();
@@ -133,6 +199,7 @@ export default function ExcelImport({ onImport }) {
             json,
             rowSheetNames,
             headerLabels,
+            fileName,
           });
           return;
         }
@@ -169,27 +236,38 @@ export default function ExcelImport({ onImport }) {
           headerLabels,
           rowSheetNames,
           confirmedSheets,
+          fileName,
         });
         return;
       }
 
-      const mappedRows = applyDefaultCountry(remapRows(json, matched));
+      const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, matched)));
       finish(mappedRows);
     } catch (err) {
       console.error('לא ניתן היה לטעון את הגדרות השדות מהשרת:', err);
       setMatchError('לא ניתן היה להתאים עמודות אוטומטית (השרת לא זמין) - הקובץ יובא כמו שהוא.');
-      finish(json);
+      finish(normalizePrintField(applyDefaultCountry(json)));
     }
   };
 
   const handleFile = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    setFileName(file.name);
+    const fileName = file.name;
+    setFileNames((prev) => [...prev, fileName]);
     setMatchError('');
 
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data);
+    let workbook;
+    try {
+      const data = await file.arrayBuffer();
+      workbook = XLSX.read(data);
+    } catch (err) {
+      console.error('לא ניתן לקרוא את קובץ ה-Excel:', err);
+      setMatchError('לא ניתן לקרוא את קובץ ה-Excel. ודא שהקובץ תקין ונסה שוב.');
+      event.target.value = '';
+      return;
+    }
+    event.target.value = '';
 
     // קוראים את כל הגליונות בקובץ (לא רק את הראשון) - כדי לא לפספס גליון נוסף
     // (למשל גליון של כתובות בארץ וגליון נפרד של כתובות בחו"ל) - כולם מיובאים לאותה טבלה
@@ -199,7 +277,7 @@ export default function ExcelImport({ onImport }) {
       const rawJson = XLSX.utils.sheet_to_json(sheet, { defval: '' });
       return {
         sheetName: name,
-        json: applyRenameMap(rawJson, renameMap),
+        json: applyRenameMap(rawJson, renameMap).filter((row) => !isBlankRow(row)),
         trueOrder,
         labels,
       };
@@ -219,13 +297,24 @@ export default function ExcelImport({ onImport }) {
       return;
     }
 
-    await runColumnMatching(json, rowSheetNames, headerLabels, null);
+    await runColumnMatching(json, rowSheetNames, headerLabels, null, fileName);
   };
 
   const handleBelongsToConfirm = async () => {
-    const { json, rowSheetNames, headerLabels, checked } = belongsToPrompt;
+    const { json, rowSheetNames, headerLabels, checked, fileName } = belongsToPrompt;
     setBelongsToPrompt(null);
-    await runColumnMatching(json, rowSheetNames, headerLabels, checked);
+    await runColumnMatching(json, rowSheetNames, headerLabels, checked, fileName);
+  };
+
+  // ביטול אמיתי - שום שורה לא נכנסת לטבלה, וגם שם הקובץ יורד מהרשימה שמוצגת ליד
+  // הכפתור, כדי שלא יראה כאילו הוא כן יובא
+  const handleBelongsToCancel = () => {
+    const { fileName } = belongsToPrompt;
+    setBelongsToPrompt(null);
+    setFileNames((prev) => {
+      const index = prev.lastIndexOf(fileName);
+      return index === -1 ? prev : [...prev.slice(0, index), ...prev.slice(index + 1)];
+    });
   };
 
   const toggleBelongsToSheet = (sheetName, shouldFill) => {
@@ -270,14 +359,18 @@ export default function ExcelImport({ onImport }) {
     }
 
     const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, finalMatched)));
-    onImport(applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets));
+    onImport(mergeDuplicateIdentities(applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets)));
   };
 
+  // ביטול אמיתי - בניגוד למה שהיה קודם, שום שורה לא נכנסת לטבלה (לא רק מדלגים על
+  // העמודות שלא זוהו) - וגם שם הקובץ יורד מהרשימה שמוצגת ליד הכפתור
   const handleDialogCancel = () => {
-    const { json, matched, rowSheetNames, confirmedSheets } = pending;
+    const { fileName } = pending;
     setPending(null);
-    const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, matched)));
-    onImport(applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets));
+    setFileNames((prev) => {
+      const index = prev.lastIndexOf(fileName);
+      return index === -1 ? prev : [...prev.slice(0, index), ...prev.slice(index + 1)];
+    });
   };
 
   return (
@@ -293,16 +386,23 @@ export default function ExcelImport({ onImport }) {
           whiteSpace: 'nowrap',
           bgcolor: '#ffffff',
           color: '#1e293b',
-          borderColor: '#e2e8f0',
-          '&:hover': { bgcolor: '#f8fafc', borderColor: '#cbd5e1' },
+          borderColor: '#60a5fa',
+          py: 0.15,
+          px: 1,
+          fontSize: '0.75rem',
+          '&:hover': { bgcolor: '#eff6ff', borderColor: '#60a5fa' },
         }}
       >
         ייבוא Excel
         <input hidden type="file" accept=".xlsx,.xls" onChange={handleFile} />
       </Button>
-      {fileName && (
-        <Typography variant="caption" sx={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {fileName}
+      {fileNames.length > 0 && (
+        <Typography
+          variant="caption"
+          title={fileNames.join(', ')}
+          sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+          {fileNames.join(', ')}
         </Typography>
       )}
       {matchError && (
@@ -311,17 +411,17 @@ export default function ExcelImport({ onImport }) {
         </Typography>
       )}
       {belongsToPrompt && (
-        <Dialog open onClose={handleBelongsToConfirm}>
-          <DialogTitle sx={{ pb: 1 }}>האם למלא את שדה "שייך ל" בשם הגליון?</DialogTitle>
+        <Dialog open onClose={handleBelongsToCancel} maxWidth="xs">
+          <DialogTitle sx={{ pb: 0.5, pt: 1.5, fontSize: '1.05rem' }}>האם למלא את שדה "שייך ל" בשם הגליון?</DialogTitle>
           <DialogContent>
-            <Stack spacing={1.5}>
+            <Stack spacing={0.5}>
               {belongsToPrompt.matchingSheets.map((sheetName) => (
                 <Stack
                   key={sheetName}
                   direction="row"
                   alignItems="center"
                   justifyContent="space-between"
-                  sx={{ py: 0.5, borderBottom: '1px solid #f1f5f9' }}
+                  sx={{ py: 0.25, borderBottom: '1px solid #f1f5f9' }}
                 >
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
                     {sheetName}
@@ -346,6 +446,7 @@ export default function ExcelImport({ onImport }) {
             </Stack>
           </DialogContent>
           <DialogActions>
+            <Button onClick={handleBelongsToCancel}>ביטול</Button>
             <Button onClick={handleBelongsToConfirm} variant="contained">
               המשך
             </Button>
@@ -361,6 +462,7 @@ export default function ExcelImport({ onImport }) {
           rows={pending.json}
           onConfirm={handleDialogConfirm}
           onCancel={handleDialogCancel}
+          onOpenColumnSettings={handleOpenColumnSettings}
         />
       )}
     </Box>

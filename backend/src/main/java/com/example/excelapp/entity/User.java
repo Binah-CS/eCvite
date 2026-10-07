@@ -51,6 +51,9 @@ public class User {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "column_preferences")
+    private String columnPreferences;
+
     @PrePersist
     public void onCreate() {
         createdAt = LocalDateTime.now();

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -17,6 +17,14 @@ export default function LoginPage() {
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
 
+  // "מעיר" את בסיס הנתונים (Neon) כבר במסך ההתחברות - הוא "נרדם" אחרי חוסר פעילות,
+  // וההתעוררות הראשונה לוקחת כמה שניות. עדיף שזה יקרה כאן, בזמן שממלאים שם/טלפון,
+  // מאשר שתחכה לזה אחר כך בטעינת הטבלה עצמה. קריאה קלה שלא דורשת פרטי משתמש, בלי
+  // להציג שגיאה אם היא נכשלת - זו רק "חימום", לא פעולה קריטית
+  useEffect(() => {
+    api.getRecipientColumns().catch(() => {});
+  }, []);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
@@ -28,7 +36,7 @@ export default function LoginPage() {
     try {
       const response = await api.login({ name, phone });
 
-      localStorage.setItem('user', JSON.stringify(response.data));
+      sessionStorage.setItem('user', JSON.stringify(response.data));
 
       navigate('/');
     } catch (err) {

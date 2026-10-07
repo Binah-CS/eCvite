@@ -46,4 +46,19 @@ private final UserRepository userRepository;
         return ResponseEntity.ok(authService.register(user));
     }
 
+    @PutMapping("/column-preferences")
+    public ResponseEntity<User> updateColumnPreferences(@RequestBody Map<String, String> request) {
+        String phone = request.get("phone");
+        String columnPreferences = request.get("columnPreferences");
+
+        User user = userRepository.findByPhone(phone);
+        if (user == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        user.setColumnPreferences(columnPreferences);
+        userRepository.save(user);
+        return ResponseEntity.ok(user);
+    }
+
 }

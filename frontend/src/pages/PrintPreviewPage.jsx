@@ -3,10 +3,59 @@ import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Box, Container, Typography, Button, Paper, Stack } from '@mui/material';
 import { REAL_LABEL_SIZES, getRealColumns } from '../utils/labelSheetLayout';
+import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 
-function getDisplayName(row) {
-  if (row.display) return row.display;
-  return [row.man, row.woman ? `ו${row.woman}` : '', row.lastName].filter(Boolean).join(' ');
+function getLoggedUser() {
+  const raw = sessionStorage.getItem('user');
+  return raw ? JSON.parse(raw) : null;
+}
+
+// שדות נוספים (לא חלק מהתבנית הקבועה של שם/כתובת) שמופיעים במדבקה כשורה נפרדת רק
+// אם סומנו להדפסה ב"ניהול עמודות" וגם יש להם ערך בפועל אצל הנמען הספציפי
+const EXTRA_PRINT_FIELDS = [
+  { field: 'phone', label: 'טלפון' },
+  { field: 'mail', label: 'מייל' },
+  { field: 'fatherName', label: 'שם האב' },
+  { field: 'motherName', label: 'שם האם' },
+  { field: 'belongsTo', label: 'שייך ל' },
+  { field: 'addressNote', label: 'הערת כתובת' },
+  { field: 'neighborhood', label: 'שכונה' },
+];
+
+// שורת "לכבוד ..." - קידומת/בעל/אישה/שם משפחה/סיום מתאחדים לשורה אחת, אבל כל חלק
+// מופיע רק אם הוא מסומן להדפסה. אם row.display קיים (שם מותאם אישית) הוא משמש כמו
+// שהיה קודם, ללא תלות בסימוני בעל/אישה/שם משפחה - קידומת/סיום עדיין חלים סביבו
+function buildNameLine(row, getPrintFlag) {
+  const prefixPart = getPrintFlag('prefix') && row.prefix ? row.prefix : '';
+  const suffixPart = getPrintFlag('suffix') && row.suffix ? row.suffix : '';
+
+  let namePart;
+  if (row.display) {
+    namePart = row.display;
+  } else {
+    const manShown = getPrintFlag('man') && row.man;
+    const womanShown = getPrintFlag('woman') && row.woman;
+    const womanText = womanShown ? (manShown ? `ו${row.woman}` : row.woman) : '';
+    const lastNamePart = getPrintFlag('lastName') && row.lastName ? row.lastName : '';
+    namePart = [manShown ? row.man : '', womanText, lastNamePart].filter(Boolean).join(' ');
+  }
+
+  const content = [prefixPart, namePart, suffixPart].filter(Boolean).join(' ');
+  return content ? `לכבוד ${content}` : '';
+}
+
+function buildAddressLine1(row, getPrintFlag) {
+  return [
+    getPrintFlag('street') && row.street ? row.street : '',
+    getPrintFlag('houseNo') && row.houseNo ? row.houseNo : '',
+  ].filter(Boolean).join(' ');
+}
+
+function buildAddressLine2(row, getPrintFlag) {
+  return [
+    getPrintFlag('city') && row.city ? row.city : '',
+    getPrintFlag('country') && row.country ? row.country : '',
+  ].filter(Boolean).join(' ');
 }
 
 // פריסת רשת אמיתית לדף מדבקות - הגדלים ומספר העמודות מגיעים מאותו מקור אמת
@@ -28,6 +77,14 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
   const actualRows = selectedRows.length > 0 ? selectedRows : selectedItems;
   const rowsToDisplay = actualRows;
   const layout = LABEL_LAYOUT[labelSize] || LABEL_LAYOUT.standard;
+
+  // "עמודות להדפסה" מ"ניהול עמודות" - אותה העדפה שנשמרה למשתמשת, נופלת חזרה
+  // לברירת המחדל (השדות שהודפסו תמיד עד היום) אם עדיין לא נשמרה העדפה אישית
+  const columnPreferences = parseColumnPreferences(getLoggedUser()?.columnPreferences);
+  const getPrintFlag = (technicalName) => {
+    const saved = columnPreferences[technicalName]?.print;
+    return saved !== undefined ? saved : PRINT_DEFAULT_FIELDS.has(technicalName);
+  };
 
   // כשמגיעים ישר מכפתור "הדפס" (לא מ"תצוגה מקדימה") - פותחים את חלון ההדפסה
   // של הדפדפן מיד, בלי לחכות שילחצו שוב על "הדפס מדבקות" כאן
@@ -111,10 +168,12 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
               display: 'grid',
               gridTemplateColumns: `repeat(${layout.columns}, ${layout.width}px)`,
               justifyContent: 'center',
-              // בלי רווח אופקי בין העמודות - 3 מדבקות של 7 ס"מ תופסות בדיוק את כל רוחב הדף,
-              // אין מקום לרווח. רווח אנכי קטן בין השורות עדיין נשאר, לנוחות קריאה
-              columnGap: 0,
+              // רווח אופקי קטן בין העמודות - רק במסך התצוגה, לנוחות הקריאה. בהדפסה
+              // בפועל זה חוזר ל-0 (למטה) כי 3 מדבקות של 7 ס"מ תופסות בדיוק את כל רוחב
+              // הדף, אין מקום לרווח בלי לקלקל את היישור הפיזי מול הגיליון האמיתי
+              columnGap: 1,
               rowGap: 1,
+              '@media print': { columnGap: 0 },
             }}
           >
             {rowsToDisplay.map((row, index) => (
@@ -136,29 +195,48 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                   fontFamily: fontType,
                 }}
               >
-                {/* שורת השם המכובדת */}
-                <Typography
-                  variant={layout.nameVariant}
-                  sx={{ fontWeight: 'bold', mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
-                >
-                  לכבוד {row.prefix || ''} {getDisplayName(row)} {row.suffix || ''}
-                </Typography>
+                {/* שורת השם המכובדת - רק אם יש בה בכלל תוכן לפי מה שסומן להדפסה */}
+                {buildNameLine(row, getPrintFlag) && (
+                  <Typography
+                    variant={layout.nameVariant}
+                    sx={{ fontWeight: 'bold', mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
+                  >
+                    {buildNameLine(row, getPrintFlag)}
+                  </Typography>
+                )}
 
                 {/* שורת הרחוב */}
-                <Typography
-                  variant={layout.addrVariant}
-                  sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
-                >
-                  {row.street} {row.houseNo}
-                </Typography>
+                {buildAddressLine1(row, getPrintFlag) && (
+                  <Typography
+                    variant={layout.addrVariant}
+                    sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
+                  >
+                    {buildAddressLine1(row, getPrintFlag)}
+                  </Typography>
+                )}
 
                 {/* שורת עיר וארץ - מתחת לרחוב */}
-                <Typography
-                  variant={layout.addrVariant}
-                  sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
-                >
-                  {row.city} {row.country || ''}
-                </Typography>
+                {buildAddressLine2(row, getPrintFlag) && (
+                  <Typography
+                    variant={layout.addrVariant}
+                    sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
+                  >
+                    {buildAddressLine2(row, getPrintFlag)}
+                  </Typography>
+                )}
+
+                {/* שדות נוספים - כל אחד בשורה משלו, רק אם סומן להדפסה ויש לו ערך */}
+                {EXTRA_PRINT_FIELDS.map(({ field, label }) =>
+                  getPrintFlag(field) && row[field] ? (
+                    <Typography
+                      key={field}
+                      variant={layout.addrVariant}
+                      sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
+                    >
+                      {label}: {row[field]}
+                    </Typography>
+                  ) : null
+                )}
               </Box>
             ))}
           </Box>

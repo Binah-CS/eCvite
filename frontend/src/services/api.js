@@ -56,6 +56,9 @@ const api = {
           `/recipient-columns/${encodeURIComponent(technicalName)}/aliases`,
           { alias }
       ),
+
+  updateColumnPreferences: (phone, columnPreferences) =>
+      apiClient.put('/auth/column-preferences', { phone, columnPreferences }),
 };
 
 export default api;

@@ -62,13 +62,29 @@ public class Recipients {
 
     private boolean print; // flag
     private String display;
+
+    @Column(name = "address_note")
+    private String addressNote;
+
+    // "זיכרון" פנימי (JSON) של אילו ערכים מתוך שדות הכתובת הועברו להערת הכתובת ומאיזה
+    // שדה כל אחד הגיע - כדי שאפשר יהיה להחזיר אותם לשדה המקורי, גם אחרי רענון, בלי
+    // שום סימן נראה בטקסט של הערת הכתובת עצמה. לא מוצג בטבלה כעמודה בכלל
+    @Column(name = "address_note_sources")
+    private String addressNoteSources;
+    // כולל גם כתובת (עיר/רחוב/מספר בית) ולא רק שם+טלפון - כדי שלא יתבלבל בין שני
+    // נמענים שונים בעלי אותו שם שאין להם טלפון שמור (למשל "משה כהן" בלי טלפון,
+    // פעמיים, בכתובות שונות) ויחשוב שזה אותו נמען. משפיע רק על נמענים חדשים - לנמען
+    // שכבר קיים ומזוהה לפי ה-hashCode שלו, ה-hash הישן שלו לא מחושב מחדש
     public String generateRowHashCode() {
         try {
             String data =
                     Objects.toString(man, "") +
                             Objects.toString(woman, "") +
                             Objects.toString(lastName, "") +
-                            Objects.toString(phone, "");
+                            Objects.toString(phone, "") +
+                            Objects.toString(city, "") +
+                            Objects.toString(street, "") +
+                            Objects.toString(houseNo, "");
 
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] hash = md.digest(data.getBytes(StandardCharsets.UTF_8));
