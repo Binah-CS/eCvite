@@ -19,6 +19,9 @@
     "web-vitals": "^3.3.1",
     "xlsx": "^0.18.5"
   },
+  "devDependencies": {
+    "yaml": "^2.4.2"
+  },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",

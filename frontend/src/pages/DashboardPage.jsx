@@ -7,7 +7,7 @@ import DataTable from '../components/DataTable';
 import api from '../services/api';
 import PrintModal from '../components/PrintModal'; 
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
-import { parseColumnPreferences } from '../utils/columnPreferences';
+import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
 
 
 
@@ -177,7 +177,11 @@ export default function DashboardPage() {
       setError('לא ניתן למחוק את הרשומות מהשרת.');
     }
   };
-  const handleSave = async (updatedRows) => {
+  // extraDeleteHashCodes - מזהים למחיקה שהתקבלו ישירות מהקורא (למשל handleConfirmDuplicates
+  // ב-DataTable, אחרי שהמשתמשת פתרה שורות כפולות) ולא דרך pendingDeleteHashCodes (state) -
+  // כי כשקוראים למחיקה ולשמירה ברצף באותה קריאה סינכרונית, ה-state ההוא עוד לא מספיק
+  // להתעדכן לפני שה-handleSave הזה כבר רץ (stale closure), וההעברה במפורש פותרת את זה
+  const handleSave = async (updatedRows, extraDeleteHashCodes = []) => {
     console.log("1. כפתור שמור נלחץ בדאשבורד!");
 
     if (!user?.phone) {
@@ -200,26 +204,45 @@ export default function DashboardPage() {
 
       console.log("SENDING TO BACKEND:", {
         phone: user.phone,
-        recipients: cleanRows
+        recipients: cleanRows,
+        hashCodesToDelete
       });
 
       const response = await api.saveRecords(
           user.phone,
-          cleanRows
+          cleanRows,
+          hashCodesToDelete
       );
+
+      if (hashCodesToDelete.length > 0) {
+        // מסירים רק את מה שבאמת נשלח בבקשה הזו (לא מאפסים סתם לריק) - כי בין
+        // הרגע שנשלחה הבקשה לרגע שהיא חוזרת, המשתמשת יכולה להספיק לסמן עוד שורה
+        // למחיקה (למשל דרך אייקון הפח) - איפוס גורף היה מוחק גם אותה מהתור בלי
+        // שהיא נשלחה בפועל לשרת אף פעם
+        const sentSet = new Set(hashCodesToDelete);
+        setPendingDeleteHashCodes((prev) => prev.filter((id) => !sentSet.has(id)));
+      }
 
       console.log("3. נשמר בהצלחה!", response.data);
 
       // משתמשים ישירות בנתונים שחזרו מהשמירה (hashCode טרי לנמענים חדשים, "שייך ל"
       // אחרי איחוד) - במקום לבקש מחדש את כל הרשימה מהשרת בנפרד. זה היה בקשת רשת
       // שלישית ברצף (אחרי מחיקה ושמירה) שהאיטה מאוד את "שמור את כל המוזמנים" בפועל
+      // התאמה לפי hashCode קודם (חד-משמעית, לשורה שכבר הייתה קיימת) - ורק אם אין
+      // (שורה חדשה) נופלים לזהות. זהות לבדה לא מספיקה כשיש 2 שורות עם אותם פרטי
+      // זהות בדיוק (כמו ב"השאר את שתיהן" עם duplicateSalt) - שתיהן היו מתמזגות
+      // לאותה תוצאה אחת ומקבלות בטעות את אותו מזהה. מוסיפים גם את duplicateSalt
+      // לזהות (השרת מחזיר אותו כמו שהוא, ר' Recipients.java) כדי להבדיל ביניהן
       const savedRows = Array.isArray(response.data) ? response.data : [];
+      const savedByHashCode = new Map();
       const savedByIdentity = new Map();
       savedRows.forEach((row) => {
-        savedByIdentity.set(buildIdentityKey(row), row);
+        savedByHashCode.set(row.hashCode, row);
+        savedByIdentity.set(`${buildIdentityKey(row)}|${row.duplicateSalt ?? ''}`, row);
       });
       const finalRecords = updatedRows.map((row) => {
-        const saved = savedByIdentity.get(buildIdentityKey(row));
+        const saved = (row.hashCode && savedByHashCode.get(row.hashCode))
+          ?? savedByIdentity.get(`${buildIdentityKey(row)}|${row.duplicateSalt ?? ''}`);
         return saved ? { ...saved, id: saved.hashCode } : row;
       });
 
@@ -368,18 +391,11 @@ export default function DashboardPage() {
   const handleColumnOrderChange = async (order) => {
     const currentPrefs = parseColumnPreferences(user?.columnPreferences);
     const columnPreferences = JSON.stringify({ ...currentPrefs, __order: order });
-    let updatedUser = { ...user, columnPreferences };
-    try {
-      const response = await api.updateColumnPreferences(user.phone, columnPreferences);
-      updatedUser = response.data;
-    } catch {
-      // אם קריאת השרת נכשלה, שומרים לפחות מקומית כדי שהשינוי לא ילך לאיבוד בטעות
-    }
-    sessionStorage.setItem('user', JSON.stringify(updatedUser));
+    await saveColumnPreferences(user, columnPreferences);
   };
 
   return (
-      <Box sx={{ width: '100%', height: '100vh', px: 2, pt: 0.5, pb: 1, display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ width: '100%', height: '100vh', px: 1, pt: 0.5, pb: 1, display: 'flex', flexDirection: 'column' }}>
 
         {error && (
             <Typography color="error" variant="body2" mb={1}>
@@ -401,6 +417,7 @@ export default function DashboardPage() {
               columnPreferences={parseColumnPreferences(user?.columnPreferences)}
               profileMenu={profileMenu}
               onColumnOrderChange={handleColumnOrderChange}
+              phone={user?.phone}
           />
         </Box>
 
