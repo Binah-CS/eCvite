@@ -114,17 +114,6 @@ export default function DashboardPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isTableDirty]);
 
-  // "פינג" קל כל 4 דקות כל עוד הדף פתוח - Neon (בסיס הנתונים) "נרדם" אחרי 5 דקות של
-  // חוסר פעילות, וההתעוררות הראשונה אחרי זה איטית (כמה שניות). זה מונע מזה לקרות
-  // שוב ושוב תוך כדי עבודה רציפה בטבלה (לא עוזר לכניסה הראשונה ביום - לזה יש פינג
-  // נפרד במסך ההתחברות)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      api.getRecipientColumns().catch(() => {});
-    }, 4 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
-
   // עטוף ב-useCallback (לא פונקציה רגילה) כדי שהזהות שלו תישאר יציבה בין רינדורים -
   // אחרת DataTable מקבל onAutoSave חדש בכל הקשה, מה שגורם לו לבנות מחדש את כל
   // ה-columns שלו וקלטי העריכה מאבדים פוקוס אחרי כל אות (בדיוק הבאג שנתקלנו בו)
