@@ -10,6 +10,7 @@ import {
     Typography,
 } from "@mui/material";
 import api from "../services/api";
+import { isValidGmail, isValidIsraeliPhone } from '../utils/inputValidation';
 export default function RegisterPage() {
 
     const navigate = useNavigate();
@@ -36,7 +37,6 @@ export default function RegisterPage() {
         houseNumber: "",
     });
 
-    const phoneRegex = /^(05\d{8}|0[23489]\d{7})$/;
     const handleChange = (e) => {
         const { name, value } = e.target;
 
@@ -46,18 +46,17 @@ export default function RegisterPage() {
         });
 
         if (name === "email") {
-            const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
-            setEmailError(value !== "" && !gmailRegex.test(value));
+            setEmailError(value !== "" && !isValidGmail(value));
         }
         if (name === "phone") {
-            setPhoneError(value !== "" && !phoneRegex.test(value));
+            setPhoneError(value !== "" && !isValidIsraeliPhone(value));
         }
     };
 
     const handleRegister = async (e) => {
         e.preventDefault();
 
-        if (!phoneRegex.test(user.phone)) {
+        if (!isValidIsraeliPhone(user.phone)) {
             setPhoneError(true);
             return;
         }
@@ -68,9 +67,7 @@ export default function RegisterPage() {
 
         setTermsError("");
 
-        const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
-
-        if (!gmailRegex.test(user.email)) {
+        if (!isValidGmail(user.email)) {
             setEmailError(true);
             return;
         }

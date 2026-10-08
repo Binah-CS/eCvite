@@ -32,7 +32,11 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
-
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -86,7 +90,7 @@
 
     <build>
         <sourceDirectory>backend/src/main/java</sourceDirectory>
-        <testSourceDirectory>backend/src/test/java</testSourceDirectory>
+        <testSourceDirectory>backend/src/main/test/java</testSourceDirectory>
         <directory>backend/target</directory>
         <resources>
             <resource>
