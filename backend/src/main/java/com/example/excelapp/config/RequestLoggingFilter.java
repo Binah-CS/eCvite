@@ -11,6 +11,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 // עוטפת כל בקשת HTTP אמיתית שמגיעה מה-frontend (כל /api/**) - שורת לוג אחת "נכנס"
@@ -45,8 +46,12 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
             if (status >= 400) {
                 String body = new String(wrappedResponse.getContentAsByteArray(), StandardCharsets.UTF_8);
                 log.warn("✗ {} {} -> {} ({} ms): {}", request.getMethod(), request.getRequestURI(), status, durationMs, body);
+                setBackendLogHeader(wrappedResponse, String.format(
+                        "✗ %s %s -> %d (%d ms): %s", request.getMethod(), request.getRequestURI(), status, durationMs, body));
             } else {
                 log.info("✓ {} {} -> {} ({} ms)", request.getMethod(), request.getRequestURI(), status, durationMs);
+                setBackendLogHeader(wrappedResponse, String.format(
+                        "✓ %s %s -> %d (%d ms)", request.getMethod(), request.getRequestURI(), status, durationMs));
             }
         } catch (Exception ex) {
             long durationMs = System.currentTimeMillis() - start;
@@ -54,9 +59,22 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
             // ל-SLF4J להדפיס את כל ה-stack trace המלא, כולל הקובץ והשורה המדויקים
             // שבהם השגיאה נזרקה בפועל - לא רק את שם סוג השגיאה
             log.error("✗ {} {} -> unhandled exception after {} ms", request.getMethod(), request.getRequestURI(), durationMs, ex);
+            setBackendLogHeader(wrappedResponse, String.format(
+                    "✗ %s %s -> unhandled exception after %d ms: %s", request.getMethod(), request.getRequestURI(), durationMs, ex));
             throw ex;
         } finally {
             wrappedResponse.copyBodyToResponse();
         }
+    }
+
+    // מצמידה תמצית של אותה שורת לוג בדיוק שנכתבה לקונסולת השרת, כ-header בתשובה
+    // עצמה - כדי שה-frontend (ר' ה-interceptor ב-api.js) יוכל להדפיס אותה לקונסול
+    // של הדפדפן, יחד עם הלוג שלו. בלי זה, לוגי השרת נשארים נעולים רק בטרמינל של
+    // השרת (או בדשבורד Render) - בלתי נגישים למי שאין לה גישה לשם, כולל בדיקה
+    // של האתר החי. מקודדת ב-URL (לא טקסט גולמי) כי כותרות HTTP לא תומכות בבטחה
+    // בעברית/תווים לא-ASCII - חלק מהשרתים משחיתים טקסט UTF-8 גולמי בכותרת
+    private void setBackendLogHeader(HttpServletResponse response, String message) {
+        String trimmed = message.length() > 500 ? message.substring(0, 500) + "…" : message;
+        response.setHeader("X-Backend-Log", URLEncoder.encode(trimmed, StandardCharsets.UTF_8));
     }
 }

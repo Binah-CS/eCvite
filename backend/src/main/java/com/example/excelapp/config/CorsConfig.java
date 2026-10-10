@@ -17,7 +17,11 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowedOriginPatterns(allowedOrigins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
                 .allowedHeaders("*")
-                .maxAge(3600);
+                .maxAge(3600)
+                // בלי exposedHeaders, כותרת מותאמת-אישית (כמו X-Backend-Log) מגיעה בפועל
+                // בתשובה מהשרת, אבל קוד ה-JS בדפדפן עיוור אליה לגמרי - הדפדפן חוסם גישה
+                // לכל כותרת שלא הוגדרה כאן במפורש, מטעמי אבטחה (CORS) - ר' RequestLoggingFilter
+                .exposedHeaders("X-Backend-Log");
     }
 
     @jakarta.annotation.PostConstruct

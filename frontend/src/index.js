@@ -4,8 +4,21 @@ import { BrowserRouter } from 'react-router-dom';
 import { CacheProvider } from '@emotion/react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import App from './App';
+import ErrorBoundary from './ErrorBoundary';
 import './index.css';
 import { rtlCache } from './rtl';
+
+// תופסות שגיאות JavaScript שלא קשורות לקריאת רשת בכלל (לא עוברות דרך ה-
+// interceptor ב-api.js) - כמו קריסה ברינדור של רכיב לפני שה-ErrorBoundary תפס
+// אותה, או שגיאה ב-callback/timeout. בלי זה, קריסה כזו הייתה "שקטה לגמרי" -
+// לא רואים אותה בשום לוג, בדיוק המקרה שתואר (התחברות הצליחה, מעבר למסך הבא לא
+// קרה, ושום שגיאת רשת לא נרשמה)
+window.addEventListener('error', (event) => {
+  console.error('✗ שגיאת JavaScript לא תפוסה', event.error ?? event.message, event);
+});
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('✗ Promise נדחה בלי טיפול (unhandled rejection)', event.reason, event);
+});
 
 // עיצוב אחיד לכל הכפתורים באתר: לבן עם מסגרת כחולה בהירה (כמו בסרגל הכלים של הטבלה הראשית) במקום המילוי הכחול הבהיר/הטקסט החיוור של ברירת המחדל של MUI -
 // חל אוטומטית על כל <Button> בכל מסך, בלי לגעת בכל קובץ בנפרד. כפתורי אזהרה
@@ -51,12 +64,14 @@ const theme = createTheme({
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <CacheProvider value={rtlCache}>
-      <ThemeProvider theme={theme}>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </ThemeProvider>
-    </CacheProvider>
+    <ErrorBoundary>
+      <CacheProvider value={rtlCache}>
+        <ThemeProvider theme={theme}>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </ThemeProvider>
+      </CacheProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );
