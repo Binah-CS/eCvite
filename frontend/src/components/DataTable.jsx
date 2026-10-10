@@ -38,10 +38,10 @@ const SYSTEM_FIELDS_HIDDEN_BY_DEFAULT = {
 // עמודות כתובת - מהן אפשר להעביר ערך שלא מתאים לעמודת "הערת כתובת" (קליק ימני על התא)
 const ADDRESS_FIELDS = ['country', 'city', 'neighborhood', 'street', 'houseNo'];
 
-// שוליים קבועים בקצה הטבלה, משוריינים לאייקוני המחיקה/הסטוריה הצפים (ר' hoveredRow
-// למטה) - ה-DataGrid מקבל קופסה צרה יותר בדיוק ברוחב הזה (paddingInlineEnd), כך
-// שאף עמודה, לא משנה כמה תורחב, לא יכולה לרנדר לתוך השטח הזה בכלל
-const ROW_ICON_GUTTER_PX = 56;
+// שוליים קבועים בקצה הטבלה, משוריינים לאייקוני המחיקה/הסטוריה/הוספה הצפים (ר'
+// hoveredRow למטה) - ה-DataGrid מקבל קופסה צרה יותר בדיוק ברוחב הזה (paddingInlineEnd),
+// כך שאף עמודה, לא משנה כמה תורחב, לא יכולה לרנדר לתוך השטח הזה בכלל
+const ROW_ICON_GUTTER_PX = 80;
 
 // עיצוב משותף לכפתורי סרגל הכלים העליון (בטל סינון/מיון, יצוא, הוסף שורה, שמור) -
 // כדי שכולם ייראו אחידים בלי להעתיק את אותו אובייקט סגנון בכל כפתור בנפרד
@@ -261,11 +261,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // כפתור מחיקה צף שנשאר תמיד באותו קצה קבוע של המסך (לא בתוך עמודה של הטבלה עצמה) -
   // כי ה-DataGrid בגרסה הזו ממקם את התאים שלו בעצמו (position אבסולוטי), וזה מתנגש עם
   // ניסיון להצמיד עמודה רגילה. במקום זה עוקבים אחרי מיקום השורה שבריחוף ומציירים מעליה.
-  const [hoveredRow, setHoveredRow] = useState(null); // { id, top, height, inGutter, edge }
-  // גודל האזור (בפיקסלים) ליד הגבול העליון/תחתון של שורה שבו "+" להוספת שורה
-  // מופיע - קטן מספיק שלא יפריע לריחוף הרגיל על השורה (שמציג מחיקה/היסטוריה),
-  // גדול מספיק להיות לחיץ בנוחות על שורה בגובה 32px (ר' rowHeight)
-  const ROW_EDGE_ZONE_PX = 6;
+  const [hoveredRow, setHoveredRow] = useState(null); // { id, top, height, inGutter }
+  // תפריט "הוסף שורה מעל/מתחת" - נפתח מאייקון ה-"+" ליד הפח/היסטוריה (ר' JSX למטה)
+  // left/top (לא anchorEl!) - אם היינו מצמידים את התפריט לאלמנט ה-DOM של האייקון
+  // עצמו, הוא עלול "להתנתק" ממנו: האייקון מצויר רק כש-hoveredRow אמת, ופתיחת
+  // התפריט (ה-backdrop השקוף שלו) יכולה לגרום לעכבר "לצאת" מתחום הטבלה ולאפס את
+  // hoveredRow מיד - מה שמסיר את האייקון מה-DOM ממש באותו רגע שהתפריט מנסה
+  // להתמקם לפיו, וה-browser ממקם אותו ב-(0,0), בפינת המסך, במקום ליד השורה
+  const [insertMenu, setInsertMenu] = useState(null); // { left, top, rowId }
   // המיקום (Y) והקשר האחרונים של העכבר, נשמרים גם מחוץ ל-useEffect של ה-mousemove
   // (ר' למטה) - כדי שאפשר יהיה "לחשב מחדש" את hoveredRow מול מיקום עדכני של השורות
   // בלי שהעכבר יזוז בפועל (ר' useEffect השני, על rows, שמשתמש בזה אחרי מחיקה)
@@ -289,14 +292,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         const id = rowEl.getAttribute('data-id');
         const top = rect.top - containerRect.top;
         const height = rect.height;
-        // קרוב לגבול העליון/תחתון של השורה הזו - "+" להוספת שורה מעל/מתחת. שתי
-        // שורות סמוכות נוגעות זו בזו (אין רווח ביניהן), אז ה-Y בדיוק על הגבול
-        // תמיד ייפול תוך כדי הלולאה למעלה על השורה הראשונה שתואמת (סדר ה-DOM) -
-        // כלומר "תחתית" השורה העליונה, לא "ראש" השורה התחתונה. זה עקבי ומספיק
-        let edge = null;
-        if (clientY - rect.top <= ROW_EDGE_ZONE_PX) edge = 'top';
-        else if (rect.bottom - clientY <= ROW_EDGE_ZONE_PX) edge = 'bottom';
-        return { id, top, height, inGutter, edge };
+        return { id, top, height, inGutter };
       }
     }
     return null;
@@ -344,7 +340,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         const { clientY, inGutter } = lastMouseRef.current;
         setHoveredRow((prev) => {
           const next = computeHoveredRowAt(clientY, inGutter);
-          if (prev && next && String(prev.id) === String(next.id) && prev.top === next.top && prev.height === next.height && prev.inGutter === next.inGutter && prev.edge === next.edge) return prev;
+          if (prev && next && String(prev.id) === String(next.id) && prev.top === next.top && prev.height === next.height && prev.inGutter === next.inGutter) return prev;
           if (prev === null && next === null) return prev;
           return next;
         });
@@ -2034,50 +2030,68 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           <HistoryOutlinedIcon className="row-history-icon-svg" fontSize="small" sx={{ color: '#94a3b8', transition: 'color 0.15s' }} />
         </IconButton>
       )}
-      {hoveredRow?.edge && (
-        // קו דק + "+" לאורך הגבול העליון/תחתון של השורה שבריחוף - מופיע רק כש-
-        // hoveredRow.edge מחושב (קרוב לגבול, ר' ROW_EDGE_ZONE_PX למעלה). מתחיל אחרי
-        // עמודת ה-checkbox (כדי לא לחפוף אותה) וקצר בכוונה (לא לאורך כל השורה) -
-        // כדי שירגיש כסמן עדין, לא כפס כבד על פני הטבלה. חי בתוך שטח התאים עצמו
-        // (לא בשוליים השמורים לאייקוני מחיקה/היסטוריה) כדי לא להתנגש אתם מרחבית
-        <Box
+      {hoveredRow && (
+        <IconButton
           data-row-insert-icon="true"
-          onClick={() => handleInsertRowAt(hoveredRow.id, hoveredRow.edge === 'top' ? 'before' : 'after')}
-          title="הוסף שורה כאן"
+          size="small"
+          title="הוסף שורה"
+          onClick={(event) => setInsertMenu({ left: event.clientX, top: event.clientY, rowId: hoveredRow.id })}
           sx={{
             position: 'absolute',
-            top: (hoveredRow.edge === 'top' ? hoveredRow.top : hoveredRow.top + hoveredRow.height) - 1,
-            insetInlineStart: 48,
-            insetInlineEnd: `${ROW_ICON_GUTTER_PX}px`,
-            height: '1px',
-            bgcolor: '#93c5fd',
-            zIndex: 6,
-            cursor: 'pointer',
-            '&:hover': { bgcolor: '#3b82f6' },
+            top: hoveredRow.top + hoveredRow.height / 2 - 16,
+            insetInlineEnd: 50,
+            zIndex: 5,
+            bgcolor: 'transparent',
+            boxShadow: 'none',
+            '&:hover': { bgcolor: 'transparent' },
+            '&:hover .row-insert-icon-svg': { color: '#16a34a' },
           }}
         >
-          <Box
-            sx={{
-              position: 'absolute',
-              insetInlineStart: -2,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              width: 13,
-              height: 13,
-              borderRadius: '50%',
-              bgcolor: '#3b82f6',
-              color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              pointerEvents: 'none',
-            }}
-          >
-            <AddIcon sx={{ fontSize: 10 }} />
-          </Box>
-        </Box>
+          <AddIcon className="row-insert-icon-svg" fontSize="small" sx={{ color: '#94a3b8', transition: 'color 0.15s' }} />
+        </IconButton>
       )}
    </Box>
+
+      {/* תפריט "הוסף שורה מעל/מתחת" - נפתח מאייקון ה-"+" ליד הפח/היסטוריה (ר' למעלה).
+          rowId נשמר בזמן הלחיצה על האייקון עצמו, לא נקרא מ-hoveredRow שוב בזמן
+          הלחיצה על אחת מהאפשרויות בתפריט - עד אז העכבר כבר יכול לזוז לשורה אחרת */}
+      <Menu
+        open={Boolean(insertMenu)}
+        anchorReference="anchorPosition"
+        anchorPosition={insertMenu ? { left: insertMenu.left, top: insertMenu.top } : undefined}
+        onClose={() => setInsertMenu(null)}
+        // MenuListProps - לא slotProps.list (שם שלא קיים בכלל על Menu, ולכן לא עשה
+        // שום דבר) - זה השם הנכון למקום שבו MUI שם ברירת מחדל 8px ריפוד עליון+תחתון
+        // על הרשימה הפנימית, בנוסף לריפוד של ה-paper עצמו - שניהם ביחד יצרו את הרווח
+        MenuListProps={{ sx: { py: 0 } }}
+        slotProps={{
+          paper: {
+            sx: {
+              borderRadius: 2,
+              width: 'fit-content',
+              minWidth: 'unset',
+              maxWidth: 'unset',
+              py: 0,
+              boxShadow: '0 4px 16px rgba(15,23,42,0.16)',
+            },
+          },
+        }}
+      >
+        <MenuItem
+          onClick={() => { handleInsertRowAt(insertMenu.rowId, 'before'); setInsertMenu(null); }}
+          sx={{ gap: 0.4, py: 0.2, px: 0.75, fontSize: '0.65rem', fontWeight: 600, minHeight: 'unset', whiteSpace: 'nowrap' }}
+        >
+          <ArrowUpwardIcon sx={{ color: '#475569', fontSize: '0.65rem' }} />
+          הוסף שורה מעל
+        </MenuItem>
+        <MenuItem
+          onClick={() => { handleInsertRowAt(insertMenu.rowId, 'after'); setInsertMenu(null); }}
+          sx={{ gap: 0.4, py: 0.2, px: 0.75, fontSize: '0.65rem', fontWeight: 600, minHeight: 'unset', whiteSpace: 'nowrap' }}
+        >
+          <ArrowDownwardIcon sx={{ color: '#475569', fontSize: '0.65rem' }} />
+          הוסף שורה מתחת
+        </MenuItem>
+      </Menu>
 
       <Menu
         open={exportMenuAnchor !== null}
