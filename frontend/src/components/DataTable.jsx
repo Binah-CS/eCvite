@@ -1920,6 +1920,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         }}
         pageSizeOptions={[25, 50, 100]}
         localeText={{
+          noRowsLabel: 'לא נמצאו רשומות',
+          noResultsOverlayLabel: 'לא נמצאו תוצאות',
           toolbarLabel: 'כלים',
           toolbarDensityLabel: 'צפיפות',
           toolbarDensityCompact: 'קומפקטי',
