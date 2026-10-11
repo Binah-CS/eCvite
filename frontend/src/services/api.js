@@ -73,6 +73,8 @@ const api = {
   getRecipientColumns: () =>
 
       apiClient.get('/recipient-columns'),
+  keepDatabaseAlive: () =>
+      apiClient.get('/health/db'),
     importRecords: (phone, rows) =>
         apiClient.post('/recipients/import', {
             phone,
