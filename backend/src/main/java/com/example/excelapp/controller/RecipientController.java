@@ -70,8 +70,20 @@ public class RecipientController {
 
         List<Recipients> incoming = request.getRecipients();
 
-        // Rows that already have a hashCode are persisted records.  Preserve that
-        // stable identity so edits to identity fields do not create a new recipient.
+        // מוחקים (מנתקים) קודם, לפני השמירה - לא אחריה. אם המחיקה הייתה רצה אחרי
+        // השמירה, נמען שנמחק ואז יובא/נוסף מחדש עם אותה זהות היה מקבל hash זהה לנמען
+        // הישן שעדיין מקושר אליך באותו רגע, והמחיקה שרצה רק אחר כך הייתה מנתקת
+        // בטעות גם את מה שכרגע נשמר. באותה בקשה/טרנזקציה של השמירה עצמה (לא בקשת
+        // HTTP נפרדת) - חוסך round-trip שלם לשרת בכל שמירה שכוללת גם מחיקה
+        List<String> hashCodesToDelete = request.getHashCodesToDelete();
+        if (hashCodesToDelete != null && !hashCodesToDelete.isEmpty()) {
+            deleteUserRecipientLinks(user, hashCodesToDelete);
+        }
+
+        // הפרדה לפי מה שהפרונט כבר יודע: שורה עם hashCode היא נמען קיים שמזוהה
+        // במפורש - מעדכנים אותה ישירות, בלי לחפש/להשוות לאף נמען אחר (בדיוק השורה
+        // שעליה עבדו, לא "מישהו עם אותו שם"). רק שורה בלי hashCode היא נמען חדש
+        // לגמרי שצריך hash טרי ובדיקת כפילות מול מה שכבר קיים
         List<Recipients> existingRows = new ArrayList<>();
         List<Recipients> newRows = new ArrayList<>();
         for (Recipients r : incoming) {
@@ -292,6 +304,17 @@ public class RecipientController {
 
         activityLogService.log(request.getPhone(), "RECIPIENTS_DELETED", "Recipient links removed: " + linksToDelete.size());
 
-        return ResponseEntity.ok().build();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            Map<String, Object> entry = new java.util.LinkedHashMap<>();
+            entry.put("changedBy", row[0]);
+            entry.put("changeDate", row[1]);
+            entry.put("operation", row[2]);
+            entry.put("oldData", row[3]);
+            entry.put("changedByName", row[4]);
+            result.add(entry);
+        }
+
+        return ResponseEntity.ok(result);
     }
 }
