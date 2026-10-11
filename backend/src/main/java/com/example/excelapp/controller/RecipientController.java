@@ -5,7 +5,6 @@ import com.example.excelapp.entity.UserRecipients;
 import com.example.excelapp.entity.Recipients;
 import com.example.excelapp.repository.RecipientsRepository;
 import com.example.excelapp.dto.SaveRecipientsRequest;
-import com.example.excelapp.dto.DeleteRecipientsRequest;
 import com.example.excelapp.repository.UserRecipientsRepository;
 import com.example.excelapp.repository.UserRepository;
 import com.example.excelapp.service.ExcelService;
@@ -169,6 +168,18 @@ public class RecipientController {
         return String.join(", ", values);
     }
 
+    private void deleteUserRecipientLinks(User user, List<String> hashCodes) {
+        List<UserRecipients> linksToDelete =
+                userRecipientsRepository.findByUserAndRecipient_HashCodeIn(user, hashCodes);
+
+        userRecipientsRepository.deleteAll(linksToDelete);
+        activityLogService.log(
+                user.getPhone(),
+                "RECIPIENTS_DELETED",
+                "Recipient links removed: " + linksToDelete.size()
+        );
+    }
+
 
     @GetMapping
     public ResponseEntity<?> getRecipients(@RequestParam String phone) {
@@ -274,47 +285,5 @@ public class RecipientController {
         return ResponseEntity.ok(
                 savedRecipients
         );
-    }
-
-
-    @PostMapping("/delete")
-    public ResponseEntity<?> deleteRecipients(
-            @RequestBody DeleteRecipientsRequest request
-    ) {
-
-        User user = userRepository.findByPhone(request.getPhone());
-
-        if (user == null) {
-            return ResponseEntity
-                    .status(HttpStatus.NOT_FOUND)
-                    .body("User not found");
-        }
-
-        List<String> hashCodes = request.getHashCodes();
-
-        // מוחקים רק את הקישור (user_recipients) בין המשתמש הזה לנמענים שנבחרו -
-        // לא את שורת ה-Recipients עצמה, כי אותו hashCode (נגזר משם+טלפון) יכול
-        // להיות משותף/מקושר גם למשתמשים אחרים, ומחיקה ישירה הייתה מוחקת להם בטעות.
-        // שאילתה אחת ממוקדת (JOIN + IN) - לא טוענים את כל הקישורים של המשתמש
-        // (יכולים להיות מאות) רק כדי לסנן בזיכרון בשביל כמה שנבחרו למחיקה
-        List<UserRecipients> linksToDelete =
-                userRecipientsRepository.findByUserAndRecipient_HashCodeIn(user, hashCodes);
-
-        userRecipientsRepository.deleteAll(linksToDelete);
-
-        activityLogService.log(request.getPhone(), "RECIPIENTS_DELETED", "Recipient links removed: " + linksToDelete.size());
-
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Object[] row : rows) {
-            Map<String, Object> entry = new java.util.LinkedHashMap<>();
-            entry.put("changedBy", row[0]);
-            entry.put("changeDate", row[1]);
-            entry.put("operation", row[2]);
-            entry.put("oldData", row[3]);
-            entry.put("changedByName", row[4]);
-            result.add(entry);
-        }
-
-        return ResponseEntity.ok(result);
     }
 }

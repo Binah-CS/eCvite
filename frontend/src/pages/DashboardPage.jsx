@@ -357,7 +357,7 @@ export default function DashboardPage() {
   // הוא ה-hashCode (מחרוזת) - id מספרי טהור הוא שורה חדשה שעוד לא נשמרה בשרת בכלל
   // (ר' handleAddRow/handleImport), ולכן אין מה למחוק בשבילה
 
-  const handleDeleteRows = async (idsToDelete) => {
+  const handleDeleteRows = (idsToDelete) => {
     if (!user?.phone) return;
 
     const deletedIds = new Set(
@@ -368,27 +368,17 @@ export default function DashboardPage() {
 
     if (!deletedIds.size) return;
 
-    const realIds = [...deletedIds];
+    // Numeric ids belong to rows that were never saved, so they have no server
+    // record to unlink. Only persisted hash codes are sent on the next save.
+    const realIds = [...deletedIds].filter((id) => !/^\d+$/.test(id));
+    realIds.forEach((id) => pendingDeletedHashCodes.current.add(id));
+    savePendingDeletedHashCodes(user.phone, pendingDeletedHashCodes.current);
 
-    try {
-      // Keep the deletion local until the user explicitly saves the table.
-      realIds.forEach((id) => pendingDeletedHashCodes.current.add(id));
-      savePendingDeletedHashCodes(user.phone, pendingDeletedHashCodes.current);
+    const currentRows = getLocalRecords(user.phone);
+    const updatedRows = filterDeletedRows(currentRows, deletedIds);
 
-      console.log('✅ הרשומות נמחקו מהשרת:', realIds);
-
-      const currentRows = getLocalRecords(user.phone);
-
-      const updatedRows = filterDeletedRows(currentRows, deletedIds);
-
-      saveLocalRecords(user.phone, updatedRows);
-      setRecords(updatedRows);
-      await loadActivityLogs();
-
-    } catch (err) {
-      console.error('❌ שגיאה במחיקת הרשומות:', err);
-      setError('לא ניתן למחוק את הרשומות מהשרת.');
-    }
+    saveLocalRecords(user.phone, updatedRows);
+    setRecords(updatedRows);
   };
   const handleSave = async (updatedRows) => {
     console.log("1. כפתור שמור נלחץ בדאשבורד!");
@@ -408,23 +398,23 @@ export default function DashboardPage() {
       console.log("2. שולח לבקאנד אחרי ניקוי:", cleanRows);
 
 
+      const hashCodesToDelete = [...pendingDeletedHashCodes.current];
       console.log("SENDING TO BACKEND:", {
         phone: user.phone,
-        recipients: cleanRows
+        recipients: cleanRows,
+        hashCodesToDelete,
       });
-
-      const hashCodesToDelete = [...pendingDeletedHashCodes.current];
-      if (hashCodesToDelete.length) {
-        await api.deleteRecipients(user.phone, hashCodesToDelete);
-        pendingDeletedHashCodes.current.clear();
-        clearPendingDeletedHashCodes(user.phone);
-      }
 
       const response = await api.saveRecords(
           user.phone,
-          updatedRows
+          cleanRows,
+          hashCodesToDelete
       );
 
+      if (hashCodesToDelete.length) {
+        pendingDeletedHashCodes.current.clear();
+        clearPendingDeletedHashCodes(user.phone);
+      }
 
 
       console.log("3. נשמר בהצלחה!", response.data);
