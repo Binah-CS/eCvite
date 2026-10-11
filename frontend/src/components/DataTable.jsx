@@ -10,6 +10,7 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import AddIcon from '@mui/icons-material/Add';
 import { DataGrid, useGridApiRef } from '@mui/x-data-grid';
+import * as XLSX from 'xlsx';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
 import api from '../services/api';
@@ -523,7 +524,27 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
 
   const handleDownloadExcel = () => {
     setExportMenuAnchor(null);
-    apiRef.current.exportDataAsCsv({ utf8WithBom: true });
+
+    const visibleColumns = columns.filter((column) => columnVisibilityModel[column.field] !== false);
+    const sheetRows = [
+      visibleColumns.map((column) => (column.headerName || column.field).replace(/\s*\*+\s*$/, '')),
+      ...filteredRows.map((row) => visibleColumns.map((column) => row[column.field] ?? '')),
+    ];
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'מוזמנים');
+    const file = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([file], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = 'רשימת מוזמנים.xlsx';
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   // שורה חדשה וריקה, עם id מקומי-לתצוגה בלבד (לא hashCode אמיתי - ר' handleSave)
