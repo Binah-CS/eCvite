@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,} from '@mui/material';
+import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,Tooltip,} from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -193,9 +193,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const [inputValue, setInputValue] = useState('');
   const [fieldDefs, setFieldDefs] = useState([]);
 
-  const [problemQueue, setProblemQueue] = useState([]); // תורי תאים שצריך לתקן לפני שמירה - {id, field}
-  const [pendingProblems, setPendingProblems] = useState([]); // תאים בעייתיים שממתינים להחלטה - לתקן או לשמור בכל זאת
-  const [saveAnywayDialogOpen, setSaveAnywayDialogOpen] = useState(false);
+  const [problemQueue, setProblemQueue] = useState([]); // תור התאים שקופצים ביניהם לתיקון (כפתור "תיקון שדות") - {id, field}
   const [duplicateGroups, setDuplicateGroups] = useState([]); // [[row, row, ...], ...] - קבוצות שורות עם אותה זהות (בעל/אישה/שם משפחה/טלפון/כתובת)
   const [duplicateChoices, setDuplicateChoices] = useState({}); // groupIndex -> 'both' | id של השורה שנשארת
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
@@ -423,14 +421,10 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // נקרא שוב, בלי extraDeleteIds, מ-handleSaveAnyway/handleFixProblemsNow)
   const pendingExtraDeleteIdsRef = useRef([]);
 
+  // שדות חסרים/שגויים לא עוצרים את השמירה (ר' #82) - הם מוצגים ומתוקנים דרך כפתור
+  // "תיקון שדות" הנפרד בסרגל הכלים, ושמירה תמיד נשמרת מיד כמו שהטבלה נמצאת
   const proceedAfterDuplicates = (rowsToSave, extraDeleteIds = []) => {
     if (extraDeleteIds.length) pendingExtraDeleteIdsRef.current = extraDeleteIds;
-    const problems = findProblemCells(rowsToSave);
-    if (problems.length > 0) {
-      setPendingProblems(problems);
-      setSaveAnywayDialogOpen(true);
-      return;
-    }
     onSave(rowsToSave, pendingExtraDeleteIdsRef.current);
     pendingExtraDeleteIdsRef.current = [];
   };
@@ -496,24 +490,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     setDuplicateGroups([]);
   };
 
-  // "שמור בכל זאת" - מתעלמים מהשדות הבעייתיים ושומרים את הטבלה כמו שהיא
-  const handleSaveAnyway = () => {
-    setSaveAnywayDialogOpen(false);
-    onSave(rows, pendingExtraDeleteIdsRef.current);
-    pendingExtraDeleteIdsRef.current = [];
-  };
-
-  // "לתקן עכשיו" - נכנסים לתהליך הקפיצה האוטומטית לתיקון השדות, כמו שהיה קודם
-  const handleFixProblemsNow = () => {
-    setSaveAnywayDialogOpen(false);
+  // כפתור "תיקון שדות" - נכנסים לתהליך הקפיצה האוטומטית בין כל השדות החסרים/השגויים
+  // שיש כרגע בטבלה (allProblems), בלי קשר לשמירה. לא שומר כלום בעצמו
+  const handleShowProblems = () => {
     // מנקים סינון/מיון כדי שכל השורות יהיו גלויות בסדר קבוע - כדי שאפשר יהיה לקפוץ ביניהן
     setActiveFilters([]);
     setInputValue('');
     setSortModel([]);
-    setProblemQueue(pendingProblems);
-    // לא שומרים עכשיו בכלל (המשתמשת בחרה לתקן קודם) - מזהי המחיקה הממתינים מסבב
-    // כפילויות קודם כבר לא רלוונטיים לניסיון השמירה הבא, שיבדוק כפילויות מחדש בעצמו
-    pendingExtraDeleteIdsRef.current = [];
+    setProblemQueue(allProblems);
   };
 
   const handlePrintLabels = () => {
@@ -1198,14 +1182,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         if (remaining.length !== prev.length) {
           // התור באמת השתנה (תא תוקן) - מעדכנים אותו, ומדכאים את הקפיצה האוטומטית
           // של האפקט למטה: הקפיצה עצמה מטופלת כאן ישירות, רק כשיצאו עם Enter
+          // כשהתור מתרוקן התהליך פשוט נגמר - לא שומרים אוטומטית (התיקון כבר לא חלק
+          // מהשמירה, ר' handleShowProblems). שומרים כרגיל ב"שמור את כל המוזמנים"
           suppressNextJumpRef.current = true;
-          if (remaining.length === 0 && prev.length > 0) {
-            // pendingExtraDeleteIdsRef כבר תמיד ריק בנקודה הזו (handleFixProblemsNow
-            // מאפס אותו לפני שמגיעים לכאן בכלל) - משלבים אותו במפורש בכל זאת, כדי
-            // שכל קריאה ל-onSave בקובץ הזה תשלח את שני הפרמטרים באותו אופן, בלי
-            // להסתמך על ברירת המחדל של handleSave לשמור על התנהגות נכונה
-            onSave(rowsRef.current, pendingExtraDeleteIdsRef.current);
-          }
           setProblemQueue(remaining);
         }
 
@@ -1584,7 +1563,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     setColumnVisibilityModel(model);
   }, [fieldDefs, columnPreferences]);
 
-  // בכל פעם שתור התיקונים מתעדכן (שמירה נחסמה, או שתוקן תא אחד וקפצנו לבא) -
+  // בכל פעם שתור התיקונים מתעדכן (לחיצה על "תיקון שדות", או שתוקן תא אחד וקפצנו לבא) -
   // גוללים אל התא הראשון בתור וממקדים ישירות ב-input שבתוכו (התאים הם קלטים חיים
   // תמיד, לא מסתמכים על מצב עריכה של ה-DataGrid, אז אין צורך "לפתוח" עריכה בכלל)
   useEffect(() => {
@@ -1592,7 +1571,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     // אם התור התרוקן בדיוק בפעם שדוכאה קפיצה (למשל לחיצת עכבר, לא Enter), הדגל היה
     // נשאר "תקוע" true ומדכא בטעות גם את הקפיצה הבאה האמיתית (למשל אחרי Enter אמיתי).
     // handleFocusOut כבר מטפל בעצמו בקפיצה (jumpToProblem) כשיוצאים עם Enter - האפקט
-    // הזה אחראי רק על המקרה שהתור מתעדכן מבחוץ (בעיקר בלחיצה על "שמור")
+    // הזה אחראי רק על המקרה שהתור מתעדכן מבחוץ (בעיקר בלחיצה על "תיקון שדות")
     const shouldSuppress = suppressNextJumpRef.current;
     suppressNextJumpRef.current = false;
     if (problemQueue.length === 0 || !apiRef.current || shouldSuppress) return undefined;
@@ -1758,6 +1737,26 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           >
             הוסף שורה
           </Button>
+          {/* שדות חובה ריקים או ערכים לא תקינים בכל הטבלה - המספר מתעדכן חי עם כל
+              עריכה (allProblems), ולחיצה קופצת לשדה הראשון ומשם לבא אחרי כל תיקון.
+              ה-span סביב הכפתור - Tooltip לא מקבל אירועי ריחוף מכפתור disabled */}
+          <Tooltip title="השלמת מידע ותיקון בעיות בשדות">
+            <span>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleShowProblems}
+                disabled={allProblems.length === 0}
+                sx={{
+                  ...TOOLBAR_BUTTON_SX,
+                  whiteSpace: 'nowrap',
+                  ...(allProblems.length > 0 && { color: '#b45309', borderColor: '#f59e0b' }),
+                }}
+              >
+                תיקון שדות ({allProblems.length})
+              </Button>
+            </span>
+          </Tooltip>
           <Button
             variant="outlined"
             size="small"
@@ -1804,8 +1803,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             return 'context-menu-target-cell';
           }
 
-          // צביעה בכלל לא קורית לפני שהיה ניסיון שמירה שנחסם - שורה חדשה/ריקה לא נצבעת
-          // מיד, רק אחרי שלוחצים "שמור את כל המוזמנים" ונמצאות בעיות בפועל
+          // צביעה בכלל לא קורית לפני שלוחצים על "תיקון שדות" - שורה חדשה/ריקה לא נצבעת
+          // מיד בזמן שממלאים אותה, רק כשבוחרים במפורש לעבור על השדות לתיקון
           if (problemQueue.length === 0) return '';
 
           // התא הספציפי שקפצנו אליו כרגע (הראשון בתור התיקונים) - מודגש הרבה יותר חזק
@@ -2242,25 +2241,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         </DialogActions>
       </Dialog>
 
-      {/* disableRestoreFocus - בלי זה ה-Dialog "מחזיר" את הפוקוס לכפתור השמירה אחרי
-          שהוא נסגר, וזה מתנגש עם הקפיצה האוטומטית לתא הבעייתי שקורית באותו רגע בדיוק */}
-      <Dialog open={saveAnywayDialogOpen} onClose={handleFixProblemsNow} disableRestoreFocus>
-        <DialogTitle>יש שדות שגויים או חסרים</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            נמצאו {pendingProblems.length} שדות שדורשים תיקון (חובה שריקים או ערכים לא תקינים).
-            אפשר לתקן אותם עכשיו, או לשמור בכל זאת כמו שהטבלה נמצאת עכשיו.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleFixProblemsNow} color="primary">
-            לתקן עכשיו
-          </Button>
-          <Button onClick={handleSaveAnyway} color="error" variant="contained">
-            שמור בכל זאת
-          </Button>
-        </DialogActions>
-      </Dialog>
       {/* חלונית היסטוריית שינויים - נפתחת מאייקון ההסטוריה הצף על שורה (handleOpenHistory).
           לחיצה על שורת היסטוריה משחזרת את הערכים הישנים לתוך השורה הנוכחית בטבלה
           (handleRestoreFromHistory) - בדיוק כמו עריכה רגילה של תא, נשמר בפועל רק
