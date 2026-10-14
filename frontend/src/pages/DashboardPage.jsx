@@ -351,7 +351,11 @@ export default function DashboardPage() {
       trackActivity('RECIPIENTS_DELETE_FAILED', `Reason: ${err.message || 'Delete failed'}`);
     }
   };
-  const handleSave = async (updatedRows) => {
+  // extraDeleteHashCodes - מזהים למחיקה שהתקבלו ישירות מהקורא (למשל handleConfirmDuplicates
+  // ב-DataTable, אחרי שהמשתמשת פתרה שורות כפולות) ולא דרך pendingDeleteHashCodes (state) -
+  // כי כשקוראים למחיקה ולשמירה ברצף באותה קריאה סינכרונית, ה-state ההוא עוד לא מספיק
+  // להתעדכן לפני שה-handleSave הזה כבר רץ (stale closure), וההעברה במפורש פותרת את זה
+  const handleSave = async (updatedRows, extraDeleteHashCodes = []) => {
     console.log("1. כפתור שמור נלחץ בדאשבורד!");
 
     if (!user?.phone) {
@@ -373,7 +377,8 @@ export default function DashboardPage() {
 
       console.log("SENDING TO BACKEND:", {
         phone: user.phone,
-        recipients: cleanRows
+        recipients: cleanRows,
+        hashCodesToDelete
       });
 
       const hashCodesToDelete = [...pendingDeletedHashCodes.current];
@@ -388,7 +393,8 @@ export default function DashboardPage() {
       // delete to remove that new link.
       const response = await api.saveRecords(
           user.phone,
-          cleanRows
+          cleanRows,
+          hashCodesToDelete
       );
 
 
@@ -534,18 +540,11 @@ export default function DashboardPage() {
   const handleColumnOrderChange = async (order) => {
     const currentPrefs = parseColumnPreferences(user?.columnPreferences);
     const columnPreferences = JSON.stringify({ ...currentPrefs, __order: order });
-    let updatedUser = { ...user, columnPreferences };
-    try {
-      const response = await api.updateColumnPreferences(user.phone, columnPreferences);
-      updatedUser = response.data;
-    } catch {
-      // אם קריאת השרת נכשלה, שומרים לפחות מקומית כדי שהשינוי לא ילך לאיבוד בטעות
-    }
-    sessionStorage.setItem('user', JSON.stringify(updatedUser));
+    await saveColumnPreferences(user, columnPreferences);
   };
 
   return (
-      <Box sx={{ width: '100%', height: '100vh', px: 2, pt: 0.5, pb: 1, display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ width: '100%', height: '100vh', px: 1, pt: 0.5, pb: 1, display: 'flex', flexDirection: 'column' }}>
 
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
           <Typography fontWeight={700} color="#1e3a8a">

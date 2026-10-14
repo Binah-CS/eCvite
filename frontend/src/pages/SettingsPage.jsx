@@ -15,8 +15,7 @@ import {
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined';
 import { getExcelColumns } from '../services/excelColumnsCache';
-import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
-import api from '../services/api';
+import { parseColumnPreferences, PRINT_DEFAULT_FIELDS, saveColumnPreferences } from '../utils/columnPreferences';
 
 function getLoggedUser() {
   const raw = sessionStorage.getItem('user');
@@ -64,14 +63,7 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     const columnPreferences = JSON.stringify(prefs);
-    let updatedUser = { ...user, columnPreferences };
-    try {
-      const response = await api.updateColumnPreferences(user.phone, columnPreferences);
-      updatedUser = response.data;
-    } catch {
-      // אם קריאת השרת נכשלה, שומרים לפחות מקומית כדי שהשינוי לא ילך לאיבוד בטעות
-    }
-    sessionStorage.setItem('user', JSON.stringify(updatedUser));
+    await saveColumnPreferences(user, columnPreferences);
     setSavedOpen(true);
   };
 

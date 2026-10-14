@@ -1,13 +1,11 @@
 package com.example.excelapp.entity;
 
+import com.example.excelapp.util.HashUtil;
 import jakarta.persistence.*;
 import lombok.*;
 
 import jakarta.validation.constraints.Pattern;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.Objects;
 
@@ -60,25 +58,11 @@ public class User {
     }
 
     public String generateHashCode() {
-        try {
-            String data =
-                    Objects.toString(firstNameMan, "") +
-                            Objects.toString(firstNameWoman, "") +
-                            Objects.toString(lastName, "") +
-                            Objects.toString(phone, "");
-
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(data.getBytes(StandardCharsets.UTF_8));
-
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-
-            return sb.toString();
-
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("Error generating hash", e);
-        }
+        String data =
+                Objects.toString(firstNameMan, "") +
+                        Objects.toString(firstNameWoman, "") +
+                        Objects.toString(lastName, "") +
+                        Objects.toString(phone, "");
+        return HashUtil.sha256Hex(data);
     }
 }
