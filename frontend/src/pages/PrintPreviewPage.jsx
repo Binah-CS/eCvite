@@ -52,10 +52,17 @@ function buildAddressLine1(row, getPrintFlag) {
 }
 
 function buildAddressLine2(row, getPrintFlag) {
-  return [
-    getPrintFlag('city') && row.city ? row.city : '',
-    getPrintFlag('country') && row.country ? row.country : '',
-  ].filter(Boolean).join(' ');
+  return getPrintFlag('city') && row.city ? row.city : '';
+}
+
+// ישראל היא ברירת המחדל (ייבוא אקסל ממלא "ישראל" לנמען בלי ארץ) - אין טעם להדפיס
+// אותה על כל מדבקה. ארץ אחרת מודפסת בשורה נפרדת, מתחת לכל הכתובת
+const DOMESTIC_COUNTRY_NAMES = new Set(['ישראל', 'israel', 'il', 'isr']);
+
+function buildCountryLine(row, getPrintFlag) {
+  const country = String(row.country ?? '').trim();
+  if (!getPrintFlag('country') || !country) return '';
+  return DOMESTIC_COUNTRY_NAMES.has(country.toLowerCase()) ? '' : country;
 }
 
 // פריסת רשת אמיתית לדף מדבקות - הגדלים ומספר העמודות מגיעים מאותו מקור אמת
@@ -209,13 +216,23 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                   </Typography>
                 )}
 
-                {/* שורת עיר וארץ - מתחת לרחוב */}
+                {/* שורת העיר - מתחת לרחוב */}
                 {buildAddressLine2(row, getPrintFlag) && (
                   <Typography
                     variant={layout.addrVariant}
                     sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
                   >
                     {buildAddressLine2(row, getPrintFlag)}
+                  </Typography>
+                )}
+
+                {/* שורת הארץ - רק לנמען מחוץ לישראל, מתחת לכל הכתובת */}
+                {buildCountryLine(row, getPrintFlag) && (
+                  <Typography
+                    variant={layout.addrVariant}
+                    sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
+                  >
+                    {buildCountryLine(row, getPrintFlag)}
                   </Typography>
                 )}
 
