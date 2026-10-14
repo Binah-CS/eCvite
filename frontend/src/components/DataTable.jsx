@@ -197,6 +197,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const [duplicateGroups, setDuplicateGroups] = useState([]); // [[row, row, ...], ...] - קבוצות שורות עם אותה זהות (בעל/אישה/שם משפחה/טלפון/כתובת)
   const [duplicateChoices, setDuplicateChoices] = useState({}); // groupIndex -> 'both' | id של השורה שנשארת
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const duplicateDialogOpenRef = useRef(duplicateDialogOpen); // ל-Ctrl+S - לא לפתוח שוב את חלונית הכפילויות כשהיא כבר פתוחה
+  duplicateDialogOpenRef.current = duplicateDialogOpen;
   const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא כתובת
   const [exportMenuAnchor, setExportMenuAnchor] = useState(null); // כפתור "יצוא" - תפריט הדפסת מדבקות / הורדת קובץ
   const [secondarySortFields, setSecondarySortFields] = useState([]); // תת-מיון: שרשרת עמודות לשבירת שוויון, לפי בחירת המשתמשת
@@ -439,6 +441,24 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     }
     proceedAfterDuplicates(rows);
   };
+
+  // Ctrl+S (או Cmd+S במק) = לחיצה על "שמור", כולל בדיקת הכפילויות. ref כדי שהמאזין
+  // (נרשם פעם אחת) תמיד יפעיל את handleSaveClick העדכני, עם השורות הנוכחיות. e.code
+  // ולא e.key - כשהמקלדת בעברית המקש S כותב "ד", והקיצור צריך לעבוד בכל שפה. capture
+  // כדי שיתפס לפני ה-DataGrid או קלט בתא שעוצרים את האירוע. preventDefault - בלי זה
+  // הדפדפן פותח את חלון "שמירת הדף" שלו
+  const saveShortcutRef = useRef(handleSaveClick);
+  saveShortcutRef.current = handleSaveClick;
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.code !== 'KeyS') return;
+      event.preventDefault();
+      if (duplicateDialogOpenRef.current) return;
+      saveShortcutRef.current();
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, []);
 
   // לפי הבחירה של המשתמשת בכל קבוצה - 'both' או ה-id של השורה שנשארת. ברירת מחדל - בדיקה לא נבחרה נשארת 'both' (לא מוחקת בלי בחירה מפורשת)
   const handleConfirmDuplicates = () => {
@@ -1761,9 +1781,10 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             variant="outlined"
             size="small"
             onClick={handleSaveClick}
+            title="Ctrl+S"
             sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
           >
-            שמור את כל המוזמנים
+            שמור
           </Button>
         </Stack>
       </Box>
