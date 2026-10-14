@@ -9,6 +9,11 @@ import com.example.excelapp.repository.UserRecipientsRepository;
 import com.example.excelapp.repository.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.PersistenceContext;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +53,10 @@ class RecipientControllerTest {
     private UserRecipientsRepository userRecipientsRepository;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
+    @PersistenceContext
+    private EntityManager entityManager;
 
     private User seedUser(String phone, String firstNameMan) {
         User user = User.builder()
@@ -250,6 +259,89 @@ class RecipientControllerTest {
 
         Recipients afterUpdate = recipientsRepository.findById(belongsToA.getHashCode()).orElseThrow();
         assertThat(afterUpdate.getMan()).isEqualTo("נדרס ע\"י משתמשת אחרת");
+    }
+
+    // ---------- ביצועים: מספר הפקודות ל-DB בשמירה גדולה ----------
+
+    // כמה פקודות SQL ש-Hibernate הכין בפועל מאז ה-clear האחרון (batch של INSERT-ים
+    // נספר פעם אחת, לא לכל שורה) - הקישורים ל-user_recipients נשלחים ב-JDBC batch
+    // אחד ולא נספרים כאן בכלל
+    private long preparedStatementsSince(Runnable action) {
+        Statistics stats = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        stats.clear();
+        action.run();
+        return stats.getPrepareStatementCount();
+    }
+
+    private String postSave(SaveRecipientsRequest req) {
+        try {
+            return mockMvc.perform(post("/api/recipients/save")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsBytes(req)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void save_500NewRows_usesAHandfulOfStatementsNotOnePerRow() throws Exception {
+        // לפני התיקון: SELECT לכל שורה (merge) + INSERT לכל שורה + INSERT לכל קישור
+        // = כ-1,500 פקודות, כל אחת round-trip נפרד ל-Neon
+        User user = seedUser("0526666666", "גדולה");
+        List<Recipients> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            rows.add(newUnsavedRecipient("נמען" + i, "05" + String.format("%08d", i)));
+        }
+        SaveRecipientsRequest req = new SaveRecipientsRequest();
+        req.setPhone(user.getPhone());
+        req.setRecipients(rows);
+
+        String[] response = new String[1];
+        long statements = preparedStatementsSince(() -> response[0] = postSave(req));
+
+        assertThat(objectMapper.readTree(response[0])).hasSize(500);
+        assertThat(statements).isLessThan(40);
+
+        entityManager.clear();
+        mockMvc.perform(get("/api/recipients").param("phone", user.getPhone()))
+                .andExpect(jsonPath("$", hasSize(500)));
+    }
+
+    @Test
+    void save_500ExistingRows_updatesWithoutASelectPerRow() throws Exception {
+        // השמירה הרגילה אחרי עריכה - כל השורות כבר עם hashCode, אחת מהן השתנתה
+        User user = seedUser("0527777777", "עורכת גדולה");
+        List<Recipients> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            rows.add(newUnsavedRecipient("קיים" + i, "05" + String.format("%08d", i)));
+        }
+        SaveRecipientsRequest first = new SaveRecipientsRequest();
+        first.setPhone(user.getPhone());
+        first.setRecipients(rows);
+        JsonNode saved = objectMapper.readTree(postSave(first));
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Recipients> resend = new java.util.ArrayList<>();
+        for (JsonNode node : saved) {
+            resend.add(objectMapper.treeToValue(node, Recipients.class));
+        }
+        resend.get(0).setCity("עיר חדשה");
+        SaveRecipientsRequest second = new SaveRecipientsRequest();
+        second.setPhone(user.getPhone());
+        second.setRecipients(resend);
+
+        long statements = preparedStatementsSince(() -> postSave(second));
+        assertThat(statements).isLessThan(40);
+
+        entityManager.flush();
+        entityManager.clear();
+        Recipients edited = recipientsRepository.findById(resend.get(0).getHashCode()).orElseThrow();
+        assertThat(edited.getCity()).isEqualTo("עיר חדשה");
+        mockMvc.perform(get("/api/recipients").param("phone", user.getPhone()))
+                .andExpect(jsonPath("$", hasSize(500)));
     }
 
     // ---------- GET /api/recipients ----------
