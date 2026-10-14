@@ -1,4 +1,4 @@
-import { useEffect,useCallback, useState } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Avatar, IconButton, Menu, MenuItem, Snackbar, Alert } from '@mui/material';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
@@ -9,6 +9,8 @@ import PrintModal from '../components/PrintModal';
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
 
+const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
+const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
 
 
 function getLoggedUser() {
@@ -48,6 +50,8 @@ export default function DashboardPage() {
   const [isTableDirty, setIsTableDirty] = useState(false);
   const [profileMenuAnchor, setProfileMenuAnchor] = useState(null); // תפריט הפרופיל (עיגול עם אות ראשונה) שנפתח למעלה
   const [saveSuccessOpen, setSaveSuccessOpen] = useState(false); // הודעת "השמירה נעשתה בהצלחה" שיורדת מלמעלה
+  const lastDashboardActivityAt = useRef(Date.now());
+  const lastDatabaseKeepAliveAt = useRef(Date.now());
 
   // זהות השורות שהיו מסומנות לפני שיצאנו לתצוגה המקדימה - נקרא פעם אחת, בטרם עולה הטבלה
   const [initialSelectedIds] = useState(() => {
@@ -114,15 +118,50 @@ export default function DashboardPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isTableDirty]);
 
-  // "פינג" קל כל 4 דקות כל עוד הדף פתוח - Neon (בסיס הנתונים) "נרדם" אחרי 5 דקות של
-  // חוסר פעילות, וההתעוררות הראשונה אחרי זה איטית (כמה שניות). זה מונע מזה לקרות
-  // שוב ושוב תוך כדי עבודה רציפה בטבלה (לא עוזר לכניסה הראשונה ביום - לזה יש פינג
-  // נפרד במסך ההתחברות)
+  // The dashboard load already queries the DB for recipients. After that, keep
+  // the connection warm only while the user is actively working in this visible
+  // dashboard tab. No request is made from DataTable or from background tabs.
   useEffect(() => {
-    const interval = setInterval(() => {
-      api.getRecipientColumns().catch(() => {});
-    }, 4 * 60 * 1000);
-    return () => clearInterval(interval);
+    const sendKeepAliveIfDue = () => {
+      const now = Date.now();
+      lastDashboardActivityAt.current = now;
+
+      if (document.visibilityState !== 'visible'
+          || now - lastDatabaseKeepAliveAt.current < DB_KEEP_ALIVE_INTERVAL_MS) {
+        return;
+      }
+
+      lastDatabaseKeepAliveAt.current = now;
+      api.keepDatabaseAlive().catch(() => {});
+    };
+
+    const keepAliveWhileActive = () => {
+      const now = Date.now();
+      const hasRecentActivity = now - lastDashboardActivityAt.current <= DASHBOARD_ACTIVITY_WINDOW_MS;
+      const isDue = now - lastDatabaseKeepAliveAt.current >= DB_KEEP_ALIVE_INTERVAL_MS;
+
+      if (document.visibilityState === 'visible' && hasRecentActivity && isDue) {
+        lastDatabaseKeepAliveAt.current = now;
+        api.keepDatabaseAlive().catch(() => {});
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        sendKeepAliveIfDue();
+      }
+    };
+
+    const activityEvents = ['pointerdown', 'keydown', 'scroll', 'touchstart'];
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, sendKeepAliveIfDue, { passive: true }));
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const interval = window.setInterval(keepAliveWhileActive, 60 * 1000);
+
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, sendKeepAliveIfDue));
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(interval);
+    };
   }, []);
 
   // עטוף ב-useCallback (לא פונקציה רגילה) כדי שהזהות שלו תישאר יציבה בין רינדורים -

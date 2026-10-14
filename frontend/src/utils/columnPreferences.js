@@ -1,4 +1,5 @@
 import api from '../services/api';
+import { refreshExcelColumns } from '../services/excelColumnsCache';
 
 // עמודות שמודפסות היום במדבקה בפועל (ברירת המחדל של "עמודות להדפסה" לפני ששמרו
 // העדפה אישית) - שאר העמודות מתחילות לא מסומנות להדפסה
@@ -23,6 +24,9 @@ export async function saveColumnPreferences(user, columnPreferences) {
   try {
     const response = await api.updateColumnPreferences(user.phone, columnPreferences);
     updatedUser = response.data;
+    // Preferences changed: refresh the shared column-definition cache once so
+    // subsequent screens and imports use the latest configuration.
+    await refreshExcelColumns().catch(() => {});
   } catch {
     // אם קריאת השרת נכשלה, שומרים לפחות מקומית כדי שהשינוי לא ילך לאיבוד בטעות
   }

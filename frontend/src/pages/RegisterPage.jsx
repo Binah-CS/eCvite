@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
     Box,
@@ -10,15 +10,11 @@ import {
     Typography,
 } from "@mui/material";
 import api from "../services/api";
+import { refreshExcelColumns } from '../services/excelColumnsCache';
 export default function RegisterPage() {
 
     const navigate = useNavigate();
     const location = useLocation();
-
-    // "מעיר" את Neon כבר במסך ההרשמה - ר' אותו הסבר ב-LoginPage.jsx
-    useEffect(() => {
-        api.getRecipientColumns().catch(() => {});
-    }, []);
 
     const [emailError, setEmailError] = useState(false);
     const [phoneError, setPhoneError] = useState(false);
@@ -78,6 +74,7 @@ export default function RegisterPage() {
         try {
             const response = await api.register(user);
             sessionStorage.setItem('user', JSON.stringify(response.data));
+            await refreshExcelColumns();
             navigate("/");
         } catch (err) {
             alert("ההרשמה נכשלה");
