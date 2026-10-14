@@ -8,6 +8,8 @@ import {
     Paper,
     TextField,
     Typography,
+    Snackbar,
+    Alert,
 } from "@mui/material";
 import api from "../services/api";
 import { refreshExcelColumns } from '../services/excelColumnsCache';
@@ -20,6 +22,7 @@ export default function RegisterPage() {
     const [phoneError, setPhoneError] = useState(false);
     const [agreeTerms, setAgreeTerms] = useState(false);
     const [termsError, setTermsError] = useState("");
+    const [submitError, setSubmitError] = useState(false);
     const [user, setUser] = useState({
         firstNameMan: location.state?.name || "",
         firstNameWoman: "",
@@ -77,12 +80,13 @@ export default function RegisterPage() {
             await refreshExcelColumns();
             navigate("/");
         } catch (err) {
-            alert("ההרשמה נכשלה");
+            setSubmitError(true);
         }
     };
 
 
     return (
+        <>
         <Container maxWidth="sm" sx={{ mt: 4 }}>
             <Paper sx={{ p: 4 }}>
 
@@ -203,5 +207,16 @@ export default function RegisterPage() {
                 </Box>
             </Paper>
         </Container>
+        <Snackbar
+            open={submitError}
+            autoHideDuration={6000}
+            onClose={() => setSubmitError(false)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        >
+            <Alert severity="error" variant="filled" onClose={() => setSubmitError(false)}>
+                ההרשמה נכשלה. נסי שוב.
+            </Alert>
+        </Snackbar>
+        </>
     );
 }
