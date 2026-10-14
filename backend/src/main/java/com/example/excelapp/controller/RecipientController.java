@@ -15,6 +15,7 @@ import com.example.excelapp.service.ExcelService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -45,6 +46,9 @@ public class RecipientController {
 
     @PersistenceContext
     private EntityManager entityManager;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     // "מציגה" למסד הנתונים מי המשתמשת המבצעת את הפעולה הנוכחית, כדי שהטריגרים
     // ששומרים היסטוריית שינויים בטבלת הנמענים (recipients_history) ידעו למי לייחס
@@ -119,46 +123,50 @@ public class RecipientController {
             }
         }
 
+        // יצירת hash לכל שורה חדשה - בזיכרון, לא פונה ל-DB
+        for (Recipients r : newRows) {
+            r.setHashCode(r.generateRowHashCode());
+        }
+
+        // שאילתה אחת שטוענת את כל הנמענים מהבקשה שכבר קיימים ב-DB (גם קיימים וגם
+        // "חדשים" שה-hash שלהם כבר קיים). בלי זה, saveAll() על ישות עם @Id מוגדר-מראש
+        // עושה merge() שמריץ SELECT נפרד לכל שורה לפני השמירה - ב-500 שורות זה 500
+        // round-trips ל-Neon, וזה מה שהפך את "שמור" לאיטי מאוד. ישות שכבר נטענה כאן
+        // נמצאת ב-persistence context, וה-merge עליה לא פונה ל-DB בכלל
+        Set<String> requestHashCodes = incoming.stream()
+                .map(Recipients::getHashCode)
+                .collect(Collectors.toSet());
+        Map<String, Recipients> managedByHash = recipientRepository.findAllById(requestHashCodes).stream()
+                .collect(Collectors.toMap(Recipients::getHashCode, r -> r));
+
         List<Recipients> savedRecipients = new ArrayList<>();
 
-        // עדכון ישיר של נמענים קיימים (לפי ה-hashCode שהם כבר מזוהים איתו) - save()
-        // על ישות עם @Id שכבר מוגדר מבצע UPDATE על השורה הקיימת, לא יוצר כפילות
-        if (!existingRows.isEmpty()) {
-            savedRecipients.addAll(recipientRepository.saveAll(existingRows));
+        // עדכון ישיר של נמענים קיימים (לפי ה-hashCode שהם כבר מזוהים איתו) - UPDATE על
+        // השורה הקיימת, לא יוצר כפילות
+        for (Recipients r : existingRows) {
+            savedRecipients.add(upsertRecipient(r, managedByHash));
         }
 
-        if (!newRows.isEmpty()) {
-            // יצירת hash לכל שורה חדשה - בזיכרון, לא פונה ל-DB
-            for (Recipients r : newRows) {
-                r.setHashCode(r.generateRowHashCode());
+        // דה-דופ רק בתוך אותה בקשה (למשל קובץ אקסל עם שתי שורות זהות) - לא מול מה
+        // שכבר קיים ב-DB. אם כבר יש נמען עם אותה זהות (שם+טלפון+כתובת), השורה החדשה
+        // בכוונה מעדכנת אותו עם הנתונים הנוכחיים - לא מתעלמת מהם ומחזירה את הישן (כמו
+        // שקרה קודם, למשל אחרי מחיקה וייבוא מחדש של אותה זהות). "שייך ל" הוא יוצא
+        // דופן - הוא תמיד מצטבר מול מה שכבר היה (לא נדרס), כדי שאותו נמען שמיובא פעם
+        // עם שיוך אחד ופעם עם שיוך אחר (שני קבצים/ייבואים נפרדים) יצבור את שניהם ולא
+        // יאבד את הקודם
+        Set<String> seen = new HashSet<>();
+        for (Recipients r : newRows) {
+            if (!seen.add(r.getHashCode())) continue;
+            Recipients existing = managedByHash.get(r.getHashCode());
+            if (existing != null) {
+                r.setBelongsTo(mergeBelongsTo(existing.getBelongsTo(), r.getBelongsTo()));
             }
-
-            // צריך לדעת אילו מהשורות האלה כבר קיימות ב-DB (לפי אותו hash) - לא כדי
-            // להתעלם מהחדשות (כמו קודם), אלא כדי לאחד את "שייך ל" איתן לפני השמירה
-            List<String> hashCodes = newRows.stream().map(Recipients::getHashCode).distinct().toList();
-            Map<String, Recipients> existingByHash = recipientRepository.findAllById(hashCodes).stream()
-                    .collect(Collectors.toMap(Recipients::getHashCode, r -> r));
-
-            // דה-דופ רק בתוך אותה בקשה (למשל קובץ אקסל עם שתי שורות זהות) - לא מול מה
-            // שכבר קיים ב-DB. saveAll() עם hashCode (שהוא ה-@Id, מוגדר-מראש) מבצע
-            // עדכון-או-הוספה אוטומטית: אם כבר יש נמען עם אותה זהות (שם+טלפון+כתובת),
-            // השורה החדשה בכוונה מעדכנת אותו עם הנתונים הנוכחיים - לא מתעלמת מהם
-            // ומחזירה את הישן (כמו שקרה קודם, למשל אחרי מחיקה וייבוא מחדש של אותה זהות).
-            // "שייך ל" הוא יוצא דופן - הוא תמיד מצטבר מול מה שכבר היה (לא נדרס), כדי
-            // שאותו נמען שמיובא פעם עם שיוך אחד ופעם עם שיוך אחר (שני קבצים/ייבואים
-            // נפרדים) יצבור את שניהם ולא יאבד את הקודם
-            List<Recipients> toSave = new ArrayList<>();
-            Set<String> seen = new HashSet<>();
-            for (Recipients r : newRows) {
-                if (!seen.add(r.getHashCode())) continue;
-                Recipients existing = existingByHash.get(r.getHashCode());
-                if (existing != null) {
-                    r.setBelongsTo(mergeBelongsTo(existing.getBelongsTo(), r.getBelongsTo()));
-                }
-                toSave.add(r);
-            }
-            savedRecipients.addAll(recipientRepository.saveAll(toSave));
+            savedRecipients.add(upsertRecipient(r, managedByHash));
         }
+
+        // שולחים עכשיו את כל ה-INSERT/UPDATE של הנמענים (ב-batch-ים, ר'
+        // hibernate.jdbc.batch_size) - חייבים לפני הוספת הקישורים למטה, שמפנים אליהם
+        entityManager.flush();
 
         // שאילתה אחת שמביאה רק את ה-hash-ים הקיימים (לא את הישויות המלאות - זה היה
         // גורם ל-N+1 שאילתות, אחת לכל recipient בנפרד, כי ManyToOne ברירת מחדל הוא eager)
@@ -166,22 +174,24 @@ public class RecipientController {
                 userRecipientsRepository.findRecipientHashCodesByUser(user)
         );
 
-        List<UserRecipients> links = savedRecipients.stream()
-                .filter(recipient -> !alreadyLinkedHashes.contains(recipient.getHashCode()))
-                .map(recipient -> {
-
-                    UserRecipients link = new UserRecipients();
-
-                    link.setUser(user);
-                    link.setRecipient(recipient);
-
-                    return link;
-
-                })
+        List<String> hashCodesToLink = savedRecipients.stream()
+                .map(Recipients::getHashCode)
+                .filter(hash -> !alreadyLinkedHashes.contains(hash))
+                .distinct()
                 .toList();
 
-        if (!links.isEmpty()) {
-            userRecipientsRepository.saveAll(links);
+        // JDBC batch ולא saveAll() - ל-UserRecipients יש id מסוג IDENTITY, ו-Hibernate
+        // מבטל batching לגמרי לישויות כאלה (כל קישור היה INSERT ו-round-trip נפרד)
+        if (!hashCodesToLink.isEmpty()) {
+            jdbcTemplate.batchUpdate(
+                    "INSERT INTO user_recipients (user_id, recipient_id) VALUES (?, ?)",
+                    hashCodesToLink,
+                    hashCodesToLink.size(),
+                    (ps, hash) -> {
+                        ps.setString(1, user.getHashCode());
+                        ps.setString(2, hash);
+                    }
+            );
         }
 
         // save()/saveAll() על ישות עם @Id שכבר מוגדר (המצב תמיד כאן - ה-hash מחושב
@@ -199,6 +209,18 @@ public class RecipientController {
         // ל" אחרי איחוד) - כדי שהפרונט יוכל לעדכן את הטבלה מיד מהתשובה הזו, בלי לבקש
         // מחדש את כל הרשימה מהשרת בנפרד (בקשה שלישית שהאיטה את "שמור" בפועל)
         return ResponseEntity.ok(savedRecipients);
+    }
+
+    // נמען שלא קיים ב-DB נשמר עם persist() - בלי ה-SELECT המקדים ש-merge() עושה כדי
+    // לבדוק אם הוא קיים (את זה כבר יודעים מ-managedByHash). נמען קיים כבר טעון ב-
+    // persistence context, ולכן ה-merge עליו רק מעתיק את הערכים החדשים, בלי פנייה ל-DB
+    private Recipients upsertRecipient(Recipients r, Map<String, Recipients> managedByHash) {
+        if (!managedByHash.containsKey(r.getHashCode())) {
+            entityManager.persist(r);
+            managedByHash.put(r.getHashCode(), r);
+            return r;
+        }
+        return entityManager.merge(r);
     }
 
     // מאחדת ערכי "שייך ל" (מופרדים בפסיק) מהרשומה הקיימת ב-DB ומהשורה שנשלחה עכשיו,

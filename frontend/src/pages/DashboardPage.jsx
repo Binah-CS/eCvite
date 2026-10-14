@@ -9,6 +9,7 @@ import { VisibleRowsContext } from '../utils/visibleRowsContext';
 import PrintModal from '../components/PrintModal'; 
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
+import { buildSavedSnapshot, selectRowsToSave } from '../utils/changedRows';
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
@@ -123,6 +124,10 @@ export default function DashboardPage() {
 
  
 
+  // "תמונה" של מה ששמור כרגע ב-DB (hashCode -> חתימת השורה) - כדי לשלוח בשמירה רק
+  // שורות חדשות או שהשתנו מאז. ref ולא state - לא משפיע על התצוגה, רק על השמירה
+  const savedSnapshotRef = useRef(new Map());
+
   const loadRecords = useCallback(async () => {
     if (!user?.phone) {
       setRecords([]);
@@ -136,6 +141,7 @@ export default function DashboardPage() {
 
       //  שיפור: אם הבקאנד החזיר רשימה ריקה (כי ה-DB ריק/לא מחובר), נטען כגיבוי מהלוקאל
       if (response.data && response.data.length > 0) {
+        savedSnapshotRef.current = buildSavedSnapshot(response.data);
         setRecords(response.data);
       } else {
         const local = getLocalRecords(user.phone);
@@ -365,12 +371,23 @@ export default function DashboardPage() {
         new Set([...pendingDeleteHashCodes, ...filterRealHashCodes(extraDeleteHashCodes)])
       );
 
-      console.log("2. שולח לבקאנד:", updatedRows);
+      // שולחים רק שורות חדשות או כאלה שהתוכן שלהן שונה ממה ששמור ב-DB (ר'
+      // changedRows.js) - לא את כל הטבלה בכל שמירה. ההשוואה רצה בזיכרון (אלפיות
+      // שנייה גם ל-500 שורות), וחוסכת לשלוח, לבדוק ולהחזיר שורות שלא נגעו בהן
+      const rowsToSave = selectRowsToSave(updatedRows, savedSnapshotRef.current);
+
+      console.log("2. שולח לבקאנד:", rowsToSave);
+
+      if (rowsToSave.length === 0 && hashCodesToDelete.length === 0) {
+        setIsTableDirty(false);
+        setSaveSuccessOpen(true);
+        return;
+      }
 
       // hashCode כן נשלח (רק id המקומי-לתצוגה מוסר) - שורה עם hashCode היא נמען שכבר
       // קיים בשרת, ומזהה אותו במפורש בשביל עדכון; רק שורה חדשה לגמרי (בלי hashCode,
       // כמו מ"הוסף שורה") תיבדק ותקבל hash חדש בצד השרת
-      const cleanRows = updatedRows.map(
+      const cleanRows = rowsToSave.map(
           ({ id, ...rest }) => rest
       );
 
@@ -407,7 +424,9 @@ export default function DashboardPage() {
       // (שורה חדשה) נופלים לזהות. זהות לבדה לא מספיקה כשיש 2 שורות עם אותם פרטי
       // זהות בדיוק (כמו ב"השאר את שתיהן" עם duplicateSalt) - שתיהן היו מתמזגות
       // לאותה תוצאה אחת ומקבלות בטעות את אותו מזהה. מוסיפים גם את duplicateSalt
-      // לזהות (השרת מחזיר אותו כמו שהוא, ר' Recipients.java) כדי להבדיל ביניהן
+      // לזהות (השרת מחזיר אותו כמו שהוא, ר' Recipients.java) כדי להבדיל ביניהן.
+      // שורה שכבר יש לה hashCode מותאמת רק לפיו - היא לא בהכרח נשלחה (לא השתנתה),
+      // ואסור שתיפול להתאמה לפי זהות ותקבל בטעות נתונים ומזהה של שורה אחרת שנשמרה
       const savedRows = Array.isArray(response.data) ? response.data : [];
       const savedByHashCode = new Map();
       const savedByIdentity = new Map();
@@ -416,11 +435,13 @@ export default function DashboardPage() {
         savedByIdentity.set(`${buildIdentityKey(row)}|${row.duplicateSalt ?? ''}`, row);
       });
       const finalRecords = updatedRows.map((row) => {
-        const saved = (row.hashCode && savedByHashCode.get(row.hashCode))
-          ?? savedByIdentity.get(`${buildIdentityKey(row)}|${row.duplicateSalt ?? ''}`);
+        const saved = row.hashCode
+          ? savedByHashCode.get(row.hashCode)
+          : savedByIdentity.get(`${buildIdentityKey(row)}|${row.duplicateSalt ?? ''}`);
         return saved ? { ...saved, id: saved.hashCode } : row;
       });
 
+      savedSnapshotRef.current = buildSavedSnapshot(finalRecords);
       setRecords(finalRecords);
       saveLocalRecords(user.phone, finalRecords);
       setIsTableDirty(false);
