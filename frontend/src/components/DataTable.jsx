@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,} from '@mui/material';
+import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,Checkbox,} from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -14,6 +14,7 @@ import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
 import api from '../services/api';
 import { buildIdentityKey } from '../utils/recipientIdentity';
+import { PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 
 // מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
 const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
@@ -37,6 +38,15 @@ const SYSTEM_FIELDS_HIDDEN_BY_DEFAULT = {
 
 // עמודות כתובת - מהן אפשר להעביר ערך שלא מתאים לעמודת "הערת כתובת" (קליק ימני על התא)
 const ADDRESS_FIELDS = ['country', 'city', 'neighborhood', 'street', 'houseNo'];
+
+function parsePrintFields(raw) {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 // שוליים קבועים בקצה הטבלה, משוריינים לאייקוני המחיקה/הסטוריה/הוספה הצפים (ר'
 // hoveredRow למטה) - ה-DataGrid מקבל קופסה צרה יותר בדיוק ברוחב הזה (paddingInlineEnd),
@@ -777,6 +787,25 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     onAutoSave(updatedRows);
   }, [onAutoSave]);
 
+  const toggleCellPrint = useCallback((id, field, print) => {
+    const updatedRows = rowsRef.current.map((row) => {
+      if (String(row.id) !== String(id)) return row;
+      return {
+        ...row,
+        printFields: JSON.stringify({ ...parsePrintFields(row.printFields), [field]: print }),
+      };
+    });
+    rowsRef.current = updatedRows;
+    setRows(updatedRows);
+    onAutoSave(updatedRows);
+  }, [onAutoSave]);
+
+  const isCellPrintEnabled = useCallback((row, field) => {
+    const cellPreference = parsePrintFields(row.printFields)[field];
+    if (cellPreference !== undefined) return cellPreference;
+    return columnPreferences?.[field]?.print ?? PRINT_DEFAULT_FIELDS.has(field);
+  }, [columnPreferences]);
+
   const handleMoveToAddressNote = () => {
     if (!contextMenu) return;
     moveValueToAddressNote(contextMenu.id, contextMenu.field);
@@ -835,7 +864,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   // אייקון קטן שמופיע כשעוברים עם העכבר על תא בעמודת כתובת - לחיצה עליו מעבירה
   // את הערך ישירות ל"הערת כתובת", כדי שהאפשרות תהיה גלויה ולא רק דרך קליק ימני
   const renderAddressCell = useCallback((params) => {
-    const { id, field, value } = params;
+    const { id, field, value, row } = params;
     return (
       <Box
         sx={{
@@ -859,9 +888,17 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
             background: 'transparent',
           }}
         />
+        <Checkbox
+          checked={isCellPrintEnabled(row, field)}
+          size="small"
+          inputProps={{ 'aria-label': `הדפס את ${field} עבור רשומה זו` }}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => toggleCellPrint(id, field, event.target.checked)}
+          sx={{ p: 0.25, flexShrink: 0 }}
+        />
       </Box>
     );
-  }, [createCellInputHandlers]);
+  }, [createCellInputHandlers, isCellPrintEnabled, toggleCellPrint]);
 
   // תא טקסט חי - קלט חופשי לגמרי תמיד, ואם יש pickListField (עמודות קידומת/סיום/
   // שייך ל) גם חץ קטן לצידו שפותח Menu לבחירה מהערכים הקיימים באותה עמודה. שתי
@@ -871,7 +908,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   // אחרי כל אות (בדיוק הבאג שנתקלנו בו)
   const renderTextCell = useCallback((pickListField) => {
     const TextCell = (params) => {
-      const { id, field, value } = params;
+      const { id, field, value, row } = params;
       const [menuOpen, setMenuOpen] = useState(false);
       const [menuOptions, setMenuOptions] = useState([]);
       const [expanded, setExpanded] = useState(false); // "שייך ל" עם כמה ערכים - הוצג במלואו ביוזמת המשתמשת
@@ -947,6 +984,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
               // פנוי מהטקסט כדי שלא תכסה חלק מהתוכן
               paddingInlineEnd: showExpandedPeek ? 40 : 0,
             }}
+          />
+          <Checkbox
+            checked={isCellPrintEnabled(row, field)}
+            size="small"
+            inputProps={{ 'aria-label': `הדפס את ${field} עבור רשומה זו` }}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => toggleCellPrint(id, field, event.target.checked)}
+            sx={{ p: 0.25, flexShrink: 0 }}
           />
           {showCollapsed && (
             <Box
@@ -1057,7 +1102,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     // אמיתי עם fiber משלו - הכרחי כי יש כאן hooks (useState/useRef) בפנים. בלעדי זה
     // ריאקט "מבלבל" בין hooks של תאים שונים (בדיוק השגיאה "Rendered more hooks...")
     return (params) => <TextCell {...params} />;
-  }, [updateCellValue, createCellInputHandlers]);
+  }, [updateCellValue, createCellInputHandlers, isCellPrintEnabled, toggleCellPrint]);
 
     const handleInputChange = (e) => {
     setInputValue(e.target.value);
@@ -1785,6 +1830,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
       </Box>
 
    <Box ref={gridContainerRef} sx={{ pl: 1.5, pr: 0, pb: 1, pt: 0.75, maxWidth: '100%', position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+
    {/* קופסה צרה יותר מהקונטיינר ב-ROW_ICON_GUTTER_PX קבועים, בדיוק ברוחב אייקוני
        המחיקה/הסטוריה הצפים למטה - ה-DataGrid מקבל את השטח שנשאר ופיזית לא יכול
        לרנדר אף עמודה, לא משנה כמה תורחב, אל תוך השוליים השמורים האלה */}
