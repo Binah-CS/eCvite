@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>דוח בדיקת באגים בעריכת נמענים</title>
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: Arial, sans-serif; direction: rtl; color: #172033; font-size: 11pt; line-height: 1.55; }
+  h1 { color: #12355b; font-size: 24pt; border-bottom: 2px solid #2d6a9f; padding-bottom: 8px; }
+  h2 { color: #12355b; font-size: 16pt; margin-top: 26px; }
+  h3 { color: #1f4e79; font-size: 13pt; margin-top: 20px; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; }
+  th { background: #dbeaf7; } td, th { border: 1px solid #aebdca; padding: 7px; vertical-align: top; text-align: right; }
+  code, pre { direction: ltr; text-align: left; font-family: Consolas, monospace; background: #f4f6f8; }
+  code { padding: 1px 3px; } pre { padding: 10px; white-space: pre-wrap; }
+  .critical { color: #a61b1b; font-weight: bold; } .high { color: #bf5b00; font-weight: bold; } .medium { color: #806000; font-weight: bold; }
+  .meta { background: #f4f8fb; padding: 12px; border-right: 4px solid #2d6a9f; }
+  .pagebreak { page-break-before: always; }
+</style>
+</head>
+<body>
+<h1>דוח בדיקת באגים בזרימת עריכת נמענים</h1>
+<div class="meta">
+<b>פרויקט:</b> eCvite<br>
+<b>ענף שנבדק:</b> <code>feature/database-health-check</code><br>
+<b>Commit שנבדק:</b> <code>d683cfdb72d06c27448caff29f6603af8748c3f1</code> — “Keep database warm during active dashboard use”<br>
+<b>תאריך הבדיקה:</b> 13.10.2026<br>
+<b>היקף:</b> יצירה, עריכה, מחיקה, שמירה, טעינה מחדש, ניווט והרשאות של רשומות נמענים.
+</div>
+
+<h2>תקציר מנהלים</h2>
+<p>נמצאו שישה באגים פעילים בזרימת העריכה. שניים מהם קריטיים: ה־API אינו מאמת זהות משתמשת, וכל מי שמכיר מספר טלפון ו־<code>hashCode</code> יכול לקרוא או לשנות נתונים; וכן משתמשת יכולה לדרוס נמען של משתמשת אחרת. שלושה באגים נוספים עלולים לגרום לאובדן עריכה או מחיקה שטרם נשמרו. הממצא השישי הוא ממשק API מת שנותן 404 אם ייעשה בו שימוש.</p>
+<table>
+<tr><th>חומרה</th><th>כמות</th><th>משמעות</th></tr>
+<tr><td class="critical">קריטית</td><td>2</td><td>חשיפת מידע או שינוי מידע של משתמשות אחרות.</td></tr>
+<tr><td class="high">גבוהה</td><td>3</td><td>אובדן עריכות או מחיקות שהמשתמשת ציפתה שישמרו.</td></tr>
+<tr><td class="medium">בינונית</td><td>1</td><td>נקודת כשל בנתיב API שאינו מחובר למסך הפעיל.</td></tr>
+</table>
+
+<h2>זרימת הנתונים הקיימת</h2>
+<pre>הקלדה בתא / פעולה בטבלה
+        ↓
+DataTable.rows (state פנימי)
+        ↓ onAutoSave, רק בפעולות שקוראות לו
+Dashboard.records + localStorage[records-{phone}] + isTableDirty=true
+        ↓ לחיצה על “שמור את כל המוזמנים”
+POST /api/recipients/save { phone, recipients, hashCodesToDelete }
+        ↓
+RecipientController → recipients + user_recipients
+        ↓
+תגובה → Dashboard.setRecords(finalRecords) + localStorage</pre>
+<p>בכניסה מחדש לדשבורד, <code>loadRecords</code> מבצע <code>GET /api/recipients?phone=…</code>. אם השרת מחזיר לפחות שורה אחת, גרסת השרת מחליפה את המצב המקומי; הגיבוי המקומי נקרא רק כאשר התשובה ריקה או שהבקשה נכשלת.</p>
+
+<h2>ממצאים מפורטים</h2>
+<h3>1. אין אימות זהות ב־API <span class="critical">קריטית</span></h3>
+<p><b>הבעיה:</b> אין Session בצד השרת, JWT או מנגנון הרשאה אחר. הלקוח שומר את אובייקט המשתמש ב־<code>sessionStorage</code> ושולח מספר טלפון כפרמטר או בגוף הבקשה. השרת משתמש במספר זה כדי לבחור משתמשת.</p>
+<pre>GET /api/recipients?phone=050… → findByPhone(phone) → מחזיר נמענים
+POST /api/recipients/save { phone: "050…", ... } → findByPhone(phone) → שומר</pre>
+<p><b>השפעה:</b> לקוחה יכולה לשנות את ה־phone בבקשת דפדפן ולקרוא, למחוק קישור או לשמור רשומות בשם משתמשת אחרת. מספר טלפון אינו אישור זהות.</p>
+<p><b>ראיות:</b> <code>AuthController.java:22–35</code> מחזיר אובייקט משתמש בלבד; <code>RecipientController.java:73, 215–224, 337–341</code> מקבל ומאמין ל־phone מהבקשה; אין שכבת Spring Security בפרויקט.</p>
+<p><b>תיקון:</b> להוסיף אימות שרת־צד; להפיק token בהתחברות; להסיק את המשתמשת מתוך ה־token בכל endpoint; לא לקבל <code>phone</code> כאמצעי הרשאה.</p>
+
+<h3>2. עדכון עם hashCode של משתמשת אחרת דורס את הנמען שלה <span class="critical">קריטית</span></h3>
+<p><b>הבעיה:</b> בכל שורה שיש בה <code>hashCode</code>, השרת מכניס אותה ל־<code>existingRows</code> וקורא ל־<code>recipientRepository.saveAll</code>, בלי לבדוק שיש קישור בין הנמען למשתמשת המבצעת.</p>
+<pre>משתמשת ב' שולחת hashCode של נמען של א'
+  → existingRows
+  → saveAll(existingRows)
+  → UPDATE recipients
+  → תוכן הנמען של א' מוחלף</pre>
+<p><b>הוכחה:</b> קיימת בדיקת אינטגרציה בשם <code>save_existingHashCode_updatesRegardlessOfWhichUserSentIt</code> ב־<code>RecipientControllerTest.java:228–253</code>. ההערה בבדיקה עצמה מגדירה זאת “פער אבטחה ידוע”, והבדיקה מאשרת שהדריסה מצליחה.</p>
+<p><b>תיקון:</b> לפני עדכון כל <code>hashCode</code>, לוודא שקיים <code>user_recipients</code> עבור המשתמשת המאומתת והנמען. בהיעדר קישור להחזיר 403 ולא לבצע <code>saveAll</code>.</p>
+
+<h3>3. עריכה מקומית נעלמת ברענון או במעבר למסך אחר <span class="high">גבוהה</span></h3>
+<p><b>הבעיה:</b> הקלדה נשמרת מקומית, אך אין סימון מתמשך שמבדיל בין צילום מצב שנשמר בשרת לבין טיוטה מקומית. לאחר unmount של הדשבורד, <code>loadRecords</code> מעדיף את השרת בכל מצב שבו הוא מחזיר רשימה לא ריקה.</p>
+<pre>הקלדה → localStorage מכיל גרסה חדשה
+ניווט להגדרות / תצוגה מקדימה / רענון
+→ Dashboard נטען מחדש → GET לשרת
+→ השרת מחזיר גרסה ישנה אך לא ריקה
+→ setRecords(response.data)
+→ הטיוטה המקומית אינה מוצגת</pre>
+<p><b>מסלולי הניווט:</b> <code>DashboardPage</code> מנווט ל־<code>/settings</code>; <code>PrintModal</code> מנווט ל־<code>/print-preview</code>. שניהם מחליפים route ולכן הדשבורד נבנה מחדש.</p>
+<p><b>ראיות:</b> <code>DashboardPage.jsx:65–91</code> ו־<code>:170–175</code>; ה־fallback ל־localStorage קורה רק בתשובה ריקה או catch.</p>
+<p><b>תיקון:</b> לשמור מעטפת טיוטה עם <code>dirty</code>, זמן שינוי וגרסת שרת אחרונה. בטעינה: אם יש טיוטה dirty, להציע שחזור או להעדיף אותה באופן מפורש. להוסיף guard לניווט פנימי וליציאה.</p>
+
+<h3>4. שורה חדשה ללא הקלדה אינה נשמרת בגיבוי המקומי <span class="high">גבוהה</span></h3>
+<p><b>הבעיה:</b> כפתור “הוסף שורה” וכן פעולת הוספה לפני/אחרי שורה משנים רק את <code>rows</code> בתוך <code>DataTable</code>. הם אינם קוראים ל־<code>onAutoSave</code>.</p>
+<pre>הוסף שורה → setRows בלבד
+אין כתיבה ל-localStorage
+אין isTableDirty=true
+רענון / ניווט → השורה נעלמת</pre>
+<p><b>ראיות:</b> <code>DataTable.jsx:557–566</code> ו־<code>:571–580</code>. לעומת מחיקה ועריכת תא, שקוראות ל־<code>onAutoSave</code>.</p>
+<p><b>תיקון:</b> לחשב את המערך החדש בתוך callback, לעדכן אותו ב־<code>setRows</code> ולקרוא באותה פעולה ל־<code>onAutoSave(nextRows)</code>. יש לכסות גם “הוסף לפני” ו“הוסף אחרי”.</p>
+
+<h3>5. מחיקה שממתינה לשמירה אובדת ברענון או בניווט <span class="high">גבוהה</span></h3>
+<p><b>הבעיה:</b> השורה אכן מוסרת מהטבלה ומה־localStorage, אבל רשימת ה־<code>hashCode</code> שיש למחוק בשרת נשמרת רק ב־React state בשם <code>pendingDeleteHashCodes</code>. היא אינה נכתבת לאחסון מתמשך.</p>
+<pre>מחק שורה שמורה → הטבלה המקומית אינה מציגה אותה
+pendingDeleteHashCodes=[hash] בזיכרון בלבד
+רענון / מעבר למסך → state מתאפס
+GET מהשרת מחזיר שוב את השורה
+→ המחיקה לא נשלחת לעולם</pre>
+<p><b>ראיות:</b> <code>DashboardPage.jsx:181–190</code> מגדיר <code>useState([])</code>; אין קריאה ל־localStorage עבור רשימת המחיקות. <code>handleSave</code> שולח את הרשימה רק אם הדשבורד עדיין חי.</p>
+<p><b>תיקון:</b> לשמור את תור המחיקות ב־localStorage לפי משתמשת, לטעון אותו בתחילת הדשבורד, ולהסיר ממנו רק אחרי תשובת שמירה מוצלחת.</p>
+
+<h3>6. עריכה בזמן שבקשת שמירה פתוחה יכולה להידרס <span class="high">גבוהה</span></h3>
+<p><b>הבעיה:</b> <code>handleSave</code> שולח צילום מצב של <code>updatedRows</code>. בזמן שהבקשה מחכה לתשובה המשתמשת עדיין יכולה להקליד. כשהתגובה חוזרת, הקוד קורא ל־<code>setRecords(finalRecords)</code> מתוך הצילום הישן ומסמן <code>isTableDirty=false</code>.</p>
+<pre>לחיצה על שמור: snapshot A נשלח
+המשתמשת משנה תא: state/localStorage = B
+תגובה ל-A מגיעה: setRecords(finalRecords של A)
+→ B נדרס; הדגל מציג שהטבלה נקייה</pre>
+<p><b>ראיות:</b> <code>DashboardPage.jsx:195–272</code>. אין נעילת עריכה, מספר גרסה או בדיקה שה־state השתנה במהלך הבקשה.</p>
+<p><b>תיקון:</b> לנעול את פעולת העריכה בזמן save, או לנהל revision מקומי: לנקות dirty ולהחליף state רק אם revision התגובה זהה ל־revision שנשלח. אחרת לשמור את השינוי החדש כטיוטה ולהציג “יש שינויים שטרם נשמרו”.</p>
+
+<h3>7. נתיב upload-excel מוגדר בלקוח אך אינו קיים בשרת <span class="medium">בינונית</span></h3>
+<p><b>הבעיה:</b> הלקוח מגדיר <code>POST /recipients/upload-excel</code>, אך ב־<code>RecipientController</code> אין endpoint כזה. ה־imports של <code>MultipartFile</code> ו־<code>ExcelService</code> קיימים אך אין שימוש.</p>
+<p><b>השפעה:</b> כל קוד שיקרא ל־<code>api.uploadExcel</code> יקבל 404. הייבוא הפעיל כיום מעבד Excel בדפדפן, לכן אין פגיעה במסלול הפעיל כרגע.</p>
+<p><b>תיקון:</b> להסיר את לקוח ה־API המת, או לממש endpoint תואם עם אימות והרשאה.</p>
+
+<h2>ממצאים שנבדקו ואינם באג פעיל בענף זה</h2>
+<ul>
+<li><b>אטומיות שמירה ומחיקה:</b> <code>saveRecipients</code> מסומן <code>@Transactional</code>, לכן הממצא הישן של עדכון חלקי בעקבות כשל באמצע אינו תקף בענף זה.</li>
+<li><b>מחיקה בלבד:</b> <code>recipients</code> יכול להיות null ללא NullPointerException; קיימת בדיקה המכסה את התרחיש.</li>
+<li><b>hash חדש לשתי כפילויות שהוחלט להשאיר:</b> קיימת בדיקה ל־<code>duplicateSalt</code>, והיא מכסה החזרת מזהים שונים.</li>
+</ul>
+
+<h2>סדר תיקון מומלץ</h2>
+<ol>
+<li>להוסיף אימות והרשאות שרת־צד ולחסום עדכון/קריאה לפי phone מהלקוח.</li>
+<li>לבדוק בעלות על כל recipient לפני עדכון, מחיקה או קריאת היסטוריה.</li>
+<li>להפוך טיוטה מקומית ומחיקות ממתינות למצב מתמשך עם חיווי ברור למשתמשת.</li>
+<li>לפתור מרוץ בין עריכה לשמירה באמצעות revision או נעילת טבלה זמנית.</li>
+<li>לחבר כל פעולת הוספת שורה ל־<code>onAutoSave</code>.</li>
+<li>להסיר או לממש את נתיב <code>upload-excel</code>.</li>
+</ol>
+
+<h2>אימות הבדיקה ומגבלות</h2>
+<p>בוצעה סקירת קוד סטטית של מסלולי ה־frontend וה־backend, כולל בדיקות האינטגרציה הקיימות. בדיקת ה־backend לא הורצה במכונה זו: הפקודה <code>mvn test</code> נכשלה לפני התחלה כי Maven ו־Java אינם זמינים ב־PATH. בניית ה־frontend הופעלה באמצעות <code>npm.cmd run build</code>; בזמן יצירת הדוח תהליך הבנייה עדיין רץ ולא החזיר תוצאת הצלחה או כשל, ולכן אין לייחס לדוח תוצאת build.</p>
+<p>הדוח בודק את ה־commit והענף המצוינים בראשו בלבד. לא בוצעו שינויים בקוד המוצר.</p>
+</body></html>
