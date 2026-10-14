@@ -1,6 +1,6 @@
 // src/components/PrintModal.jsx
 import { useState } from 'react';
-import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider } from '@mui/material';
+import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
 import { MODAL_TEXTS, FONT_OPTIONS } from '../pages/HardCodePage';
@@ -151,6 +151,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   });
 
   const [printType, setPrintType] = useState('labels');
+  const [notification, setNotification] = useState('');
 
   // פונקציה שמטפלת במעבר משלב 1 לשלב 2
   const handleNextStep = () => {
@@ -158,7 +159,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
       setStep(2);
     } else {
       // 🌟 שימוש בפונקציית הטקסט הדינמית מהקבועים
-      alert(MODAL_TEXTS.NOT_AVAILABLE_ALERT(printType));
+      setNotification(MODAL_TEXTS.NOT_AVAILABLE_ALERT(printType));
     }
   };
 
@@ -184,6 +185,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   };
 
   return (
+    <>
     <Modal open={open} onClose={onClose}>
       <Box sx={{ ...modalStyle, width: step === 2 ? 740 : 400 }}>
         
@@ -290,5 +292,16 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
 
       </Box>
     </Modal>
+    <Snackbar
+      open={Boolean(notification)}
+      autoHideDuration={6000}
+      onClose={() => setNotification('')}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+    >
+      <Alert severity="info" variant="filled" onClose={() => setNotification('')}>
+        {notification}
+      </Alert>
+    </Snackbar>
+    </>
   );
 }
