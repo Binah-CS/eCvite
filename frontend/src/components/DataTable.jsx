@@ -523,7 +523,23 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
 
   const handleDownloadCsv = () => {
     setExportMenuAnchor(null);
-    apiRef.current.exportDataAsCsv({ utf8WithBom: true });
+
+    const visibleColumns = columns.filter((column) => columnVisibilityModel[column.field] !== false);
+    const csvRows = [
+      visibleColumns.map((column) => (column.headerName || column.field).replace(/\s*\*+\s*$/, '')),
+      ...filteredRows.map((row) => visibleColumns.map((column) => row[column.field] ?? '')),
+    ];
+    const csv = csvRows
+      .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))
+      .join('\r\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = 'רשימת מוזמנים.csv';
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   // שורה חדשה וריקה, עם id מקומי-לתצוגה בלבד (לא hashCode אמיתי - ר' handleSave)
