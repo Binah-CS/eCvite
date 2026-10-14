@@ -88,7 +88,13 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
   // "עמודות להדפסה" מ"ניהול עמודות" - אותה העדפה שנשמרה למשתמשת, נופלת חזרה
   // לברירת המחדל (השדות שהודפסו תמיד עד היום) אם עדיין לא נשמרה העדפה אישית
   const columnPreferences = parseColumnPreferences(getLoggedUser()?.columnPreferences);
-  const getPrintFlag = (technicalName) => {
+  const getPrintFlag = (row, technicalName) => {
+    try {
+      const cellPreference = JSON.parse(row.printFields || '{}')[technicalName];
+      if (cellPreference !== undefined) return cellPreference;
+    } catch {
+      // Old recipients and malformed values use the user's field preference.
+    }
     const saved = columnPreferences[technicalName]?.print;
     return saved !== undefined ? saved : PRINT_DEFAULT_FIELDS.has(technicalName);
   };
@@ -197,32 +203,32 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                 }}
               >
                 {/* שורת השם המכובדת - רק אם יש בה בכלל תוכן לפי מה שסומן להדפסה */}
-                {buildNameLine(row, getPrintFlag) && (
+                {buildNameLine(row, (field) => getPrintFlag(row, field)) && (
                   <Typography
                     variant={layout.nameVariant}
                     sx={{ fontWeight: 'bold', mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
                   >
-                    {buildNameLine(row, getPrintFlag)}
+                    {buildNameLine(row, (field) => getPrintFlag(row, field))}
                   </Typography>
                 )}
 
                 {/* שורת הרחוב */}
-                {buildAddressLine1(row, getPrintFlag) && (
+                {buildAddressLine1(row, (field) => getPrintFlag(row, field)) && (
                   <Typography
                     variant={layout.addrVariant}
                     sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
                   >
-                    {buildAddressLine1(row, getPrintFlag)}
+                    {buildAddressLine1(row, (field) => getPrintFlag(row, field))}
                   </Typography>
                 )}
 
-                {/* שורת העיר - מתחת לרחוב */}
+                {/* שורת עיר וארץ - מתחת לרחוב */}
                 {buildAddressLine2(row, getPrintFlag) && (
                   <Typography
                     variant={layout.addrVariant}
                     sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2 }}
                   >
-                    {buildAddressLine2(row, getPrintFlag)}
+                    {buildAddressLine2(row, (field) => getPrintFlag(row, field))}
                   </Typography>
                 )}
 
@@ -238,7 +244,7 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
 
                 {/* שדות נוספים - כל אחד בשורה משלו, רק אם סומן להדפסה ויש לו ערך */}
                 {EXTRA_PRINT_FIELDS.map(({ field, label }) =>
-                  getPrintFlag(field) && row[field] ? (
+                  getPrintFlag(row, field) && row[field] ? (
                     <Typography
                       key={field}
                       variant={layout.addrVariant}
