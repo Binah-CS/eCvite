@@ -61,9 +61,6 @@ public class Recipients {
     private boolean print; // flag
     private String display;
 
-    @Column(name = "print_fields")
-    private String printFields;
-
     @Column(name = "address_note")
     private String addressNote;
 

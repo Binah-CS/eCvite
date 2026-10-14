@@ -11,6 +11,18 @@ import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPr
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
+const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
+const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+
+function getSavedSelectedIds() {
+  try {
+    const saved = sessionStorage.getItem(SELECTED_ROW_IDS_STORAGE_KEY);
+    const ids = saved ? JSON.parse(saved) : [];
+    return Array.isArray(ids) ? ids : [];
+  } catch {
+    return [];
+  }
+}
 
 
 function getLoggedUser() {
@@ -52,13 +64,24 @@ export default function DashboardPage() {
   const [saveSuccessOpen, setSaveSuccessOpen] = useState(false); // הודעת "השמירה נעשתה בהצלחה" שיורדת מלמעלה
   const lastDashboardActivityAt = useRef(Date.now());
   const lastDatabaseKeepAliveAt = useRef(Date.now());
+  const pendingRecipientSavesRef = useRef(new Map());
+  const recipientSaveQueueRef = useRef(Promise.resolve());
 
   // זהות השורות שהיו מסומנות לפני שיצאנו לתצוגה המקדימה - נקרא פעם אחת, בטרם עולה הטבלה
   const [initialSelectedIds] = useState(() => {
     if (typeof window === 'undefined') return [];
-    const saved = sessionStorage.getItem('savedSelectedIds');
-    return saved ? JSON.parse(saved) : [];
+    return getSavedSelectedIds();
   });
+
+  const handleSelectionChange = useCallback((rows) => {
+    const selected = Array.isArray(rows) ? rows : [];
+    setSelectedRows(selected);
+    sessionStorage.setItem(
+      SELECTED_ROW_IDS_STORAGE_KEY,
+      JSON.stringify(selected.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
+    );
+    sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(selected));
+  }, []);
 
  
 
@@ -101,7 +124,6 @@ export default function DashboardPage() {
     if (cameFromPreview === 'true') {
       setIsPrintModalOpen(true);
       sessionStorage.removeItem('fromPreview'); // מנקים מיד כדי שלא יציק ברענונים הבאים
-      sessionStorage.removeItem('savedSelectedIds');
     }
   }, []);
   //  מקפיץ אזהרה ברענן/סגירה רק אם הסטייט השתנה (כלומר יש שינויים שלא נשמרו)
@@ -173,6 +195,46 @@ export default function DashboardPage() {
     setRecords(updatedRows);
     setIsTableDirty(true); //  בום! ברגע שיש שינוי בטבלה, האבא ננעל רשמית!
   }, [user?.phone]);
+
+  // שומרת שינויי תא לשרת אחרי שההקלדה נעצרת לרגע. לכל שורה יש השהיה נפרדת,
+  // והבקשות נשלחות בתור כדי שערך ישן לא ידרוס ערך חדש אם הרשת איטית.
+  const persistRecipientChange = useCallback((row) => {
+    if (!user?.phone || !row) return;
+
+    const key = String(row.hashCode ?? row.id);
+    const previous = pendingRecipientSavesRef.current.get(key);
+    if (previous) window.clearTimeout(previous.timer);
+
+    let queued = false;
+    const queueSave = () => {
+      if (queued) return;
+      queued = true;
+      pendingRecipientSavesRef.current.delete(key);
+      const { id, ...recipient } = row;
+      recipientSaveQueueRef.current = recipientSaveQueueRef.current
+        .catch(() => {})
+        .then(() => api.saveRecords(user.phone, [recipient], []))
+        .catch((err) => {
+          console.error('לא ניתן לשמור את השינוי בשרת:', err);
+        });
+    };
+
+    const timer = window.setTimeout(queueSave, 350);
+    pendingRecipientSavesRef.current.set(key, { timer, queueSave });
+  }, [user?.phone]);
+
+  const flushPendingRecipientSaves = useCallback(() => {
+    for (const { timer, queueSave } of pendingRecipientSavesRef.current.values()) {
+      window.clearTimeout(timer);
+      queueSave();
+    }
+    return recipientSaveQueueRef.current;
+  }, []);
+
+  const handleOpenPrint = useCallback(async () => {
+    await flushPendingRecipientSaves();
+    setIsPrintModalOpen(true);
+  }, [flushPendingRecipientSaves]);
 
   // מחיקה לא נשלחת לשרת מיד - רק נשמרת בתור "ממתינה" ונשלחת בפועל רק כשלוחצים "שמור
   // את כל המוזמנים" (handleSave), יחד עם שאר השינויים. המזהה האמיתי של שורה שמורה
@@ -383,8 +445,9 @@ export default function DashboardPage() {
 
         <Box sx={{ bgcolor: '#f8fafc', borderRadius: 3, p: 0.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
           <MenuItem
-            onClick={() => {
+            onClick={async () => {
               setProfileMenuAnchor(null);
+              await flushPendingRecipientSaves();
               navigate('/settings');
             }}
             sx={{ borderRadius: 2.5, py: 1.25, px: 2, gap: 1.5, '&:hover': { bgcolor: '#eef2f7' } }}
@@ -429,11 +492,12 @@ export default function DashboardPage() {
               loading={loading}
               onSave={handleSave}
               onAutoSave={handleAutoSaveLocal}
-              onSelectionChange={setSelectedRows}
+              onPersistRow={persistRecipientChange}
+              onSelectionChange={handleSelectionChange}
               onDeleteRows={handleDeleteRows}
               initialSelectedIds={initialSelectedIds}
               onImport={handleImport}
-              onOpenPrint={() => setIsPrintModalOpen(true)}
+              onOpenPrint={handleOpenPrint}
               columnPreferences={parseColumnPreferences(user?.columnPreferences)}
               profileMenu={profileMenu}
               onColumnOrderChange={handleColumnOrderChange}
@@ -446,7 +510,6 @@ export default function DashboardPage() {
             open={isPrintModalOpen}
             onClose={() => setIsPrintModalOpen(false)}
             selectedRows={selectedRows}
-            records={records}
         />
 
         <Snackbar
