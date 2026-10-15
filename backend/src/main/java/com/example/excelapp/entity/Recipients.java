@@ -58,7 +58,9 @@ public class Recipients {
     @Column(name = "created_by")
     private String createdBy;
 
-    private boolean print; // flag
+    @Transient
+    private Boolean printEnabled;
+
     private String display;
 
     @Column(name = "address_note")

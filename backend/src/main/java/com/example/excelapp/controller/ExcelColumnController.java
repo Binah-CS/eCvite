@@ -25,7 +25,9 @@ public class ExcelColumnController {
     @GetMapping
     public ResponseEntity<List<ExcelColumn>> getColumns() {
         return ResponseEntity.ok(
-                excelColumnRepository.findAllByOrderByDefaultOrderAsc()
+                excelColumnRepository.findAllByOrderByDefaultOrderAsc().stream()
+                        .filter(column -> !"print".equals(column.getTechnicalName()))
+                        .toList()
         );
     }
 

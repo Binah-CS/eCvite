@@ -66,6 +66,7 @@ export default function DashboardPage() {
   const lastDatabaseKeepAliveAt = useRef(Date.now());
   const pendingRecipientSavesRef = useRef(new Map());
   const recipientSaveQueueRef = useRef(Promise.resolve());
+  const printPreferenceSaveQueueRef = useRef(Promise.resolve());
 
   // זהות השורות שהיו מסומנות לפני שיצאנו לתצוגה המקדימה - נקרא פעם אחת, בטרם עולה הטבלה
   const [initialSelectedIds] = useState(() => {
@@ -82,6 +83,40 @@ export default function DashboardPage() {
     );
     sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(selected));
   }, []);
+
+  const handlePrintPreferenceChange = useCallback(async (recipientHashCodes, printEnabled) => {
+    if (!user?.phone) return;
+    const hashes = Array.isArray(recipientHashCodes) ? recipientHashCodes : [recipientHashCodes];
+    const hashSet = new Set(hashes.map(String));
+
+    try {
+      printPreferenceSaveQueueRef.current = printPreferenceSaveQueueRef.current
+        .catch(() => {})
+        .then(() => api.updatePrintPreferences(user.phone, hashes, printEnabled));
+      await printPreferenceSaveQueueRef.current;
+    } catch (err) {
+      setError('לא ניתן לשמור את העדפת ההדפסה. נסי שוב.');
+      throw err;
+    }
+    setRecords((previousRecords) => {
+      const updatedRecords = previousRecords.map((row) =>
+        hashSet.has(String(row.hashCode)) ? { ...row, printEnabled } : row
+      );
+      saveLocalRecords(user.phone, updatedRecords);
+      return updatedRecords;
+    });
+    setSelectedRows((previousRows) => {
+      const updatedSelection = previousRows.map((row) =>
+        hashSet.has(String(row.hashCode ?? row.id)) ? { ...row, printEnabled } : row
+      );
+      sessionStorage.setItem(
+        SELECTED_ROW_IDS_STORAGE_KEY,
+        JSON.stringify(updatedSelection.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
+      );
+      sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(updatedSelection));
+      return updatedSelection;
+    });
+  }, [user?.phone]);
 
  
 
@@ -233,8 +268,43 @@ export default function DashboardPage() {
 
   const handleOpenPrint = useCallback(async () => {
     await flushPendingRecipientSaves();
+    await printPreferenceSaveQueueRef.current.catch(() => {});
+
+    if (!user?.phone) return;
+
+    // ההדפסה נשענת על ההעדפות השמורות ב-DB, ולא על עותק ישן של השורות שנבחרו.
+    // כך שינוי ל"לא להדפסה" תמיד נלקח בחשבון גם אם הבחירה נעשתה לפני השינוי.
+    try {
+      const response = await api.getRecipients(user.phone);
+      const currentRecords = Array.isArray(response.data) ? response.data : [];
+      const recordsByHashCode = new Map(
+        currentRecords.map((row) => [String(row.hashCode), { ...row, id: row.id ?? row.hashCode }])
+      );
+
+      setRecords(currentRecords);
+      saveLocalRecords(user.phone, currentRecords);
+      setSelectedRows((previousSelection) => {
+        const refreshedSelection = previousSelection
+          .map((row) => recordsByHashCode.get(String(row.hashCode ?? row.id)))
+          .filter(Boolean);
+        sessionStorage.setItem(
+          SELECTED_ROW_IDS_STORAGE_KEY,
+          JSON.stringify(refreshedSelection.map((row) => row.id)),
+        );
+        sessionStorage.setItem(
+          SELECTED_ROWS_STORAGE_KEY,
+          JSON.stringify(refreshedSelection),
+        );
+        return refreshedSelection;
+      });
+      setError('');
+    } catch (err) {
+      setError('לא ניתן לטעון את העדפות ההדפסה מהשרת. נסי שוב.');
+      return;
+    }
+
     setIsPrintModalOpen(true);
-  }, [flushPendingRecipientSaves]);
+  }, [flushPendingRecipientSaves, user?.phone]);
 
   // מחיקה לא נשלחת לשרת מיד - רק נשמרת בתור "ממתינה" ונשלחת בפועל רק כשלוחצים "שמור
   // את כל המוזמנים" (handleSave), יחד עם שאר השינויים. המזהה האמיתי של שורה שמורה
@@ -493,6 +563,7 @@ export default function DashboardPage() {
               onSave={handleSave}
               onAutoSave={handleAutoSaveLocal}
               onPersistRow={persistRecipientChange}
+              onPrintPreferenceChange={handlePrintPreferenceChange}
               onSelectionChange={handleSelectionChange}
               onDeleteRows={handleDeleteRows}
               initialSelectedIds={initialSelectedIds}

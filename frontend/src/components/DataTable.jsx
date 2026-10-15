@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,Checkbox,} from '@mui/material';
+import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,Checkbox,Tooltip,} from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -14,7 +14,6 @@ import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
 import api from '../services/api';
 import { buildIdentityKey } from '../utils/recipientIdentity';
-import { PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 
 // מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
 const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
@@ -39,15 +38,6 @@ const SYSTEM_FIELDS_HIDDEN_BY_DEFAULT = {
 // עמודות כתובת - מהן אפשר להעביר ערך שלא מתאים לעמודת "הערת כתובת" (קליק ימני על התא)
 const ADDRESS_FIELDS = ['country', 'city', 'neighborhood', 'street', 'houseNo'];
 
-function parsePrintFields(raw) {
-  try {
-    const parsed = JSON.parse(raw || '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 // שוליים קבועים בקצה הטבלה, משוריינים לאייקוני המחיקה/הסטוריה/הוספה הצפים (ר'
 // hoveredRow למטה) - ה-DataGrid מקבל קופסה צרה יותר בדיוק ברוחב הזה (paddingInlineEnd),
 // כך שאף עמודה, לא משנה כמה תורחב, לא יכולה לרנדר לתוך השטח הזה בכלל
@@ -67,6 +57,29 @@ const TOOLBAR_BUTTON_SX = {
   fontSize: '0.75rem',
   '&:hover': { bgcolor: '#eff6ff', borderColor: '#60a5fa' },
 };
+
+// "שורות בעמוד" (25/50/100) נשמר בדפדפן (localStorage, לכל מחשב/דפדפן בנפרד) - בלי
+// זה הטבלה חזרה ל-25 בכל רענון או מעבר להגדרות וחזרה. try/catch - localStorage
+// יכול לזרוק (חלון גלישה פרטית, חסימת אחסון), ואז פשוט נשארים עם ברירת המחדל
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
+const PAGE_SIZE_STORAGE_KEY = 'recipientsTable.pageSize';
+
+function readSavedPageSize() {
+  try {
+    const saved = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY));
+    return PAGE_SIZE_OPTIONS.includes(saved) ? saved : PAGE_SIZE_OPTIONS[0];
+  } catch {
+    return PAGE_SIZE_OPTIONS[0];
+  }
+}
+
+function savePageSize(pageSize) {
+  try {
+    localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize));
+  } catch {
+    // לא קריטי - הבחירה פשוט לא תיזכר בפעם הבאה
+  }
+}
 
 // תרגום סוג הפעולה מטבלת recipients_history (נקבע ע"י ה-trigger בבסיס הנתונים,
 // TG_OP הסטנדרטי של פוסטגרס) לתצוגה בעברית בחלונית ההסטוריה
@@ -195,7 +208,7 @@ function ColumnHeader({
   );
 }
 
-export default function DataTable({ records, loading, onSave, onAutoSave, onPersistRow, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
+export default function DataTable({ records, loading, onSave, onAutoSave, onPersistRow, onPrintPreferenceChange, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
   const [rows, setRows] = useState(records);
   const [selectionModel, setSelectionModel] = useState(initialSelectedIds || []);
   const [sortModel, setSortModel] = useState([]);
@@ -203,12 +216,12 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   const [inputValue, setInputValue] = useState('');
   const [fieldDefs, setFieldDefs] = useState([]);
 
-  const [problemQueue, setProblemQueue] = useState([]); // תורי תאים שצריך לתקן לפני שמירה - {id, field}
-  const [pendingProblems, setPendingProblems] = useState([]); // תאים בעייתיים שממתינים להחלטה - לתקן או לשמור בכל זאת
-  const [saveAnywayDialogOpen, setSaveAnywayDialogOpen] = useState(false);
+  const [problemQueue, setProblemQueue] = useState([]); // תור התאים שקופצים ביניהם לתיקון (כפתור "תיקון שדות") - {id, field}
   const [duplicateGroups, setDuplicateGroups] = useState([]); // [[row, row, ...], ...] - קבוצות שורות עם אותה זהות (בעל/אישה/שם משפחה/טלפון/כתובת)
   const [duplicateChoices, setDuplicateChoices] = useState({}); // groupIndex -> 'both' | id של השורה שנשארת
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const duplicateDialogOpenRef = useRef(duplicateDialogOpen); // ל-Ctrl+S - לא לפתוח שוב את חלונית הכפילויות כשהיא כבר פתוחה
+  duplicateDialogOpenRef.current = duplicateDialogOpen;
   const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא כתובת
   const [exportMenuAnchor, setExportMenuAnchor] = useState(null); // כפתור "יצוא" - תפריט הדפסת מדבקות / הורדת קובץ
   const [secondarySortFields, setSecondarySortFields] = useState([]); // תת-מיון: שרשרת עמודות לשבירת שוויון, לפי בחירת המשתמשת
@@ -228,6 +241,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   // צריכות תמיד את השורות העדכניות ביותר - לכן משתמשים ב-ref ולא סוגרים על rows ישירות
   const rowsRef = useRef(rows);
   const filteredRowsRef = useRef([]);
+  const pendingPrintPreferencesRef = useRef(new Map());
+  const printPreferenceAnchorRef = useRef(null);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -394,7 +409,20 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   // האמיתי הוא ה-hashCode (מפתח ראשי של הטבלה בפועל) - ה-DataGrid חייב שדה id ייחודי
   // לכל שורה, אז ממלאים אותו מה-hashCode כשהוא חסר
   useEffect(() => {
-    setRows(records.map((r) => ({ ...r, id: r.id ?? r.hashCode })));
+    setRows(records.map((r) => {
+      const id = r.id ?? r.hashCode;
+      const pendingPrintEnabled = pendingPrintPreferencesRef.current.get(String(id));
+      if (pendingPrintPreferencesRef.current.has(String(id)) && r.printEnabled === pendingPrintEnabled) {
+        pendingPrintPreferencesRef.current.delete(String(id));
+      }
+      return {
+        ...r,
+        id,
+        printEnabled: pendingPrintPreferencesRef.current.has(String(id))
+          ? pendingPrintEnabled
+          : r.printEnabled,
+      };
+    }));
   }, [records]);
 
   // משחזרת פעם אחת בלבד את הבחירה שהייתה קיימת (חוזרים מתצוגה מקדימה), ברגע שהשורות נטענות
@@ -442,14 +470,10 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   // נקרא שוב, בלי extraDeleteIds, מ-handleSaveAnyway/handleFixProblemsNow)
   const pendingExtraDeleteIdsRef = useRef([]);
 
+  // שדות חסרים/שגויים לא עוצרים את השמירה (ר' #82) - הם מוצגים ומתוקנים דרך כפתור
+  // "תיקון שדות" הנפרד בסרגל הכלים, ושמירה תמיד נשמרת מיד כמו שהטבלה נמצאת
   const proceedAfterDuplicates = (rowsToSave, extraDeleteIds = []) => {
     if (extraDeleteIds.length) pendingExtraDeleteIdsRef.current = extraDeleteIds;
-    const problems = findProblemCells(rowsToSave);
-    if (problems.length > 0) {
-      setPendingProblems(problems);
-      setSaveAnywayDialogOpen(true);
-      return;
-    }
     onSave(rowsToSave, pendingExtraDeleteIdsRef.current);
     pendingExtraDeleteIdsRef.current = [];
   };
@@ -464,6 +488,24 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     }
     proceedAfterDuplicates(rows);
   };
+
+  // Ctrl+S (או Cmd+S במק) = לחיצה על "שמור", כולל בדיקת הכפילויות. ref כדי שהמאזין
+  // (נרשם פעם אחת) תמיד יפעיל את handleSaveClick העדכני, עם השורות הנוכחיות. e.code
+  // ולא e.key - כשהמקלדת בעברית המקש S כותב "ד", והקיצור צריך לעבוד בכל שפה. capture
+  // כדי שיתפס לפני ה-DataGrid או קלט בתא שעוצרים את האירוע. preventDefault - בלי זה
+  // הדפדפן פותח את חלון "שמירת הדף" שלו
+  const saveShortcutRef = useRef(handleSaveClick);
+  saveShortcutRef.current = handleSaveClick;
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.code !== 'KeyS') return;
+      event.preventDefault();
+      if (duplicateDialogOpenRef.current) return;
+      saveShortcutRef.current();
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, []);
 
   // לפי הבחירה של המשתמשת בכל קבוצה - 'both' או ה-id של השורה שנשארת. ברירת מחדל - בדיקה לא נבחרה נשארת 'both' (לא מוחקת בלי בחירה מפורשת)
   const handleConfirmDuplicates = () => {
@@ -515,24 +557,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     setDuplicateGroups([]);
   };
 
-  // "שמור בכל זאת" - מתעלמים מהשדות הבעייתיים ושומרים את הטבלה כמו שהיא
-  const handleSaveAnyway = () => {
-    setSaveAnywayDialogOpen(false);
-    onSave(rows, pendingExtraDeleteIdsRef.current);
-    pendingExtraDeleteIdsRef.current = [];
-  };
-
-  // "לתקן עכשיו" - נכנסים לתהליך הקפיצה האוטומטית לתיקון השדות, כמו שהיה קודם
-  const handleFixProblemsNow = () => {
-    setSaveAnywayDialogOpen(false);
+  // כפתור "תיקון שדות" - נכנסים לתהליך הקפיצה האוטומטית בין כל השדות החסרים/השגויים
+  // שיש כרגע בטבלה (allProblems), בלי קשר לשמירה. לא שומר כלום בעצמו
+  const handleShowProblems = () => {
     // מנקים סינון/מיון כדי שכל השורות יהיו גלויות בסדר קבוע - כדי שאפשר יהיה לקפוץ ביניהן
     setActiveFilters([]);
     setInputValue('');
     setSortModel([]);
-    setProblemQueue(pendingProblems);
-    // לא שומרים עכשיו בכלל (המשתמשת בחרה לתקן קודם) - מזהי המחיקה הממתינים מסבב
-    // כפילויות קודם כבר לא רלוונטיים לניסיון השמירה הבא, שיבדוק כפילויות מחדש בעצמו
-    pendingExtraDeleteIdsRef.current = [];
+    setProblemQueue(allProblems);
   };
 
   const handlePrintLabels = async () => {
@@ -787,25 +819,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     onAutoSave(updatedRows);
   }, [onAutoSave]);
 
-  const toggleCellPrint = useCallback((id, field, print) => {
-    const updatedRows = rowsRef.current.map((row) => {
-      if (String(row.id) !== String(id)) return row;
-      return {
-        ...row,
-        printFields: JSON.stringify({ ...parsePrintFields(row.printFields), [field]: print }),
-      };
-    });
-    rowsRef.current = updatedRows;
-    setRows(updatedRows);
-    onAutoSave(updatedRows);
-  }, [onAutoSave]);
-
-  const isCellPrintEnabled = useCallback((row, field) => {
-    const cellPreference = parsePrintFields(row.printFields)[field];
-    if (cellPreference !== undefined) return cellPreference;
-    return columnPreferences?.[field]?.print ?? PRINT_DEFAULT_FIELDS.has(field);
-  }, [columnPreferences]);
-
   const handleMoveToAddressNote = () => {
     if (!contextMenu) return;
     moveValueToAddressNote(contextMenu.id, contextMenu.field);
@@ -864,7 +877,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   // אייקון קטן שמופיע כשעוברים עם העכבר על תא בעמודת כתובת - לחיצה עליו מעבירה
   // את הערך ישירות ל"הערת כתובת", כדי שהאפשרות תהיה גלויה ולא רק דרך קליק ימני
   const renderAddressCell = useCallback((params) => {
-    const { id, field, value, row } = params;
+    const { id, field, value } = params;
     return (
       <Box
         sx={{
@@ -888,17 +901,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
             background: 'transparent',
           }}
         />
-        <Checkbox
-          checked={isCellPrintEnabled(row, field)}
-          size="small"
-          inputProps={{ 'aria-label': `הדפס את ${field} עבור רשומה זו` }}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => toggleCellPrint(id, field, event.target.checked)}
-          sx={{ p: 0.25, flexShrink: 0 }}
-        />
       </Box>
     );
-  }, [createCellInputHandlers, isCellPrintEnabled, toggleCellPrint]);
+  }, [createCellInputHandlers]);
 
   // תא טקסט חי - קלט חופשי לגמרי תמיד, ואם יש pickListField (עמודות קידומת/סיום/
   // שייך ל) גם חץ קטן לצידו שפותח Menu לבחירה מהערכים הקיימים באותה עמודה. שתי
@@ -908,7 +913,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   // אחרי כל אות (בדיוק הבאג שנתקלנו בו)
   const renderTextCell = useCallback((pickListField) => {
     const TextCell = (params) => {
-      const { id, field, value, row } = params;
+      const { id, field, value } = params;
       const [menuOpen, setMenuOpen] = useState(false);
       const [menuOptions, setMenuOptions] = useState([]);
       const [expanded, setExpanded] = useState(false); // "שייך ל" עם כמה ערכים - הוצג במלואו ביוזמת המשתמשת
@@ -984,14 +989,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
               // פנוי מהטקסט כדי שלא תכסה חלק מהתוכן
               paddingInlineEnd: showExpandedPeek ? 40 : 0,
             }}
-          />
-          <Checkbox
-            checked={isCellPrintEnabled(row, field)}
-            size="small"
-            inputProps={{ 'aria-label': `הדפס את ${field} עבור רשומה זו` }}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => toggleCellPrint(id, field, event.target.checked)}
-            sx={{ p: 0.25, flexShrink: 0 }}
           />
           {showCollapsed && (
             <Box
@@ -1102,7 +1099,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     // אמיתי עם fiber משלו - הכרחי כי יש כאן hooks (useState/useRef) בפנים. בלעדי זה
     // ריאקט "מבלבל" בין hooks של תאים שונים (בדיוק השגיאה "Rendered more hooks...")
     return (params) => <TextCell {...params} />;
-  }, [updateCellValue, createCellInputHandlers, isCellPrintEnabled, toggleCellPrint]);
+  }, [updateCellValue, createCellInputHandlers]);
 
     const handleInputChange = (e) => {
     setInputValue(e.target.value);
@@ -1263,14 +1260,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         if (remaining.length !== prev.length) {
           // התור באמת השתנה (תא תוקן) - מעדכנים אותו, ומדכאים את הקפיצה האוטומטית
           // של האפקט למטה: הקפיצה עצמה מטופלת כאן ישירות, רק כשיצאו עם Enter
+          // כשהתור מתרוקן התהליך פשוט נגמר - לא שומרים אוטומטית (התיקון כבר לא חלק
+          // מהשמירה, ר' handleShowProblems). שומרים כרגיל ב"שמור את כל המוזמנים"
           suppressNextJumpRef.current = true;
-          if (remaining.length === 0 && prev.length > 0) {
-            // pendingExtraDeleteIdsRef כבר תמיד ריק בנקודה הזו (handleFixProblemsNow
-            // מאפס אותו לפני שמגיעים לכאן בכלל) - משלבים אותו במפורש בכל זאת, כדי
-            // שכל קריאה ל-onSave בקובץ הזה תשלח את שני הפרמטרים באותו אופן, בלי
-            // להסתמך על ברירת המחדל של handleSave לשמור על התנהגות נכונה
-            onSave(rowsRef.current, pendingExtraDeleteIdsRef.current);
-          }
           setProblemQueue(remaining);
         }
 
@@ -1315,10 +1307,10 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   }, [orderedFieldNames]);
 
   const displayFieldDefs = useMemo(() => {
-    if (!columnOrder) return orderedFieldDefs.filter((field) => field.technicalName !== 'print');
+    if (!columnOrder) return orderedFieldDefs;
     return columnOrder
       .map((name) => fieldDefs.find((f) => f.technicalName === name))
-      .filter((field) => field && field.technicalName !== 'print');
+      .filter(Boolean);
   }, [columnOrder, fieldDefs, orderedFieldDefs]);
 
   // עמודות שריקות בכל שורות ההיסטוריה הנוכחית (בחלונית ההיסטוריה) לא מוצגות בכלל -
@@ -1330,6 +1322,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
 
   const historyVisibleFieldDefs = useMemo(() => {
     return displayFieldDefs.filter((f) => {
+      if (f.technicalName === 'print') return false;
       // גם הערך הנוכחי של הנמען (לא רק הערכים הישנים ששמורים בהיסטוריה) - אחרת עמודה
       // שהתמלאה לראשונה עכשיו (למשל הוספת שם אישה שלא הייתה קודם) מוסתרת לגמרי, כי
       // בכל שינוי קודם היא הייתה ריקה - זה בדיוק המצב לפני שהתווסף אליה ערך בפעם הראשונה
@@ -1343,6 +1336,64 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
       });
     });
   }, [displayFieldDefs, historyOldValuesList, historyDialog]);
+
+  const handlePrintPreferenceChange = useCallback(async (targetRows, printEnabled) => {
+    const rowsToUpdate = (Array.isArray(targetRows) ? targetRows : [targetRows])
+      .filter((row) => row?.hashCode);
+    if (!rowsToUpdate.length || !onPrintPreferenceChange) return;
+
+    const previousRows = rowsRef.current;
+    const targetIds = new Set(rowsToUpdate.map((row) => String(row.id)));
+    const hashCodes = rowsToUpdate.map((row) => row.hashCode);
+    rowsToUpdate.forEach((row) => {
+      pendingPrintPreferencesRef.current.set(String(row.id), printEnabled);
+    });
+    const updatedRows = previousRows.map((candidate) =>
+      targetIds.has(String(candidate.id)) ? { ...candidate, printEnabled } : candidate
+    );
+    rowsRef.current = updatedRows;
+    setRows(updatedRows);
+    try {
+      await onPrintPreferenceChange(hashCodes, printEnabled);
+    } catch {
+      rowsToUpdate.forEach((row) => pendingPrintPreferencesRef.current.delete(String(row.id)));
+      rowsRef.current = previousRows;
+      setRows(previousRows);
+    }
+  }, [onPrintPreferenceChange]);
+
+  const handlePrintPreferenceToggle = useCallback((row, event) => {
+    let rowsToUpdate = [row];
+    const anchorId = printPreferenceAnchorRef.current;
+    if (event.nativeEvent.shiftKey && anchorId !== null) {
+      const orderedIds = apiRef.current?.getSortedRowIds?.() ?? rowsRef.current.map((candidate) => candidate.id);
+      const startIndex = orderedIds.findIndex((id) => String(id) === String(anchorId));
+      const endIndex = orderedIds.findIndex((id) => String(id) === String(row.id));
+      if (startIndex !== -1 && endIndex !== -1) {
+        const rangeIds = new Set(
+          orderedIds.slice(Math.min(startIndex, endIndex), Math.max(startIndex, endIndex) + 1).map(String)
+        );
+        rowsToUpdate = rowsRef.current.filter((candidate) => rangeIds.has(String(candidate.id)));
+      }
+    }
+    printPreferenceAnchorRef.current = row.id;
+    handlePrintPreferenceChange(rowsToUpdate, event.target.checked);
+  }, [apiRef, handlePrintPreferenceChange]);
+
+  const renderPrintPreferenceCell = useCallback((params) => (
+    <Checkbox
+      checked={params.row.printEnabled !== false}
+      disabled={!params.row.hashCode}
+      inputProps={{ 'aria-label': 'להדפיס נמען זה' }}
+      sx={{
+        color: '#94a3b8 !important',
+        '&.Mui-checked': { color: '#16a34a !important' },
+        '& .MuiSvgIcon-root': { fontSize: '1.35rem' },
+      }}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => handlePrintPreferenceToggle(params.row, event)}
+    />
+  ), [handlePrintPreferenceToggle]);
 
   // חץ המיון בכותרת: אם העמודה כבר המיון הראשי - מחזור רגיל (עולה -> יורד -> בטל).
   // אחרת, אותה לוגיקה בדיוק כמו בחירה מתיבת "מיון" (ר' handleAddSortField למטה) -
@@ -1509,7 +1560,22 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   );
 
   const columns = useMemo(() => {
-    const dynamicColumns = displayFieldDefs.map((f) => {
+    const printPreferenceColumn = {
+      field: 'printEnabled',
+      headerName: 'להדפיס',
+      width: 100,
+      minWidth: 100,
+      maxWidth: 100,
+      editable: false,
+      sortable: false,
+      hideable: false,
+      renderCell: renderPrintPreferenceCell,
+    };
+
+    const dynamicColumns = displayFieldDefs
+      .filter((f) => f.technicalName !== 'print')
+      .map((f) => {
+      const gridField = f.technicalName;
       const pickListField = ['prefix', 'suffix', 'belongsTo'].includes(f.technicalName)
         ? f.technicalName
         : null;
@@ -1531,7 +1597,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         minWidthOverrides[f.technicalName] ?? 0
       );
       return {
-        field: f.technicalName,
+        field: gridField,
         headerName,
         // עמודה שהורחבה/צומצמה ידנית (גרירת קו ההפרדה) נשארת ברוחב קבוע (flex:0) -
         // כיבוד מפורש של הבחירה הידנית. כל שאר העמודות הן flex:1, כך שכל הרוחב
@@ -1553,9 +1619,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         sortable: false,
         renderHeader: () => (
           <ColumnHeader
-            field={f.technicalName}
+            field={gridField}
             headerName={headerName}
-            sortDirection={sortModel[0]?.field === f.technicalName ? sortModel[0].sort : null}
+            sortDirection={sortModel[0]?.field === gridField ? sortModel[0].sort : null}
             onSortClick={handleHeaderSortClick}
             isDragArmed={dragArmedField === f.technicalName}
           />
@@ -1563,11 +1629,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
       };
     });
 
-    return [...dynamicColumns, ...systemColumns];
+    return [printPreferenceColumn, ...dynamicColumns, ...systemColumns];
     // handleHeaderSortClick תלוי רק ב-sortModel, שכבר ברשימת התלויות למטה - אין צורך
     // לחשב מחדש את כל העמודות בכל רינדור רק כי הפונקציה עצמה נוצרת מחדש בכל פעם
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayFieldDefs, renderAddressCell, renderTextCell, secondarySortFields, requiredFields, columnWidths, minWidthOverrides, sortModel, dragArmedField]);
+  }, [displayFieldDefs, renderAddressCell, renderPrintPreferenceCell, renderTextCell, secondarySortFields, requiredFields, columnWidths, minWidthOverrides, sortModel, dragArmedField]);
 
   // רשת ביטחון: הרוחב האוטומטי למעלה הוא הערכה (מדידת טקסט + תקורה קבועה לחץ המיון
   // ולריפוד התא) - אם בכל זאת נשאר קצר מדי בפועל (התקורה האמיתית של עיצוב מסוים
@@ -1641,10 +1707,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
       const userChoice = columnPreferences?.[f.technicalName]?.show;
       model[f.technicalName] = userChoice !== undefined ? userChoice : Boolean(f.defaultOrder);
     });
+    model.printEnabled = true;
     setColumnVisibilityModel(model);
   }, [fieldDefs, columnPreferences]);
 
-  // בכל פעם שתור התיקונים מתעדכן (שמירה נחסמה, או שתוקן תא אחד וקפצנו לבא) -
+  // בכל פעם שתור התיקונים מתעדכן (לחיצה על "תיקון שדות", או שתוקן תא אחד וקפצנו לבא) -
   // גוללים אל התא הראשון בתור וממקדים ישירות ב-input שבתוכו (התאים הם קלטים חיים
   // תמיד, לא מסתמכים על מצב עריכה של ה-DataGrid, אז אין צורך "לפתוח" עריכה בכלל)
   useEffect(() => {
@@ -1652,7 +1719,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     // אם התור התרוקן בדיוק בפעם שדוכאה קפיצה (למשל לחיצת עכבר, לא Enter), הדגל היה
     // נשאר "תקוע" true ומדכא בטעות גם את הקפיצה הבאה האמיתית (למשל אחרי Enter אמיתי).
     // handleFocusOut כבר מטפל בעצמו בקפיצה (jumpToProblem) כשיוצאים עם Enter - האפקט
-    // הזה אחראי רק על המקרה שהתור מתעדכן מבחוץ (בעיקר בלחיצה על "שמור")
+    // הזה אחראי רק על המקרה שהתור מתעדכן מבחוץ (בעיקר בלחיצה על "תיקון שדות")
     const shouldSuppress = suppressNextJumpRef.current;
     suppressNextJumpRef.current = false;
     if (problemQueue.length === 0 || !apiRef.current || shouldSuppress) return undefined;
@@ -1818,13 +1885,34 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
           >
             הוסף שורה
           </Button>
+          {/* שדות חובה ריקים או ערכים לא תקינים בכל הטבלה - המספר מתעדכן חי עם כל
+              עריכה (allProblems), ולחיצה קופצת לשדה הראשון ומשם לבא אחרי כל תיקון.
+              ה-span סביב הכפתור - Tooltip לא מקבל אירועי ריחוף מכפתור disabled */}
+          <Tooltip title="השלמת מידע ותיקון בעיות בשדות">
+            <span>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleShowProblems}
+                disabled={allProblems.length === 0}
+                sx={{
+                  ...TOOLBAR_BUTTON_SX,
+                  whiteSpace: 'nowrap',
+                  ...(allProblems.length > 0 && { color: '#b45309', borderColor: '#f59e0b' }),
+                }}
+              >
+                תיקון שדות ({allProblems.length})
+              </Button>
+            </span>
+          </Tooltip>
           <Button
             variant="outlined"
             size="small"
             onClick={handleSaveClick}
+            title="Ctrl+S"
             sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
           >
-            שמור את כל המוזמנים
+            שמור
           </Button>
         </Stack>
       </Box>
@@ -1851,7 +1939,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         // השמורים מחוץ לתחום הרינדור של הטבלה - שם ה-hover הטבעי (CSS) לא עובד כי
         // העכבר לא באמת מעל אלמנט השורה. משתמשת ב-hoveredRow (שנשאר מדויק גם כשהעכבר
         // עובר לאייקון, ר' handleMouseMove) במקום להסתמך רק על :hover
-        getRowClassName={(params) => (hoveredRow?.inGutter && String(params.id) === String(hoveredRow?.id) ? 'app-row-hovered' : '')}
+        getRowClassName={(params) => (
+          hoveredRow?.inGutter && String(params.id) === String(hoveredRow?.id)
+            ? 'app-row-hovered'
+            : ''
+        )}
         getCellClassName={(params) => {
           // התא שעליו נלחץ קליק ימני (בזמן שתפריט "העבר להערת כתובת" פתוח) - מודגש
           // כדי שיהיה ברור על איזה ערך מדובר. יורד אוטומטית כשהתפריט נסגר (contextMenu
@@ -1864,8 +1956,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
             return 'context-menu-target-cell';
           }
 
-          // צביעה בכלל לא קורית לפני שהיה ניסיון שמירה שנחסם - שורה חדשה/ריקה לא נצבעת
-          // מיד, רק אחרי שלוחצים "שמור את כל המוזמנים" ונמצאות בעיות בפועל
+          // צביעה בכלל לא קורית לפני שלוחצים על "תיקון שדות" - שורה חדשה/ריקה לא נצבעת
+          // מיד בזמן שממלאים אותה, רק כשבוחרים במפורש לעבור על השדות לתיקון
           if (problemQueue.length === 0) return '';
 
           // התא הספציפי שקפצנו אליו כרגע (הראשון בתור התיקונים) - מודגש הרבה יותר חזק
@@ -1972,13 +2064,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
           },
         }}
         columnVisibilityModel={columnVisibilityModel}
-        onColumnVisibilityModelChange={(model) => setColumnVisibilityModel(model)}
+        onColumnVisibilityModelChange={(model) => setColumnVisibilityModel({ ...model, printEnabled: true })}
         initialState={{
           pagination: {
-            paginationModel: { pageSize: 25 },
+            paginationModel: { pageSize: readSavedPageSize() },
           },
         }}
-        pageSizeOptions={[25, 50, 100]}
+        onPaginationModelChange={(model) => savePageSize(model.pageSize)}
+        pageSizeOptions={PAGE_SIZE_OPTIONS}
         localeText={{
           noRowsLabel: 'לא נמצאו רשומות',
           noResultsOverlayLabel: 'לא נמצאו תוצאות',
@@ -2236,6 +2329,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
           </DialogContentText>
           {duplicateGroups.map((group, groupIndex) => {
             const visibleFieldDefs = displayFieldDefs.filter((f) => {
+              if (f.technicalName === 'print') return false;
               return group.some((row) => {
                 const value = row[f.technicalName];
                 return value !== null && value !== undefined && String(value).trim() !== '';
@@ -2306,25 +2400,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         </DialogActions>
       </Dialog>
 
-      {/* disableRestoreFocus - בלי זה ה-Dialog "מחזיר" את הפוקוס לכפתור השמירה אחרי
-          שהוא נסגר, וזה מתנגש עם הקפיצה האוטומטית לתא הבעייתי שקורית באותו רגע בדיוק */}
-      <Dialog open={saveAnywayDialogOpen} onClose={handleFixProblemsNow} disableRestoreFocus>
-        <DialogTitle>יש שדות שגויים או חסרים</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            נמצאו {pendingProblems.length} שדות שדורשים תיקון (חובה שריקים או ערכים לא תקינים).
-            אפשר לתקן אותם עכשיו, או לשמור בכל זאת כמו שהטבלה נמצאת עכשיו.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleFixProblemsNow} color="primary">
-            לתקן עכשיו
-          </Button>
-          <Button onClick={handleSaveAnyway} color="error" variant="contained">
-            שמור בכל זאת
-          </Button>
-        </DialogActions>
-      </Dialog>
       {/* חלונית היסטוריית שינויים - נפתחת מאייקון ההסטוריה הצף על שורה (handleOpenHistory).
           לחיצה על שורת היסטוריה משחזרת את הערכים הישנים לתוך השורה הנוכחית בטבלה
           (handleRestoreFromHistory) - בדיוק כמו עריכה רגילה של תא, נשמר בפועל רק
