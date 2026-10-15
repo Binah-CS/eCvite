@@ -8,6 +8,7 @@ import api from '../services/api';
 import PrintModal from '../components/PrintModal'; 
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
+import { buildSavedSnapshot, selectRowsToSave } from '../utils/changedRows';
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
@@ -28,15 +29,52 @@ function getInitials(name) {
   return `${parts[0][0]}${parts[1][0]}`;
 }
 
+// try/catch בקריאה ובכתיבה של העותק המקומי - localStorage יכול לזרוק (טבלה גדולה
+// מעבר למכסה, גלישה פרטית, חסימת אחסון). כשל כאן לא אמור להפיל טעינה או שמירה
+// שהצליחו מול השרת - רק העותק המקומי לא יתעדכן
 function getLocalRecords(phone) {
-  const saved = localStorage.getItem(`records-${phone}`);
-  if (!saved) return [];
-  // מתעלמים משורות בלי id (למשל שיור ישן מגרסה קודמת) - הן היו מקריסות את DataGrid
-  return JSON.parse(saved).filter((row) => row.id !== undefined && row.id !== null);
+  try {
+    const saved = localStorage.getItem(`records-${phone}`);
+    if (!saved) return [];
+    // מתעלמים משורות בלי id (למשל שיור ישן מגרסה קודמת) - הן היו מקריסות את DataGrid
+    return JSON.parse(saved).filter((row) => row.id !== undefined && row.id !== null);
+  } catch {
+    return [];
+  }
 }
 
+// מחזירה אם השמירה המקומית הצליחה - דגל "מסונכרן" נדלק רק אם העותק באמת נכתב
 function saveLocalRecords(phone, rows) {
-  localStorage.setItem(`records-${phone}`, JSON.stringify(rows));
+  try {
+    localStorage.setItem(`records-${phone}`, JSON.stringify(rows));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// "דגל" שהעותק המקומי (records-<phone>) זהה בדיוק למה שב-DB - נדלק אחרי טעינה מהשרת
+// ואחרי כל שמירה מוצלחת, ונכבה ברגע שיש עריכה שעוד לא נשמרה. כשהוא דלוק, טעינת הדף
+// מציגה את העותק המקומי מיד, בלי לחכות לשליפת כל הנמענים מה-DB. 'true' / 'false'
+// (יש בעותק עריכות שלא נשמרו) / null (אין עדיין דגל) - ר' loadRecords
+function getSyncFlag(phone) {
+  try {
+    return localStorage.getItem(`records-synced-${phone}`);
+  } catch {
+    return null;
+  }
+}
+
+function isLocalInSync(phone) {
+  return getSyncFlag(phone) === 'true';
+}
+
+function setLocalInSync(phone, inSync) {
+  try {
+    localStorage.setItem(`records-synced-${phone}`, inSync ? 'true' : 'false');
+  } catch {
+    // לא קריטי - בפעם הבאה פשוט נטען מה-DB כרגיל
+  }
 }
 
 export default function DashboardPage() {
@@ -62,6 +100,10 @@ export default function DashboardPage() {
 
  
 
+  // "תמונה" של מה ששמור כרגע ב-DB (hashCode -> חתימת השורה) - כדי לשלוח בשמירה רק
+  // שורות חדשות או שהשתנו מאז. ref ולא state - לא משפיע על התצוגה, רק על השמירה
+  const savedSnapshotRef = useRef(new Map());
+
   const loadRecords = useCallback(async () => {
     if (!user?.phone) {
       setRecords([]);
@@ -69,22 +111,45 @@ export default function DashboardPage() {
       return;
     }
 
+    // אם העותק המקומי מסומן כזהה ל-DB - מציגים אותו ולא פונים ל-DB בכלל. כרגע
+    // מניחים חלון אחד לכל משתמשת, ולכן ה-DB לא יכול להיות מעודכן יותר מהדפדפן.
+    // ריבוי חלונות/משתמשות (עותק ישן, דריסה בשמירה) ייפתר בנפרד - "DEV: Multi-user
+    // version control". בכוונה בלי בדיקה ועדכון ברקע: עדכון שמגיע תוך כדי עריכה
+    // עלול להשפיע על מה שכותבים באותו רגע ולבלבל
+    const local = getLocalRecords(user.phone);
+    if (isLocalInSync(user.phone) && local.length > 0) {
+      savedSnapshotRef.current = buildSavedSnapshot(local);
+      setRecords(local);
+      setLoading(false);
+      console.log(`⏱ טעינה: מהעותק המקומי, בלי פנייה ל-DB (${local.length} שורות)`);
+      return;
+    }
+
+    const loadStartedAt = performance.now(); // לשורת "⏱ טעינה" בלוג
     try {
       setLoading(true);
       const response = await api.getRecipients(user.phone);
 
       //  שיפור: אם הבקאנד החזיר רשימה ריקה (כי ה-DB ריק/לא מחובר), נטען כגיבוי מהלוקאל
       if (response.data && response.data.length > 0) {
-        setRecords(response.data);
+        console.log(`⏱ טעינה מהשרת: ${Math.round(performance.now() - loadStartedAt)} ms (${response.data.length} שורות)`);
+        const serverRecords = response.data.map((row) => ({ ...row, id: row.hashCode }));
+        savedSnapshotRef.current = buildSavedSnapshot(serverRecords);
+        setRecords(serverRecords);
+        // דגל 'false' = בעותק המקומי יש עריכות שלא נשמרו (למשל אחרי שמירה שנכשלה) -
+        // לא דורסים אותן בנתוני השרת, כדי שלא יאבדו לגמרי. הדגל נדלק שוב בשמירה הבאה
+        const hasUnsavedLocalEdits = getSyncFlag(user.phone) === 'false' && local.length > 0;
+        if (!hasUnsavedLocalEdits && saveLocalRecords(user.phone, serverRecords)) {
+          setLocalInSync(user.phone, true);
+        }
       } else {
-        const local = getLocalRecords(user.phone);
         setRecords(local);
       }
 
       setError('');
     } catch (err) {
       setError('לא ניתן לטעון רשומות מהמנוע האחורי. עובד במצב לא מקוון.');
-      setRecords(getLocalRecords(user.phone));
+      setRecords(local);
     } finally {
       setLoading(false);
     }
@@ -170,6 +235,7 @@ export default function DashboardPage() {
   const handleAutoSaveLocal = useCallback((updatedRows) => {
     if (!user?.phone) return;
     saveLocalRecords(user.phone, updatedRows);
+    setLocalInSync(user.phone, false); // יש עכשיו בעותק המקומי שינוי שעוד לא נשמר ב-DB
     setRecords(updatedRows);
     setIsTableDirty(true); //  בום! ברגע שיש שינוי בטבלה, האבא ננעל רשמית!
   }, [user?.phone]);
@@ -194,6 +260,7 @@ export default function DashboardPage() {
   // להתעדכן לפני שה-handleSave הזה כבר רץ (stale closure), וההעברה במפורש פותרת את זה
   const handleSave = async (updatedRows, extraDeleteHashCodes = []) => {
     console.log("1. כפתור שמור נלחץ בדאשבורד!");
+    const saveStartedAt = performance.now(); // לשורת "⏱ שמירה" בלוג - כמה זמן לקחה כל שמירה
 
     if (!user?.phone) {
       console.log("❌ השליחה נעצרת כי אין טלפון למשתמש:", user);
@@ -206,16 +273,34 @@ export default function DashboardPage() {
       // רצה אחרי השמירה, נמען שנמחק ואז יובא/נוסף מחדש עם אותה זהות (שם+טלפון+כתובת)
       // היה מקבל hash זהה לנמען הישן שעדיין מקושר אליך באותו רגע - והמחיקה שהייתה
       // רצה רק אחר כך הייתה מנתקת בטעות גם את מה שכרגע נשמר
+      // לא מוחקים hashCode ששורה אחרת בטבלה עדיין משתמשת בו (שתי שורות עם אותו מזהה
+      // - נדיר, אבל אפשרי). מאז ששולחים רק שורות שהשתנו, השורה שנשארה לא נשלחת ולא
+      // מקושרת מחדש - והמחיקה הייתה מנתקת גם אותה מהמשתמשת, והיא נעלמת ברענון הבא
+      const hashCodesStillInTable = new Set(updatedRows.map((row) => row.hashCode).filter(Boolean));
       const hashCodesToDelete = Array.from(
         new Set([...pendingDeleteHashCodes, ...filterRealHashCodes(extraDeleteHashCodes)])
-      );
+      ).filter((hashCode) => !hashCodesStillInTable.has(hashCode));
 
-      console.log("2. שולח לבקאנד:", updatedRows);
+      // שולחים רק שורות חדשות או כאלה שהתוכן שלהן שונה ממה ששמור ב-DB (ר'
+      // changedRows.js) - לא את כל הטבלה בכל שמירה. ההשוואה רצה בזיכרון (אלפיות
+      // שנייה גם ל-500 שורות), וחוסכת לשלוח, לבדוק ולהחזיר שורות שלא נגעו בהן
+      const rowsToSave = selectRowsToSave(updatedRows, savedSnapshotRef.current);
+
+      console.log("2. שולח לבקאנד:", rowsToSave);
+
+      if (rowsToSave.length === 0 && hashCodesToDelete.length === 0) {
+        console.log('⏱ שמירה: אין שינויים מול ה-DB - לא נשלח לשרת');
+        // מסמנים "מסונכרן" רק אחרי שהעותק המקומי באמת שווה למה שמוצג עכשיו
+        if (saveLocalRecords(user.phone, updatedRows)) setLocalInSync(user.phone, true);
+        setIsTableDirty(false);
+        setSaveSuccessOpen(true);
+        return;
+      }
 
       // hashCode כן נשלח (רק id המקומי-לתצוגה מוסר) - שורה עם hashCode היא נמען שכבר
       // קיים בשרת, ומזהה אותו במפורש בשביל עדכון; רק שורה חדשה לגמרי (בלי hashCode,
       // כמו מ"הוסף שורה") תיבדק ותקבל hash חדש בצד השרת
-      const cleanRows = updatedRows.map(
+      const cleanRows = rowsToSave.map(
           ({ id, ...rest }) => rest
       );
 
@@ -244,6 +329,10 @@ export default function DashboardPage() {
       }
 
       console.log("3. נשמר בהצלחה!", response.data);
+      console.log(
+        `⏱ שמירה: ${Math.round(performance.now() - saveStartedAt)} ms ` +
+        `(נשלחו ${cleanRows.length} שורות, ${hashCodesToDelete.length} מחיקות)`
+      );
 
       // משתמשים ישירות בנתונים שחזרו מהשמירה (hashCode טרי לנמענים חדשים, "שייך ל"
       // אחרי איחוד) - במקום לבקש מחדש את כל הרשימה מהשרת בנפרד. זה היה בקשת רשת
@@ -252,7 +341,9 @@ export default function DashboardPage() {
       // (שורה חדשה) נופלים לזהות. זהות לבדה לא מספיקה כשיש 2 שורות עם אותם פרטי
       // זהות בדיוק (כמו ב"השאר את שתיהן" עם duplicateSalt) - שתיהן היו מתמזגות
       // לאותה תוצאה אחת ומקבלות בטעות את אותו מזהה. מוסיפים גם את duplicateSalt
-      // לזהות (השרת מחזיר אותו כמו שהוא, ר' Recipients.java) כדי להבדיל ביניהן
+      // לזהות (השרת מחזיר אותו כמו שהוא, ר' Recipients.java) כדי להבדיל ביניהן.
+      // שורה שכבר יש לה hashCode מותאמת רק לפיו - היא לא בהכרח נשלחה (לא השתנתה),
+      // ואסור שתיפול להתאמה לפי זהות ותקבל בטעות נתונים ומזהה של שורה אחרת שנשמרה
       const savedRows = Array.isArray(response.data) ? response.data : [];
       const savedByHashCode = new Map();
       const savedByIdentity = new Map();
@@ -261,13 +352,15 @@ export default function DashboardPage() {
         savedByIdentity.set(`${buildIdentityKey(row)}|${row.duplicateSalt ?? ''}`, row);
       });
       const finalRecords = updatedRows.map((row) => {
-        const saved = (row.hashCode && savedByHashCode.get(row.hashCode))
-          ?? savedByIdentity.get(`${buildIdentityKey(row)}|${row.duplicateSalt ?? ''}`);
+        const saved = row.hashCode
+          ? savedByHashCode.get(row.hashCode)
+          : savedByIdentity.get(`${buildIdentityKey(row)}|${row.duplicateSalt ?? ''}`);
         return saved ? { ...saved, id: saved.hashCode } : row;
       });
 
+      savedSnapshotRef.current = buildSavedSnapshot(finalRecords);
       setRecords(finalRecords);
-      saveLocalRecords(user.phone, finalRecords);
+      if (saveLocalRecords(user.phone, finalRecords)) setLocalInSync(user.phone, true);
       setIsTableDirty(false);
       setSaveSuccessOpen(true);
 
@@ -281,6 +374,7 @@ export default function DashboardPage() {
       );
 
       saveLocalRecords(user.phone, updatedRows);
+      setLocalInSync(user.phone, false);
     }
   };
 

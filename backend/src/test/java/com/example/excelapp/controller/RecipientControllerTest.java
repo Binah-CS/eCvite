@@ -9,11 +9,18 @@ import com.example.excelapp.repository.UserRecipientsRepository;
 import com.example.excelapp.repository.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.PersistenceContext;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.mockito.Mockito;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -46,8 +53,15 @@ class RecipientControllerTest {
     private RecipientsRepository recipientsRepository;
     @Autowired
     private UserRecipientsRepository userRecipientsRepository;
-    @Autowired
+    // SpyBean ולא Autowired - עובד בדיוק כמו ה-JdbcTemplate האמיתי, אבל אפשר לספור כמה
+    // פקודות SQL הקוד שלח דרכו (המחיקה והקישורים עוברים ב-JDBC ישירות, ולכן הסטטיסטיקה
+    // של Hibernate לא רואה אותם - ר' jdbcUpdatesStartingWith)
+    @SpyBean
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
+    @PersistenceContext
+    private EntityManager entityManager;
 
     private User seedUser(String phone, String firstNameMan) {
         User user = User.builder()
@@ -206,6 +220,36 @@ class RecipientControllerTest {
     }
 
     @Test
+    void save_sameRecipientSavedRepeatedly_staysLinkedExactlyOnce() throws Exception {
+        // הקישור נמען<->משתמשת נוצר עם NOT EXISTS בתוך פקודת ההכנסה (בלי שאילתה
+        // נפרדת מראש) - שמירה חוזרת של אותו נמען, גם כקיים (עם hashCode) וגם כשורה
+        // "חדשה" עם אותה זהות, לא אמורה ליצור קישור כפול
+        User user = seedUser("0531212121", "חוזרת");
+
+        SaveRecipientsRequest first = new SaveRecipientsRequest();
+        first.setPhone(user.getPhone());
+        first.setRecipients(List.of(newUnsavedRecipient("קבוע", "0532323232")));
+        JsonNode saved = objectMapper.readTree(postSave(first)).get(0);
+
+        Recipients asExisting = objectMapper.treeToValue(saved, Recipients.class);
+        asExisting.setCity("עיר אחרת");
+        SaveRecipientsRequest second = new SaveRecipientsRequest();
+        second.setPhone(user.getPhone());
+        second.setRecipients(List.of(asExisting));
+        postSave(second);
+
+        SaveRecipientsRequest third = new SaveRecipientsRequest();
+        third.setPhone(user.getPhone());
+        third.setRecipients(List.of(newUnsavedRecipient("קבוע", "0532323232")));
+        postSave(third);
+
+        Integer links = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_recipients WHERE user_id = ? AND recipient_id = ?",
+                Integer.class, user.getHashCode(), saved.get("hashCode").asText());
+        assertThat(links).isEqualTo(1);
+    }
+
+    @Test
     void save_combinedDeleteAndSave_unlinksRecipientInSameRequest() throws Exception {
         User user = seedUser("0509999999", "טל");
         Recipients toDelete = seedRecipientLinkedTo(user, "למחוק", "0501010101");
@@ -250,6 +294,145 @@ class RecipientControllerTest {
 
         Recipients afterUpdate = recipientsRepository.findById(belongsToA.getHashCode()).orElseThrow();
         assertThat(afterUpdate.getMan()).isEqualTo("נדרס ע\"י משתמשת אחרת");
+    }
+
+    // ---------- ביצועים: מספר הפקודות ל-DB בשמירה גדולה ----------
+
+    // כמה פקודות SQL ש-Hibernate הכין בפועל מאז ה-clear האחרון (batch של INSERT-ים
+    // נספר פעם אחת, לא לכל שורה). המחיקה והקישורים ל-user_recipients עוברים ב-JDBC
+    // ישירות ולא נספרים כאן - בשבילם יש jdbcUpdatesStartingWith
+    private long preparedStatementsSince(Runnable action) {
+        Statistics stats = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        stats.clear();
+        action.run();
+        return stats.getPrepareStatementCount();
+    }
+
+    // כמה פקודות jdbcTemplate.update שמתחילות בטקסט הזה נשלחו מאז ה-clear האחרון - כדי
+    // שבדיקות הביצועים יתפסו גם מחיקה/קישור שחזרו להיות פקודה לכל שורה. נספרת רק
+    // הגרסה update(String, Object...) שהקוד קורא לה - בתוכה JdbcTemplate קורא לעוד
+    // update פנימי, וה-spy רושם גם אותו, למרות שזו אותה פקודה אחת ל-DB
+    private long jdbcUpdatesStartingWith(String sqlPrefix) {
+        return Mockito.mockingDetails(jdbcTemplate).getInvocations().stream()
+                .filter(inv -> inv.getMethod().getName().equals("update"))
+                .filter(inv -> inv.getMethod().getParameterCount() == 2
+                        && inv.getMethod().getParameterTypes()[1] == Object[].class)
+                .filter(inv -> inv.getArguments().length > 0
+                        && inv.getArguments()[0] instanceof String sql
+                        && sql.startsWith(sqlPrefix))
+                .count();
+    }
+
+    private String postSave(SaveRecipientsRequest req) {
+        try {
+            return mockMvc.perform(post("/api/recipients/save")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsBytes(req)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void save_500NewRows_usesAHandfulOfStatementsNotOnePerRow() throws Exception {
+        // לפני התיקון: SELECT לכל שורה (merge) + INSERT לכל שורה + INSERT לכל קישור
+        // = כ-1,500 פקודות, כל אחת round-trip נפרד ל-Neon
+        User user = seedUser("0526666666", "גדולה");
+        List<Recipients> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            rows.add(newUnsavedRecipient("נמען" + i, "05" + String.format("%08d", i)));
+        }
+        SaveRecipientsRequest req = new SaveRecipientsRequest();
+        req.setPhone(user.getPhone());
+        req.setRecipients(rows);
+
+        String[] response = new String[1];
+        Mockito.clearInvocations(jdbcTemplate);
+        long statements = preparedStatementsSince(() -> response[0] = postSave(req));
+
+        assertThat(objectMapper.readTree(response[0])).hasSize(500);
+        assertThat(statements).isLessThan(40);
+        // כל 500 הקישורים למשתמשת - פקודת INSERT אחת, לא אחת לכל נמען
+        assertThat(jdbcUpdatesStartingWith("INSERT INTO user_recipients")).isEqualTo(1);
+
+        entityManager.clear();
+        mockMvc.perform(get("/api/recipients").param("phone", user.getPhone()))
+                .andExpect(jsonPath("$", hasSize(500)));
+    }
+
+    @Test
+    void save_500ExistingRows_updatesWithoutASelectPerRow() throws Exception {
+        // השמירה הרגילה אחרי עריכה - כל השורות כבר עם hashCode, אחת מהן השתנתה
+        User user = seedUser("0527777777", "עורכת גדולה");
+        List<Recipients> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            rows.add(newUnsavedRecipient("קיים" + i, "05" + String.format("%08d", i)));
+        }
+        SaveRecipientsRequest first = new SaveRecipientsRequest();
+        first.setPhone(user.getPhone());
+        first.setRecipients(rows);
+        JsonNode saved = objectMapper.readTree(postSave(first));
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Recipients> resend = new java.util.ArrayList<>();
+        for (JsonNode node : saved) {
+            resend.add(objectMapper.treeToValue(node, Recipients.class));
+        }
+        resend.get(0).setCity("עיר חדשה");
+        SaveRecipientsRequest second = new SaveRecipientsRequest();
+        second.setPhone(user.getPhone());
+        second.setRecipients(resend);
+
+        long statements = preparedStatementsSince(() -> postSave(second));
+        assertThat(statements).isLessThan(40);
+
+        entityManager.flush();
+        entityManager.clear();
+        Recipients edited = recipientsRepository.findById(resend.get(0).getHashCode()).orElseThrow();
+        assertThat(edited.getCity()).isEqualTo("עיר חדשה");
+        mockMvc.perform(get("/api/recipients").param("phone", user.getPhone()))
+                .andExpect(jsonPath("$", hasSize(500)));
+    }
+
+    @Test
+    void save_deleting300Links_usesOneStatementNotOnePerRow() throws Exception {
+        // לפני התיקון: טעינת כל קישור למחיקה + ה-recipient שלו (ManyToOne eager) בשאילתה
+        // נפרדת לכל אחד - 585 מחיקות לקחו כמעט 2 דקות מול Neon
+        User user = seedUser("0534545454", "מוחקת");
+        User other = seedUser("0535656565", "שכנה");
+        List<String> toDelete = new java.util.ArrayList<>();
+        for (int i = 0; i < 300; i++) {
+            toDelete.add(seedRecipientLinkedTo(user, "נמחק" + i, "05" + String.format("%08d", 50000 + i)).getHashCode());
+        }
+        // נמען שמקושר גם למשתמשת אחרת - המחיקה מנתקת רק את הקישור של המוחקת
+        Recipients shared = recipientsRepository.findById(toDelete.get(0)).orElseThrow();
+        UserRecipients otherLink = new UserRecipients();
+        otherLink.setUser(other);
+        otherLink.setRecipient(shared);
+        userRecipientsRepository.save(otherLink);
+        entityManager.flush();
+        entityManager.clear();
+
+        SaveRecipientsRequest req = new SaveRecipientsRequest();
+        req.setPhone(user.getPhone());
+        req.setRecipients(List.of());
+        req.setHashCodesToDelete(toDelete);
+
+        Mockito.clearInvocations(jdbcTemplate);
+        long statements = preparedStatementsSince(() -> postSave(req));
+        assertThat(statements).isLessThan(10);
+        // כל 300 המחיקות - פקודת DELETE אחת, לא אחת לכל שורה
+        assertThat(jdbcUpdatesStartingWith("DELETE FROM user_recipients")).isEqualTo(1);
+
+        Integer userLinks = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_recipients WHERE user_id = ?", Integer.class, user.getHashCode());
+        Integer otherLinks = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_recipients WHERE user_id = ?", Integer.class, other.getHashCode());
+        assertThat(userLinks).isZero();
+        assertThat(otherLinks).isEqualTo(1);
     }
 
     // ---------- GET /api/recipients ----------
