@@ -211,6 +211,7 @@ function ColumnHeader({
 export default function DataTable({ records, loading, onSave, onAutoSave, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
   const [rows, setRows] = useState(records);
   const [selectionModel, setSelectionModel] = useState(initialSelectedIds || []);
+  const [activeRowId, setActiveRowId] = useState(null);
   const [sortModel, setSortModel] = useState([]);
   const [activeFilters, setActiveFilters] = useState([]);
   const [inputValue, setInputValue] = useState('');
@@ -725,6 +726,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const createCellInputHandlers = useCallback((id, field) => ({
     onChange: (event) => updateCellValue(id, field, event.target.value),
     onClick: (event) => event.stopPropagation(),
+    onFocus: () => setActiveRowId(id),
     onKeyDown: (event) => {
       if (event.key === ' ') {
         event.stopPropagation();
@@ -917,6 +919,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             // ללחוץ בנפרד על חץ - אפשר עדיין להקליד חופשי במקביל. כניסה לעריכה תמיד
             // חושפת את הטקסט המלא (גם אם "שייך ל" מכווץ כרגע), ויציאה ממנה מכווצת שוב
             onFocus={() => {
+              setActiveRowId(id);
               setIsFocused(true);
               setExpanded(true);
               if (pickListField) openMenu();
@@ -1060,6 +1063,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           checked={Boolean(value)}
           onChange={(event) => updateCellValue(id, field, event.target.checked)}
           onClick={(event) => event.stopPropagation()}
+          onFocus={() => setActiveRowId(id)}
         />
       </Box>
     );
@@ -1834,7 +1838,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         // השמורים מחוץ לתחום הרינדור של הטבלה - שם ה-hover הטבעי (CSS) לא עובד כי
         // העכבר לא באמת מעל אלמנט השורה. משתמשת ב-hoveredRow (שנשאר מדויק גם כשהעכבר
         // עובר לאייקון, ר' handleMouseMove) במקום להסתמך רק על :hover
-        getRowClassName={(params) => (hoveredRow?.inGutter && String(params.id) === String(hoveredRow?.id) ? 'app-row-hovered' : '')}
+        getRowClassName={(params) => {
+          const classes = [];
+          if (String(params.id) === String(activeRowId)) classes.push('app-active-row');
+          if (hoveredRow?.inGutter && String(params.id) === String(hoveredRow.id)) classes.push('app-row-hovered');
+          return classes.join(' ');
+        }}
+        onCellClick={(params) => setActiveRowId(params.id)}
+        onCellFocusIn={(params) => setActiveRowId(params.id)}
         getCellClassName={(params) => {
           // התא שעליו נלחץ קליק ימני (בזמן שתפריט "העבר להערת כתובת" פתוח) - מודגש
           // כדי שיהיה ברור על איזה ערך מדובר. יורד אוטומטית כשהתפריט נסגר (contextMenu
@@ -1901,6 +1912,15 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           // getRowClassName למעלה
           '& .MuiDataGrid-row.app-row-hovered': {
             backgroundColor: '#eff6ff !important',
+          },
+          // השורה שבה המשתמש עובד נשארת מודגשת גם אחרי שהעכבר זז לתא אחר.
+          // המסגרת בלבד נשארת גם בשורה מסומנת, כדי לא להסתיר את צבע הבחירה שלה.
+          '& .MuiDataGrid-row.app-active-row': {
+            boxShadow: 'inset 0 0 0 1.5px #60a5fa',
+            zIndex: 1,
+          },
+          '& .MuiDataGrid-row.app-active-row:not(.Mui-selected)': {
+            backgroundColor: '#f8fbff !important',
           },
           '& .MuiDataGrid-footerContainer': {
             borderTop: '2px solid #e2e8f0',
