@@ -24,16 +24,6 @@ export function buildSavedSnapshot(rows) {
   return snapshot;
 }
 
-// האם שתי "תמונות" (buildSavedSnapshot) מתארות בדיוק את אותן שורות עם אותו תוכן -
-// משמש בטעינת הדף כדי לדעת אם העותק המקומי שהוצג מיד עדיין זהה למה שב-DB
-export function snapshotsMatch(a, b) {
-  if (a.size !== b.size) return false;
-  for (const [hashCode, signature] of a) {
-    if (b.get(hashCode) !== signature) return false;
-  }
-  return true;
-}
-
 // רק השורות שבאמת צריך לשלוח בשמירה: חדשות (בלי hashCode) או כאלה שהתוכן שלהן
 // שונה ממה ששמור. שורה עם hashCode שלא מופיעה ב-snapshot (למשל נטענה מגיבוי מקומי
 // ולא מהשרת) נשלחת גם היא - עדיף לשלוח בלי צורך מאשר לפספס שינוי
