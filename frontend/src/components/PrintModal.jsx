@@ -29,6 +29,26 @@ const GRID_PADDING_PX = 16; // padding של 1 (8px) מכל צד
 const PAGE_CONTENT_WIDTH = PREVIEW_PANEL_WIDTH - GRID_PADDING_PX;
 const PAGE_CONTENT_HEIGHT = PAGE_BOX_HEIGHT - GRID_PADDING_PX;
 const { gap: MOCK_GAP_PX, sizes: MOCK_LABEL_SIZES } = getScaledLabelSizes(PAGE_CONTENT_WIDTH);
+const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
+const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+
+function getSavedSelectedRows() {
+  try {
+    const saved = sessionStorage.getItem(SELECTED_ROWS_STORAGE_KEY);
+    const rows = saved ? JSON.parse(saved) : [];
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSelectedRows(rows) {
+  sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
+  sessionStorage.setItem(
+    SELECTED_ROW_IDS_STORAGE_KEY,
+    JSON.stringify(rows.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
+  );
+}
 
 function getLabelsPerPage(size) {
   const columns = getColumns(PAGE_CONTENT_WIDTH, size.width, MOCK_GAP_PX);
@@ -102,11 +122,10 @@ function LabelSheetPreview({ labelSize }) {
   );
 }
 
-export default function PrintModal({ open, onClose, selectedRows, records = [] }) {
+export default function PrintModal({ open, onClose, selectedRows = [] }) {
   const navigate = useNavigate();
 
-  // אם לא סימנו אף שורה - מדפיסים את כולן, במקום לא להדפיס כלום
-  const rowsToPrint = selectedRows.length > 0 ? selectedRows : records;
+  const rowsToPrint = selectedRows.length > 0 ? selectedRows : getSavedSelectedRows();
   
   // 1. בדיקה בטוחה עבור השלב (Step)
   const [step, setStep] = useState(() => {
@@ -166,6 +185,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   const handlePrint = () => {
     // אותו דף הדפסה בדיוק כמו מה"תצוגה מקדימה" - רק עם דגל שגורם לו לפתוח את חלון
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
+    saveSelectedRows(rowsToPrint);
     navigate('/print-preview', {
       state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, autoPrint: true },
     });
@@ -181,6 +201,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   };
 
   const handlePreview = () => {
+    saveSelectedRows(rowsToPrint);
     navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod } });
   };
 

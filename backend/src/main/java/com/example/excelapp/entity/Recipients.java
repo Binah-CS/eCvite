@@ -1,6 +1,7 @@
 package com.example.excelapp.entity;
 
 import com.example.excelapp.util.HashUtil;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -58,7 +59,15 @@ public class Recipients {
     @Column(name = "created_by")
     private String createdBy;
 
-    private boolean print; // flag
+    @Transient
+    private Boolean printEnabled;
+
+    // נשאר רק לתאימות לאחור עם בדיקות וקוד ישן. ההעדפה האמיתית נשמרת
+    // ב-recipient_print_preferences לפי משתמש ונמען, ולא במידע הכללי של הנמען.
+    @Transient
+    @JsonIgnore
+    private boolean print;
+
     private String display;
 
     @Column(name = "address_note")
