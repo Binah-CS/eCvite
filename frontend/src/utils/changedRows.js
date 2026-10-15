@@ -1,8 +1,10 @@
 // "חתימה" של שורה לצורך השוואה מול מה ששמור ב-DB - בלי id (מזהה תצוגה מקומי בלבד,
 // DataTable מוסיף אותו לכל שורה) ובלי duplicateSalt (לא נשמר ב-DB בכלל). null,
 // undefined ו-'' נחשבים אותו ערך - השרת מחזיר null לשדה ריק, והטבלה כותבת '' אחרי
-// עריכה, ושורה שערכו תא בה והחזירו אותו לריק לא באמת השתנתה
-const IGNORED_FIELDS = new Set(['id', 'duplicateSalt']);
+// עריכה, ושורה שערכו תא בה והחזירו אותו לריק לא באמת השתנתה. גם בלי printEnabled
+// (הווי "להדפיס" ליד כל נמען) - הוא נשמר בשרת מיד ובנפרד כשמשנים אותו, לא דרך "שמור",
+// ולכן שינוי שלו לא אמור לגרום לשמירה לשלוח את השורה שוב
+const IGNORED_FIELDS = new Set(['id', 'duplicateSalt', 'printEnabled']);
 
 export function rowSignature(row) {
   return JSON.stringify(
