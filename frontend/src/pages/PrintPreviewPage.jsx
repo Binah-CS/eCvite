@@ -47,11 +47,12 @@ function buildNameLine(row, getPrintFlag, printLanguage) {
   return printLanguage === 'en' ? `To: ${content}` : `לכבוד ${content}`;
 }
 
-function buildAddressLine1(row, getPrintFlag) {
-  return [
-    getPrintFlag('street') && row.street ? row.street : '',
-    getPrintFlag('houseNo') && row.houseNo ? row.houseNo : '',
-  ].filter(Boolean).join(' ');
+function buildAddressLine1(row, getPrintFlag, printLanguage) {
+  const street = getPrintFlag('street') && row.street ? row.street : '';
+  const houseNo = getPrintFlag('houseNo') && row.houseNo ? row.houseNo : '';
+  return (printLanguage === 'en' ? [houseNo, street] : [street, houseNo])
+    .filter(Boolean)
+    .join(' ');
 }
 
 function buildAddressLine2(row, getPrintFlag) {
@@ -212,12 +213,12 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                 )}
 
                 {/* שורת הרחוב */}
-                {buildAddressLine1(row, getPrintFlag) && (
+                {buildAddressLine1(row, getPrintFlag, printLanguage) && (
                   <Typography
                     variant={layout.addrVariant}
                     sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
                   >
-                    {buildAddressLine1(row, getPrintFlag)}
+                    {buildAddressLine1(row, getPrintFlag, printLanguage)}
                   </Typography>
                 )}
 
