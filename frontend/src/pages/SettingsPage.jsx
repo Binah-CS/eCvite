@@ -73,7 +73,7 @@ export default function SettingsPage() {
         {title}
       </Typography>
       <List dense sx={{ bgcolor: '#f8fafc', borderRadius: 2, p: 0.5 }}>
-        {fieldDefs.map((f) => (
+        {fieldDefs.filter((f) => f.technicalName !== 'print').map((f) => (
           <ListItemButton
             key={f.technicalName}
             onClick={() => toggleFlag(f.technicalName, key)}
