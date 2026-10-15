@@ -1,10 +1,21 @@
 // src/components/PrintModal.jsx
-import { useState } from 'react';
-import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert } from '@mui/material';
+import { useEffect, useState } from 'react';
+import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert, IconButton } from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
+import RemoveIcon from '@mui/icons-material/Remove';
 import { useNavigate } from 'react-router-dom';
+import { loadLabelPrintSettings, saveLabelPrintSettings } from '../utils/labelPrintSettings';
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
 import { MODAL_TEXTS, FONT_OPTIONS } from '../pages/HardCodePage';
-import { getScaledLabelSizes, getColumns } from '../utils/labelSheetLayout';
+import {
+  getScaledLabelSizes,
+  getColumns,
+  getMaxFontScale,
+  clampFontScale,
+  FONT_SCALE_MIN,
+  FONT_SCALE_DEFAULT,
+  FONT_SCALE_STEP,
+} from '../utils/labelSheetLayout';
 
 const modalStyle = {
   position: 'absolute',
@@ -116,39 +127,69 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     return 1;
   });
 
-  // 2. בדיקה בטוחה עבור גודל המדבקה
-  const [labelSize, setLabelSize] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('savedLabelSize') || 'standard';
-    }
-    return 'standard';
-  });
+  // הבחירות השמורות של המשתמשת המחוברת (בשרת אצלה, ר' labelPrintSettings.js) - אחרי
+  // הפעם הראשונה אלה ברירות המחדל שלה. נקרא פעם אחת, כשהחלון נטען
+  const [userLabelSettings] = useState(loadLabelPrintSettings);
 
-  // 3. בדיקה בטוחה עבור המדפסת - מתעלמת מערך שמור ישן שכבר לא תקין (כמו "printer1" מגרסה קודמת)
-  const [printer, setPrinter] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem('savedPrinter');
-      return saved === 'home' || saved === 'office' ? saved : 'home';
-    }
-    return 'home';
-  });
+  // ערך התחלתי לכל בחירה: קודם מה שנשמר בחזרה מהתצוגה המקדימה ("שינוי הגדרות
+  // הדפסה"), אחר כך הבחירה השמורה של המשתמשת, ורק אז ברירת המחדל. ערך לא תקין
+  // (כמו "printer1" מגרסה קודמת, או כתב שכבר לא ברשימה) מדולג
+  const initialChoice = (sessionKey, prefKey, isValid, fallback) => {
+    const fromPreview = typeof window !== 'undefined' ? sessionStorage.getItem(sessionKey) : null;
+    if (fromPreview !== null && isValid(fromPreview)) return fromPreview;
+    const fromUser = userLabelSettings[prefKey];
+    if (fromUser !== undefined && fromUser !== null && isValid(String(fromUser))) return String(fromUser);
+    return fallback;
+  };
+  const isLabelSize = (v) => v === 'standard' || v === 'large';
+  const initialLabelSize = initialChoice('savedLabelSize', 'labelSize', isLabelSize, 'standard');
 
-  // 3.1 בדיקה בטוחה עבור אופן קבלת ההדפסה (רלוונטי רק כשבוחרים במדפסת המשרד)
-  const [deliveryMethod, setDeliveryMethod] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem('savedDeliveryMethod');
-      return saved === 'courier' || saved === 'pickup' ? saved : 'courier';
-    }
-    return 'courier';
-  });
+  // 2. גודל המדבקה
+  const [labelSize, setLabelSize] = useState(initialLabelSize);
 
-  // 4. בדיקה בטוחה עבור סוג הכתב
-  const [fontType, setFontType] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('savedFontType') || FONT_OPTIONS[0].value;
-    }
-    return FONT_OPTIONS[0].value;
-  });
+  // 3. המדפסת
+  const [printer, setPrinter] = useState(() =>
+    initialChoice('savedPrinter', 'printer', (v) => v === 'home' || v === 'office', 'home'));
+
+  // 3.1 אופן קבלת ההדפסה (רלוונטי רק כשבוחרים במדפסת המשרד)
+  const [deliveryMethod, setDeliveryMethod] = useState(() =>
+    initialChoice('savedDeliveryMethod', 'deliveryMethod', (v) => v === 'courier' || v === 'pickup', 'courier'));
+
+  // 4. סוג הכתב
+  const [fontType, setFontType] = useState(() =>
+    initialChoice('savedFontType', 'fontType', (v) => FONT_OPTIONS.some((f) => f.value === v), FONT_OPTIONS[0].value));
+
+  // 5. גודל כתב (אחוז מהגודל הרגיל, 100 = כמו היום) - חופשי, אבל רק עד המקסימום
+  // שנכנס בגודל המדבקה שנבחר (ר' getMaxFontScale)
+  const [fontScale, setFontScale] = useState(() => clampFontScale(
+    initialChoice('savedFontScale', 'fontScale', (v) => v.trim() !== '' && Number.isFinite(Number(v)), String(FONT_SCALE_DEFAULT)),
+    initialLabelSize
+  ));
+
+  // 6. עובי כתב לכל המדבקה, כולל השם - "רגיל" או "מודגש"
+  const [fontWeight, setFontWeight] = useState(() =>
+    initialChoice('savedFontWeight', 'fontWeight', (v) => v === 'regular' || v === 'bold', 'regular'));
+
+  // הערכים שנשמרו בחזרה מהתצוגה המקדימה ("שינוי הגדרות הדפסה") נקראים פעם אחת - כבר
+  // נקלטו למעלה - ונמחקים מיד. בלי זה, ערך שנשאר (למשל אחרי הדפסה מהתצוגה המקדימה
+  // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
+  // אפילו עובר למשתמשת אחרת שמתחברת באותה לשונית
+  useEffect(() => {
+    ['savedLabelSize', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
+      .forEach((key) => sessionStorage.removeItem(key));
+  }, []);
+
+  // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
+  // ייפתח אצלה עם הבחירות האלה. לא מחכים לתשובה - ההדפסה לא תלויה בשמירה
+  const rememberChoices = () => {
+    saveLabelPrintSettings({ fontType, labelSize, printer, deliveryMethod, fontScale, fontWeight });
+  };
+
+  // מעבר לגודל מדבקה קטן יותר מוריד גודל כתב שכבר לא נכנס בו למקסימום החדש
+  const handleLabelSizeChange = (newSize) => {
+    setLabelSize(newSize);
+    setFontScale((current) => clampFontScale(current, newSize));
+  };
 
   const [printType, setPrintType] = useState('labels');
   const [notification, setNotification] = useState('');
@@ -164,10 +205,11 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   };
 
   const handlePrint = () => {
+    rememberChoices();
     // אותו דף הדפסה בדיוק כמו מה"תצוגה מקדימה" - רק עם דגל שגורם לו לפתוח את חלון
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
@@ -175,13 +217,16 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     sessionStorage.removeItem('savedPrinter');
     sessionStorage.removeItem('savedFontType');
     sessionStorage.removeItem('savedDeliveryMethod');
+    sessionStorage.removeItem('savedFontScale');
+    sessionStorage.removeItem('savedFontWeight');
 
     onClose();
     setStep(1);
   };
 
   const handlePreview = () => {
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod } });
+    rememberChoices();
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight } });
   };
 
   return (
@@ -212,7 +257,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
             <Typography variant="h6" mb={3}>{MODAL_TEXTS.STEP_2_TITLE}</Typography>
 
             <Stack direction="row" spacing={3} alignItems="stretch">
-              <Stack spacing={3} sx={{ flex: 1 }}>
+              <Stack spacing={2} sx={{ flex: 1 }}>
                 <FormControl fullWidth>
                   <InputLabel id="font-label">{MODAL_TEXTS.FONT_INPUT_LABEL}</InputLabel>
                   <Select
@@ -229,13 +274,56 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
                   </Select>
                 </FormControl>
 
+                {/* גודל ועובי כתב - מתחת לבחירת הכתב. ה-+ נעצר (מושבת) במקסימום שנכנס
+                    בגודל המדבקה שנבחר, כך שאי אפשר לבחור גודל שנחתך */}
+                {/* גודל ועובי - בלוק צפוף אחד, שורה לכל אחד (כותרת מימין, בחירה משמאל) */}
+                <Box sx={{ mt: '8px !important' }}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+                    {MODAL_TEXTS.FONT_SIZE_INPUT_LABEL}
+                  </Typography>
+                  <IconButton
+                    size="small"
+                    onClick={() => setFontScale((s) => clampFontScale(s - FONT_SCALE_STEP, labelSize))}
+                    disabled={fontScale <= FONT_SCALE_MIN}
+                  >
+                    <RemoveIcon fontSize="small" />
+                  </IconButton>
+                  <Typography sx={{ minWidth: 48, textAlign: 'center', fontWeight: 600 }}>
+                    {fontScale}%
+                  </Typography>
+                  <IconButton
+                    size="small"
+                    onClick={() => setFontScale((s) => clampFontScale(s + FONT_SCALE_STEP, labelSize))}
+                    disabled={fontScale >= getMaxFontScale(labelSize)}
+                  >
+                    <AddIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
+
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+                    {MODAL_TEXTS.FONT_WEIGHT_INPUT_LABEL}
+                  </Typography>
+                  <RadioGroup
+                    row
+                    value={fontWeight}
+                    onChange={(e) => setFontWeight(e.target.value)}
+                    sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                  >
+                    <FormControlLabel value="regular" control={<Radio size="small" />} label={MODAL_TEXTS.FONT_WEIGHT_REGULAR} />
+                    <FormControlLabel value="bold" control={<Radio size="small" />} label={MODAL_TEXTS.FONT_WEIGHT_BOLD} sx={{ mr: 0 }} />
+                  </RadioGroup>
+                </Stack>
+                </Box>
+
                 <FormControl fullWidth>
                   <InputLabel id="size-label">{MODAL_TEXTS.SIZE_INPUT_LABEL}</InputLabel>
                   <Select
                     labelId="size-label"
                     value={labelSize}
                     label={MODAL_TEXTS.SIZE_INPUT_LABEL}
-                    onChange={(e) => setLabelSize(e.target.value)}
+                    onChange={(e) => handleLabelSizeChange(e.target.value)}
                   >
                     <MenuItem value="standard">{MODAL_TEXTS.SIZE_STANDARD}</MenuItem>
                     <MenuItem value="large">{MODAL_TEXTS.SIZE_LARGE}</MenuItem>

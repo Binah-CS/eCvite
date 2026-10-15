@@ -52,6 +52,12 @@ public class User {
     @Column(name = "column_preferences")
     private String columnPreferences;
 
+    // הבחירות האחרונות של המשתמשת בחלון "הדפסת מדבקות" (JSON: כתב, גודל ועובי כתב,
+    // גודל מדבקה, מדפסת וכו') - כמו columnPreferences לתצוגת הטבלה, כך שאחרי הפעם
+    // הראשונה החלון נפתח אצלה תמיד עם ברירות המחדל שלה, בכל מחשב
+    @Column(name = "label_print_settings", length = 1000)
+    private String labelPrintSettings;
+
     @PrePersist
     public void onCreate() {
         createdAt = LocalDateTime.now();

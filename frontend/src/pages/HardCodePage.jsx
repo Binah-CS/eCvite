@@ -10,6 +10,10 @@ export const MODAL_TEXTS = {
   
   STEP_2_TITLE: "הגדרות הדפסה (מדבקות)",
   FONT_INPUT_LABEL: "בחירת כתב",
+  FONT_SIZE_INPUT_LABEL: "גודל כתב",
+  FONT_WEIGHT_INPUT_LABEL: "עובי כתב",
+  FONT_WEIGHT_REGULAR: "רגיל",
+  FONT_WEIGHT_BOLD: "מודגש",
   SIZE_INPUT_LABEL: "בחירת גודל מדבקה",
   PRINTER_INPUT_LABEL: "בחירת מדפסת",
   
