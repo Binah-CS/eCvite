@@ -1,5 +1,5 @@
 // src/components/PrintModal.jsx
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert, Checkbox } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
@@ -159,6 +159,13 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     }
     return true;
   });
+
+  // הערך שנשמר בחזרה מהתצוגה המקדימה נקרא פעם אחת - כבר נקלט למעלה - ונמחק מיד. בלי
+  // זה, בחירה שנשארה (למשל אחרי "שינוי הגדרות" וסגירה בלי הדפסה) הייתה גוברת על
+  // ברירת המחדל גם בהדפסות הבאות, שבכלל לא הגיעו מהתצוגה המקדימה
+  useEffect(() => {
+    sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
+  }, []);
 
   const [printType, setPrintType] = useState('labels');
   const [notification, setNotification] = useState('');
