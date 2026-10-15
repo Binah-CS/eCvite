@@ -9,7 +9,7 @@ import { VisibleRowsContext } from '../utils/visibleRowsContext';
 import PrintModal from '../components/PrintModal'; 
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
-import { buildSavedSnapshot, selectRowsToSave, snapshotsMatch } from '../utils/changedRows';
+import { buildSavedSnapshot, selectRowsToSave } from '../utils/changedRows';
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
@@ -148,13 +148,6 @@ export default function DashboardPage() {
   // שורות חדשות או שהשתנו מאז. ref ולא state - לא משפיע על התצוגה, רק על השמירה
   const savedSnapshotRef = useRef(new Map());
 
-  // גרסת ref של isTableDirty - הבדיקה ברקע ב-loadRecords מסתיימת אחרי שהמשתמשת אולי
-  // כבר התחילה לערוך, וצריכה את הערך העדכני, לא את זה מרגע תחילת הטעינה
-  const isTableDirtyRef = useRef(false);
-  useEffect(() => {
-    isTableDirtyRef.current = isTableDirty;
-  }, [isTableDirty]);
-
   const loadRecords = useCallback(async () => {
     if (!user?.phone) {
       setRecords([]);
@@ -162,57 +155,41 @@ export default function DashboardPage() {
       return;
     }
 
-    // אם העותק המקומי מסומן כזהה ל-DB - מציגים אותו מיד, בלי לחכות לשליפת כל
-    // הנמענים (כשנייה וחצי ל-1,000 נמענים). השליפה מה-DB ממשיכה ברקע רק כדי לוודא
-    // שלא השתנה משהו ממקום אחר (למשל אותה משתמשת ממחשב אחר)
-    const loadStartedAt = performance.now(); // לשורות "⏱ טעינה" בלוג
+    // אם העותק המקומי מסומן כזהה ל-DB - מציגים אותו ולא פונים ל-DB בכלל. כרגע
+    // מניחים חלון אחד לכל משתמשת, ולכן ה-DB לא יכול להיות מעודכן יותר מהדפדפן.
+    // ריבוי חלונות/משתמשות (עותק ישן, דריסה בשמירה) ייפתר בנפרד - "DEV: Multi-user
+    // version control". בכוונה בלי בדיקה ועדכון ברקע: עדכון שמגיע תוך כדי עריכה
+    // עלול להשפיע על מה שכותבים באותו רגע ולבלבל
     const local = getLocalRecords(user.phone);
-    const showedLocal = isLocalInSync(user.phone) && local.length > 0;
-    if (showedLocal) {
+    if (isLocalInSync(user.phone) && local.length > 0) {
       savedSnapshotRef.current = buildSavedSnapshot(local);
       setRecords(local);
       setLoading(false);
-      console.log(`⏱ טעינה: הטבלה הוצגה מיד מהעותק המקומי (${local.length} שורות)`);
-    } else {
-      setLoading(true);
+      console.log(`⏱ טעינה: מהעותק המקומי, בלי פנייה ל-DB (${local.length} שורות)`);
+      return;
     }
 
+    const loadStartedAt = performance.now(); // לשורת "⏱ טעינה" בלוג
     try {
+      setLoading(true);
       const response = await api.getRecipients(user.phone);
-      const loadMs = Math.round(performance.now() - loadStartedAt);
 
       //  שיפור: אם הבקאנד החזיר רשימה ריקה (כי ה-DB ריק/לא מחובר), נטען כגיבוי מהלוקאל
       if (response.data && response.data.length > 0) {
-        const serverSnapshot = buildSavedSnapshot(response.data);
-        // זהה למה שכבר מוצג - לא נוגעים בכלום (המקרה הרגיל). שונה, אבל המשתמשת
-        // כבר התחילה לערוך את מה שהוצג - לא דורסים לה את העריכה; ה-snapshot נשאר
-        // של העותק שהוצג, כך שבשמירה יישלחו רק השורות שהיא עצמה שינתה
-        const alreadyShowingThis = showedLocal && snapshotsMatch(serverSnapshot, savedSnapshotRef.current);
-        const userAlreadyEditing = showedLocal && isTableDirtyRef.current;
-        if (!showedLocal) {
-          console.log(`⏱ טעינה מהשרת: ${loadMs} ms (${response.data.length} שורות)`);
-        } else if (alreadyShowingThis) {
-          console.log(`⏱ טעינה: נבדק מול השרת ברקע - ${loadMs} ms, אין שינוי`);
-        } else if (userAlreadyEditing) {
-          console.log(`⏱ טעינה: נבדק מול השרת ברקע - ${loadMs} ms, יש הבדל, אבל כבר התחילו לערוך - לא עודכן`);
-        } else {
-          console.log(`⏱ טעינה: נבדק מול השרת ברקע - ${loadMs} ms, יש הבדל - הטבלה עודכנה מהשרת`);
-        }
-        if (!alreadyShowingThis && !userAlreadyEditing) {
-          const serverRecords = response.data.map((row) => ({ ...row, id: row.hashCode }));
-          savedSnapshotRef.current = serverSnapshot;
-          setRecords(serverRecords);
-          saveLocalRecords(user.phone, serverRecords);
-          setLocalInSync(user.phone, true);
-        }
-      } else if (!showedLocal) {
+        console.log(`⏱ טעינה מהשרת: ${Math.round(performance.now() - loadStartedAt)} ms (${response.data.length} שורות)`);
+        const serverRecords = response.data.map((row) => ({ ...row, id: row.hashCode }));
+        savedSnapshotRef.current = buildSavedSnapshot(serverRecords);
+        setRecords(serverRecords);
+        saveLocalRecords(user.phone, serverRecords);
+        setLocalInSync(user.phone, true);
+      } else {
         setRecords(local);
       }
 
       setError('');
     } catch (err) {
       setError('לא ניתן לטעון רשומות מהמנוע האחורי. עובד במצב לא מקוון.');
-      if (!showedLocal) setRecords(local);
+      setRecords(local);
     } finally {
       setLoading(false);
     }
