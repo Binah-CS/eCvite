@@ -56,6 +56,27 @@ describe('excel columns cache', () => {
     await expect(getExcelColumns()).resolves.toEqual([{ technicalName: 'after' }]);
   });
 
+  it('a background refresh that finishes after an invalidate does not bring back stale columns', async () => {
+    api.getRecipientColumns.mockResolvedValueOnce({ data: [{ technicalName: 'stored' }] });
+    await getExcelColumns();
+    simulatePageRefresh();
+
+    let resolveStale;
+    api.getRecipientColumns
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStale = resolve; }))
+      .mockResolvedValueOnce({ data: [{ technicalName: 'with-new-alias' }] });
+
+    await getExcelColumns(); // answers from storage, background request still pending
+    // a new alias is saved meanwhile -> explicit refresh
+    await expect(refreshExcelColumns()).resolves.toEqual([{ technicalName: 'with-new-alias' }]);
+
+    resolveStale({ data: [{ technicalName: 'stale' }] });
+    await flushPromises();
+
+    await expect(getExcelColumns()).resolves.toEqual([{ technicalName: 'with-new-alias' }]);
+    expect(JSON.parse(localStorage.getItem('excelColumns'))).toEqual([{ technicalName: 'with-new-alias' }]);
+  });
+
   it('a failed background refresh keeps the stored columns', async () => {
     api.getRecipientColumns
       .mockResolvedValueOnce({ data: [{ technicalName: 'kept' }] })

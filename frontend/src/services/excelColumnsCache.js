@@ -8,6 +8,11 @@ const STORAGE_KEY = 'excelColumns';
 
 let cachedColumnsPromise = null;
 
+// Bumped on every invalidate. A server response that started before the
+// latest invalidate is stale (e.g. it predates an alias that was just saved)
+// and must not write itself back into the cache or storage.
+let cacheGeneration = 0;
+
 function readStoredColumns() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -27,10 +32,11 @@ function writeStoredColumns(columns) {
 }
 
 function fetchColumnsFromServer() {
+  const generation = cacheGeneration;
   return api
       .getRecipientColumns()
       .then((res) => {
-        writeStoredColumns(res.data);
+        if (generation === cacheGeneration) writeStoredColumns(res.data);
         return res.data;
       });
 }
@@ -40,11 +46,13 @@ export function getExcelColumns() {
     const stored = readStoredColumns();
     if (stored) {
       // Answer from storage right away; when the server responds, later
-      // callers (e.g. the next Excel import) get the fresh definitions.
+      // callers (e.g. the next Excel import) get the fresh definitions -
+      // unless the cache was invalidated meanwhile (see cacheGeneration).
       cachedColumnsPromise = Promise.resolve(stored);
+      const generation = cacheGeneration;
       fetchColumnsFromServer()
           .then((fresh) => {
-            cachedColumnsPromise = Promise.resolve(fresh);
+            if (generation === cacheGeneration) cachedColumnsPromise = Promise.resolve(fresh);
           })
           .catch(() => {});
     } else {
@@ -67,6 +75,7 @@ export function refreshExcelColumns() {
 // Also drops the stored copy: an explicit invalidate (new alias saved, login,
 // preferences changed) must wait for the server, not answer with stale data.
 export function invalidateExcelColumnsCache() {
+  cacheGeneration += 1;
   cachedColumnsPromise = null;
   try {
     localStorage.removeItem(STORAGE_KEY);
