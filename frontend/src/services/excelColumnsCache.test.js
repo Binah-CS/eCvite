@@ -29,4 +29,53 @@ describe('excel columns cache', () => {
 
     expect(api.getRecipientColumns).toHaveBeenCalledTimes(2);
   });
+
+  it('after a page refresh, answers from storage immediately and refreshes in the background', async () => {
+    api.getRecipientColumns
+      .mockResolvedValueOnce({ data: [{ technicalName: 'old' }] })
+      .mockResolvedValueOnce({ data: [{ technicalName: 'new' }] });
+    await getExcelColumns(); // first load - waits for the server and stores the result
+
+    simulatePageRefresh();
+    await expect(getExcelColumns()).resolves.toEqual([{ technicalName: 'old' }]);
+    expect(api.getRecipientColumns).toHaveBeenCalledTimes(2); // background refresh started
+
+    await flushPromises();
+    await expect(getExcelColumns()).resolves.toEqual([{ technicalName: 'new' }]);
+    expect(JSON.parse(localStorage.getItem('excelColumns'))).toEqual([{ technicalName: 'new' }]);
+  });
+
+  it('an explicit invalidate drops the stored copy and waits for the server', async () => {
+    api.getRecipientColumns
+      .mockResolvedValueOnce({ data: [{ technicalName: 'before' }] })
+      .mockResolvedValueOnce({ data: [{ technicalName: 'after' }] });
+    await getExcelColumns();
+
+    invalidateExcelColumnsCache();
+    expect(localStorage.getItem('excelColumns')).toBeNull();
+    await expect(getExcelColumns()).resolves.toEqual([{ technicalName: 'after' }]);
+  });
+
+  it('a failed background refresh keeps the stored columns', async () => {
+    api.getRecipientColumns
+      .mockResolvedValueOnce({ data: [{ technicalName: 'kept' }] })
+      .mockRejectedValueOnce(new Error('offline'));
+    await getExcelColumns();
+
+    simulatePageRefresh();
+    await expect(getExcelColumns()).resolves.toEqual([{ technicalName: 'kept' }]);
+    await flushPromises();
+    await expect(getExcelColumns()).resolves.toEqual([{ technicalName: 'kept' }]);
+  });
 });
+
+// A refresh wipes the module's in-memory cache but keeps localStorage
+function simulatePageRefresh() {
+  const stored = localStorage.getItem('excelColumns');
+  invalidateExcelColumnsCache();
+  localStorage.setItem('excelColumns', stored);
+}
+
+function flushPromises() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}

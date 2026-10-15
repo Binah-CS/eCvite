@@ -8,7 +8,7 @@ import api from '../services/api';
 import PrintModal from '../components/PrintModal'; 
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
-import { buildSavedSnapshot, selectRowsToSave } from '../utils/changedRows';
+import { buildSavedSnapshot, selectRowsToSave, snapshotsMatch } from '../utils/changedRows';
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
@@ -40,6 +40,26 @@ function saveLocalRecords(phone, rows) {
   localStorage.setItem(`records-${phone}`, JSON.stringify(rows));
 }
 
+// "דגל" שהעותק המקומי (records-<phone>) זהה בדיוק למה שב-DB - נדלק אחרי טעינה מהשרת
+// ואחרי כל שמירה מוצלחת, ונכבה ברגע שיש עריכה שעוד לא נשמרה. כשהוא דלוק, טעינת הדף
+// מציגה את העותק המקומי מיד, בלי לחכות לשליפת כל הנמענים מה-DB. try/catch - גישה
+// ל-localStorage יכולה לזרוק (גלישה פרטית/חסימת אחסון), ואז פשוט לא סומכים על העותק
+function isLocalInSync(phone) {
+  try {
+    return localStorage.getItem(`records-synced-${phone}`) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function setLocalInSync(phone, inSync) {
+  try {
+    localStorage.setItem(`records-synced-${phone}`, inSync ? 'true' : 'false');
+  } catch {
+    // לא קריטי - בפעם הבאה פשוט נטען מה-DB כרגיל
+  }
+}
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [records, setRecords] = useState([]);
@@ -67,6 +87,13 @@ export default function DashboardPage() {
   // שורות חדשות או שהשתנו מאז. ref ולא state - לא משפיע על התצוגה, רק על השמירה
   const savedSnapshotRef = useRef(new Map());
 
+  // גרסת ref של isTableDirty - הבדיקה ברקע ב-loadRecords מסתיימת אחרי שהמשתמשת אולי
+  // כבר התחילה לערוך, וצריכה את הערך העדכני, לא את זה מרגע תחילת הטעינה
+  const isTableDirtyRef = useRef(false);
+  useEffect(() => {
+    isTableDirtyRef.current = isTableDirty;
+  }, [isTableDirty]);
+
   const loadRecords = useCallback(async () => {
     if (!user?.phone) {
       setRecords([]);
@@ -74,23 +101,57 @@ export default function DashboardPage() {
       return;
     }
 
-    try {
+    // אם העותק המקומי מסומן כזהה ל-DB - מציגים אותו מיד, בלי לחכות לשליפת כל
+    // הנמענים (כשנייה וחצי ל-1,000 נמענים). השליפה מה-DB ממשיכה ברקע רק כדי לוודא
+    // שלא השתנה משהו ממקום אחר (למשל אותה משתמשת ממחשב אחר)
+    const loadStartedAt = performance.now(); // לשורות "⏱ טעינה" בלוג
+    const local = getLocalRecords(user.phone);
+    const showedLocal = isLocalInSync(user.phone) && local.length > 0;
+    if (showedLocal) {
+      savedSnapshotRef.current = buildSavedSnapshot(local);
+      setRecords(local);
+      setLoading(false);
+      console.log(`⏱ טעינה: הטבלה הוצגה מיד מהעותק המקומי (${local.length} שורות)`);
+    } else {
       setLoading(true);
+    }
+
+    try {
       const response = await api.getRecipients(user.phone);
+      const loadMs = Math.round(performance.now() - loadStartedAt);
 
       //  שיפור: אם הבקאנד החזיר רשימה ריקה (כי ה-DB ריק/לא מחובר), נטען כגיבוי מהלוקאל
       if (response.data && response.data.length > 0) {
-        savedSnapshotRef.current = buildSavedSnapshot(response.data);
-        setRecords(response.data);
-      } else {
-        const local = getLocalRecords(user.phone);
+        const serverSnapshot = buildSavedSnapshot(response.data);
+        // זהה למה שכבר מוצג - לא נוגעים בכלום (המקרה הרגיל). שונה, אבל המשתמשת
+        // כבר התחילה לערוך את מה שהוצג - לא דורסים לה את העריכה; ה-snapshot נשאר
+        // של העותק שהוצג, כך שבשמירה יישלחו רק השורות שהיא עצמה שינתה
+        const alreadyShowingThis = showedLocal && snapshotsMatch(serverSnapshot, savedSnapshotRef.current);
+        const userAlreadyEditing = showedLocal && isTableDirtyRef.current;
+        if (!showedLocal) {
+          console.log(`⏱ טעינה מהשרת: ${loadMs} ms (${response.data.length} שורות)`);
+        } else if (alreadyShowingThis) {
+          console.log(`⏱ טעינה: נבדק מול השרת ברקע - ${loadMs} ms, אין שינוי`);
+        } else if (userAlreadyEditing) {
+          console.log(`⏱ טעינה: נבדק מול השרת ברקע - ${loadMs} ms, יש הבדל, אבל כבר התחילו לערוך - לא עודכן`);
+        } else {
+          console.log(`⏱ טעינה: נבדק מול השרת ברקע - ${loadMs} ms, יש הבדל - הטבלה עודכנה מהשרת`);
+        }
+        if (!alreadyShowingThis && !userAlreadyEditing) {
+          const serverRecords = response.data.map((row) => ({ ...row, id: row.hashCode }));
+          savedSnapshotRef.current = serverSnapshot;
+          setRecords(serverRecords);
+          saveLocalRecords(user.phone, serverRecords);
+          setLocalInSync(user.phone, true);
+        }
+      } else if (!showedLocal) {
         setRecords(local);
       }
 
       setError('');
     } catch (err) {
       setError('לא ניתן לטעון רשומות מהמנוע האחורי. עובד במצב לא מקוון.');
-      setRecords(getLocalRecords(user.phone));
+      if (!showedLocal) setRecords(local);
     } finally {
       setLoading(false);
     }
@@ -176,6 +237,7 @@ export default function DashboardPage() {
   const handleAutoSaveLocal = useCallback((updatedRows) => {
     if (!user?.phone) return;
     saveLocalRecords(user.phone, updatedRows);
+    setLocalInSync(user.phone, false); // יש עכשיו בעותק המקומי שינוי שעוד לא נשמר ב-DB
     setRecords(updatedRows);
     setIsTableDirty(true); //  בום! ברגע שיש שינוי בטבלה, האבא ננעל רשמית!
   }, [user?.phone]);
@@ -200,6 +262,7 @@ export default function DashboardPage() {
   // להתעדכן לפני שה-handleSave הזה כבר רץ (stale closure), וההעברה במפורש פותרת את זה
   const handleSave = async (updatedRows, extraDeleteHashCodes = []) => {
     console.log("1. כפתור שמור נלחץ בדאשבורד!");
+    const saveStartedAt = performance.now(); // לשורת "⏱ שמירה" בלוג - כמה זמן לקחה כל שמירה
 
     if (!user?.phone) {
       console.log("❌ השליחה נעצרת כי אין טלפון למשתמש:", user);
@@ -224,6 +287,8 @@ export default function DashboardPage() {
       console.log("2. שולח לבקאנד:", rowsToSave);
 
       if (rowsToSave.length === 0 && hashCodesToDelete.length === 0) {
+        console.log('⏱ שמירה: אין שינויים מול ה-DB - לא נשלח לשרת');
+        setLocalInSync(user.phone, true);
         setIsTableDirty(false);
         setSaveSuccessOpen(true);
         return;
@@ -261,6 +326,10 @@ export default function DashboardPage() {
       }
 
       console.log("3. נשמר בהצלחה!", response.data);
+      console.log(
+        `⏱ שמירה: ${Math.round(performance.now() - saveStartedAt)} ms ` +
+        `(נשלחו ${cleanRows.length} שורות, ${hashCodesToDelete.length} מחיקות)`
+      );
 
       // משתמשים ישירות בנתונים שחזרו מהשמירה (hashCode טרי לנמענים חדשים, "שייך ל"
       // אחרי איחוד) - במקום לבקש מחדש את כל הרשימה מהשרת בנפרד. זה היה בקשת רשת
@@ -289,6 +358,7 @@ export default function DashboardPage() {
       savedSnapshotRef.current = buildSavedSnapshot(finalRecords);
       setRecords(finalRecords);
       saveLocalRecords(user.phone, finalRecords);
+      setLocalInSync(user.phone, true);
       setIsTableDirty(false);
       setSaveSuccessOpen(true);
 
@@ -302,6 +372,7 @@ export default function DashboardPage() {
       );
 
       saveLocalRecords(user.phone, updatedRows);
+      setLocalInSync(user.phone, false);
     }
   };
 

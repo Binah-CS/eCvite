@@ -22,11 +22,13 @@ import jakarta.persistence.PersistenceContext;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 @RestController
@@ -80,10 +82,9 @@ public class RecipientController {
     ) {
 
         // מציאת המשתמשת ו"הצגתה" לטריגר ההיסטוריה בפנייה אחת ל-DB במקום שתיים (ר'
-        // findUserHashAndStampForHistory). לא טוענים את ישות ה-User המלאה בכלל -
-        // getReference נותן הפניה לפי המפתח בלבד, בלי SELECT, וזה כל מה שצריך כאן
+        // findUserHashAndStampForHistory). לא טוענים את ישות ה-User בכלל - כל מה
+        // שהשמירה צריכה (מחיקת קישורים, הוספת קישורים) עובד לפי ה-hash שלה בלבד
         String userHashCode = findUserHashAndStampForHistory(request.getPhone());
-        User user = userHashCode != null ? entityManager.getReference(User.class, userHashCode) : null;
 
         // recipients יכול להיות null בבקשת "מחיקה בלבד" (hashCodesToDelete בלי שורות
         // לשמירה) - לא ניגשים ל-size()/ללולאה על ה-request הגולמי לפני שמוודאים את זה
@@ -94,7 +95,7 @@ public class RecipientController {
         System.out.println("SAVE RECIPIENTS START - PHONE: " + request.getPhone()
                 + " COUNT: " + incoming.size());
 
-        if (user == null) {
+        if (userHashCode == null) {
             return ResponseEntity
                     .status(HttpStatus.NOT_FOUND)
                     .body("User not found");
@@ -107,7 +108,7 @@ public class RecipientController {
         // HTTP נפרדת) - חוסך round-trip שלם לשרת בכל שמירה שכוללת גם מחיקה
         List<String> hashCodesToDelete = request.getHashCodesToDelete();
         if (hashCodesToDelete != null && !hashCodesToDelete.isEmpty()) {
-            deleteUserRecipientLinks(user, hashCodesToDelete);
+            deleteUserRecipientLinks(userHashCode, hashCodesToDelete);
         }
 
         // הפרדה לפי מה שהפרונט כבר יודע: שורה עם hashCode היא נמען קיים שמזוהה
@@ -174,24 +175,9 @@ public class RecipientController {
                 .distinct()
                 .toList();
 
-        // קישור נמען<->משתמשת רק אם הוא עוד לא קיים - הבדיקה (NOT EXISTS) בתוך פקודת
-        // ההכנסה עצמה, ולא שאילתה נפרדת מראש של "למי כבר מקושרת" (חוסך פנייה ל-DB
-        // בכל שמירה). JDBC batch ולא saveAll() - ל-UserRecipients יש id מסוג IDENTITY,
-        // ו-Hibernate מבטל batching לגמרי לישויות כאלה (כל קישור היה round-trip נפרד)
-        if (!hashCodesToLink.isEmpty()) {
-            jdbcTemplate.batchUpdate(
-                    "INSERT INTO user_recipients (user_id, recipient_id) SELECT ?, ? " +
-                            "WHERE NOT EXISTS (SELECT 1 FROM user_recipients WHERE user_id = ? AND recipient_id = ?)",
-                    hashCodesToLink,
-                    hashCodesToLink.size(),
-                    (ps, hash) -> {
-                        ps.setString(1, userHashCode);
-                        ps.setString(2, hash);
-                        ps.setString(3, userHashCode);
-                        ps.setString(4, hash);
-                    }
-            );
-        }
+        // ישירות ב-JDBC ולא saveAll() - ל-UserRecipients יש id מסוג IDENTITY, ו-Hibernate
+        // מבטל batching לגמרי לישויות כאלה (כל קישור היה round-trip נפרד)
+        linkRecipientsToUser(userHashCode, hashCodesToLink);
 
         // save()/saveAll() על ישות עם @Id שכבר מוגדר (המצב תמיד כאן - ה-hash מחושב
         // מראש) מבצע merge(), לא persist() - וה-merge מחזיר אובייקט "רענן" שכולל רק
@@ -348,11 +334,51 @@ public class RecipientController {
     // משותף/מקושר גם למשתמשים אחרים, ומחיקה ישירה הייתה מוחקת להם בטעות. שאילתה
     // אחת ממוקדת (JOIN + IN) - לא טוענים את כל הקישורים של המשתמש (יכולים להיות
     // מאות) רק כדי לסנן בזיכרון בשביל כמה שנבחרו למחיקה. נקראת מתוך saveRecipients
-    // (מחיקה משולבת בבקשת save)
-    private void deleteUserRecipientLinks(User user, List<String> hashCodes) {
-        List<UserRecipients> linksToDelete =
-                userRecipientsRepository.findByUserAndRecipient_HashCodeIn(user, hashCodes);
-        userRecipientsRepository.deleteAll(linksToDelete);
+    // (מחיקה משולבת בבקשת save).
+    // פקודת DELETE ישירה ולא טעינת ישויות UserRecipients ואז deleteAll() - הטעינה
+    // הייתה מביאה לכל קישור גם את ה-recipient שלו (ManyToOne eager) בשאילתה נפרדת,
+    // כלומר round-trip ל-Neon לכל שורה שנמחקה: 585 מחיקות לקחו כמעט 2 דקות
+    private void deleteUserRecipientLinks(String userHashCode, List<String> hashCodes) {
+        forEachChunk(hashCodes, (chunk, placeholders) -> {
+            List<Object> params = new ArrayList<>(chunk.size() + 1);
+            params.add(userHashCode);
+            params.addAll(chunk);
+            jdbcTemplate.update(
+                    "DELETE FROM user_recipients WHERE user_id = ? AND recipient_id IN (" + placeholders + ")",
+                    params.toArray()
+            );
+        });
+    }
+
+    // מקשרת את המשתמשת לכל הנמענים שנשמרו, רק לאלה שעוד לא מקושרים אליה - פקודת
+    // INSERT אחת שבוחרת את הנמענים מטבלת recipients (כולם כבר קיימים שם, אחרי ה-flush)
+    // ומסננת עם NOT EXISTS את מי שכבר מקושר. לא שאילתה נפרדת מראש של "למי כבר מקושרת",
+    // ולא פקודה לכל קישור (batch של מאות פקודות נשלח בכמה round-trips ל-Neon)
+    private void linkRecipientsToUser(String userHashCode, List<String> hashCodes) {
+        forEachChunk(hashCodes, (chunk, placeholders) -> {
+            List<Object> params = new ArrayList<>(chunk.size() + 2);
+            params.add(userHashCode);
+            params.addAll(chunk);
+            params.add(userHashCode);
+            jdbcTemplate.update(
+                    "INSERT INTO user_recipients (user_id, recipient_id) " +
+                            "SELECT ?, r.hash_code FROM recipients r " +
+                            "WHERE r.hash_code IN (" + placeholders + ") " +
+                            "AND NOT EXISTS (SELECT 1 FROM user_recipients ur " +
+                            "WHERE ur.user_id = ? AND ur.recipient_id = r.hash_code)",
+                    params.toArray()
+            );
+        });
+    }
+
+    // מריצה פעולה על הרשימה בחלקים של עד 1,000 (עם "?,?,..." מוכן לכל חלק) - כדי
+    // שפקודה אחת לא תתקרב למגבלת מספר הפרמטרים של Postgres גם ברשימות גדולות מאוד
+    private void forEachChunk(List<String> values, BiConsumer<List<String>, String> action) {
+        final int chunkSize = 1000;
+        for (int from = 0; from < values.size(); from += chunkSize) {
+            List<String> chunk = values.subList(from, Math.min(from + chunkSize, values.size()));
+            action.accept(chunk, String.join(",", Collections.nCopies(chunk.size(), "?")));
+        }
     }
 
     // כל ההסטוריה השמורה לנמען ספציפי (recipients_history) - מכל המשתמשות שאי-פעם

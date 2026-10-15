@@ -1,4 +1,4 @@
-import { buildSavedSnapshot, rowSignature, selectRowsToSave } from './changedRows';
+import { buildSavedSnapshot, rowSignature, selectRowsToSave, snapshotsMatch } from './changedRows';
 
 const savedRow = {
   hashCode: 'h1', man: 'יוסי', lastName: 'כהן', city: 'ירושלים', phone: null, print: false,
@@ -35,6 +35,25 @@ describe('selectRowsToSave', () => {
 
     const toSave = selectRowsToSave(table, snapshot);
     expect(toSave.map((r) => r.man)).toEqual(['שורה חדשה', 'נמען10']);
+  });
+});
+
+describe('snapshotsMatch', () => {
+  const rows = [{ hashCode: 'h1', man: 'א' }, { hashCode: 'h2', man: 'ב' }];
+
+  test('the same rows match, regardless of order and display ids', () => {
+    const local = buildSavedSnapshot([{ ...rows[1], id: 'h2' }, { ...rows[0], id: 'h1' }]);
+    expect(snapshotsMatch(local, buildSavedSnapshot(rows))).toBe(true);
+  });
+
+  test('a changed field does not match', () => {
+    const changed = [rows[0], { ...rows[1], city: 'חיפה' }];
+    expect(snapshotsMatch(buildSavedSnapshot(changed), buildSavedSnapshot(rows))).toBe(false);
+  });
+
+  test('an added or removed row does not match', () => {
+    expect(snapshotsMatch(buildSavedSnapshot([rows[0]]), buildSavedSnapshot(rows))).toBe(false);
+    expect(snapshotsMatch(buildSavedSnapshot(rows), buildSavedSnapshot([rows[0]]))).toBe(false);
   });
 });
 

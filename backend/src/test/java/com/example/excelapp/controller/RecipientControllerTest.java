@@ -374,6 +374,41 @@ class RecipientControllerTest {
                 .andExpect(jsonPath("$", hasSize(500)));
     }
 
+    @Test
+    void save_deleting300Links_usesOneStatementNotOnePerRow() throws Exception {
+        // לפני התיקון: טעינת כל קישור למחיקה + ה-recipient שלו (ManyToOne eager) בשאילתה
+        // נפרדת לכל אחד - 585 מחיקות לקחו כמעט 2 דקות מול Neon
+        User user = seedUser("0534545454", "מוחקת");
+        User other = seedUser("0535656565", "שכנה");
+        List<String> toDelete = new java.util.ArrayList<>();
+        for (int i = 0; i < 300; i++) {
+            toDelete.add(seedRecipientLinkedTo(user, "נמחק" + i, "05" + String.format("%08d", 50000 + i)).getHashCode());
+        }
+        // נמען שמקושר גם למשתמשת אחרת - המחיקה מנתקת רק את הקישור של המוחקת
+        Recipients shared = recipientsRepository.findById(toDelete.get(0)).orElseThrow();
+        UserRecipients otherLink = new UserRecipients();
+        otherLink.setUser(other);
+        otherLink.setRecipient(shared);
+        userRecipientsRepository.save(otherLink);
+        entityManager.flush();
+        entityManager.clear();
+
+        SaveRecipientsRequest req = new SaveRecipientsRequest();
+        req.setPhone(user.getPhone());
+        req.setRecipients(List.of());
+        req.setHashCodesToDelete(toDelete);
+
+        long statements = preparedStatementsSince(() -> postSave(req));
+        assertThat(statements).isLessThan(10);
+
+        Integer userLinks = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_recipients WHERE user_id = ?", Integer.class, user.getHashCode());
+        Integer otherLinks = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_recipients WHERE user_id = ?", Integer.class, other.getHashCode());
+        assertThat(userLinks).isZero();
+        assertThat(otherLinks).isEqualTo(1);
+    }
+
     // ---------- GET /api/recipients ----------
 
     @Test
