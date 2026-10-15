@@ -4,6 +4,7 @@ import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, Fo
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import { useNavigate } from 'react-router-dom';
+import { loadLabelPrintSettings, saveLabelPrintSettings } from '../utils/labelPrintSettings';
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
 import { MODAL_TEXTS, FONT_OPTIONS } from '../pages/HardCodePage';
 import {
@@ -126,39 +127,37 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     return 1;
   });
 
-  // 2. בדיקה בטוחה עבור גודל המדבקה
-  const [labelSize, setLabelSize] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('savedLabelSize') || 'standard';
-    }
-    return 'standard';
-  });
+  // הבחירות השמורות של המשתמשת המחוברת (בשרת אצלה, ר' labelPrintSettings.js) - אחרי
+  // הפעם הראשונה אלה ברירות המחדל שלה. נקרא פעם אחת, כשהחלון נטען
+  const [userLabelSettings] = useState(loadLabelPrintSettings);
 
-  // 3. בדיקה בטוחה עבור המדפסת - מתעלמת מערך שמור ישן שכבר לא תקין (כמו "printer1" מגרסה קודמת)
-  const [printer, setPrinter] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem('savedPrinter');
-      return saved === 'home' || saved === 'office' ? saved : 'home';
-    }
-    return 'home';
-  });
+  // ערך התחלתי לכל בחירה: קודם מה שנשמר בחזרה מהתצוגה המקדימה ("שינוי הגדרות
+  // הדפסה"), אחר כך הבחירה השמורה של המשתמשת, ורק אז ברירת המחדל. ערך לא תקין
+  // (כמו "printer1" מגרסה קודמת, או כתב שכבר לא ברשימה) מדולג
+  const initialChoice = (sessionKey, prefKey, isValid, fallback) => {
+    const fromPreview = typeof window !== 'undefined' ? sessionStorage.getItem(sessionKey) : null;
+    if (fromPreview !== null && isValid(fromPreview)) return fromPreview;
+    const fromUser = userLabelSettings[prefKey];
+    if (fromUser !== undefined && fromUser !== null && isValid(String(fromUser))) return String(fromUser);
+    return fallback;
+  };
+  const isLabelSize = (v) => v === 'standard' || v === 'large';
+  const initialLabelSize = initialChoice('savedLabelSize', 'labelSize', isLabelSize, 'standard');
 
-  // 3.1 בדיקה בטוחה עבור אופן קבלת ההדפסה (רלוונטי רק כשבוחרים במדפסת המשרד)
-  const [deliveryMethod, setDeliveryMethod] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem('savedDeliveryMethod');
-      return saved === 'courier' || saved === 'pickup' ? saved : 'courier';
-    }
-    return 'courier';
-  });
+  // 2. גודל המדבקה
+  const [labelSize, setLabelSize] = useState(initialLabelSize);
 
-  // 4. בדיקה בטוחה עבור סוג הכתב
-  const [fontType, setFontType] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('savedFontType') || FONT_OPTIONS[0].value;
-    }
-    return FONT_OPTIONS[0].value;
-  });
+  // 3. המדפסת
+  const [printer, setPrinter] = useState(() =>
+    initialChoice('savedPrinter', 'printer', (v) => v === 'home' || v === 'office', 'home'));
+
+  // 3.1 אופן קבלת ההדפסה (רלוונטי רק כשבוחרים במדפסת המשרד)
+  const [deliveryMethod, setDeliveryMethod] = useState(() =>
+    initialChoice('savedDeliveryMethod', 'deliveryMethod', (v) => v === 'courier' || v === 'pickup', 'courier'));
+
+  // 4. סוג הכתב
+  const [fontType, setFontType] = useState(() =>
+    initialChoice('savedFontType', 'fontType', (v) => FONT_OPTIONS.some((f) => f.value === v), FONT_OPTIONS[0].value));
 
   // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - מסומן כברירת מחדל. ערך
   // שמור (חזרה מ"שינוי הגדרות" בתצוגה המקדימה) גובר - כולל אם הורידו את הסימון
@@ -179,21 +178,29 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
 
   // 5. גודל כתב (אחוז מהגודל הרגיל, 100 = כמו היום) - חופשי, אבל רק עד המקסימום
   // שנכנס בגודל המדבקה שנבחר (ר' getMaxFontScale)
-  const [fontScale, setFontScale] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem('savedFontScale');
-      return saved === null ? FONT_SCALE_DEFAULT : clampFontScale(saved, sessionStorage.getItem('savedLabelSize') || 'standard');
-    }
-    return FONT_SCALE_DEFAULT;
-  });
+  const [fontScale, setFontScale] = useState(() => clampFontScale(
+    initialChoice('savedFontScale', 'fontScale', (v) => v.trim() !== '' && Number.isFinite(Number(v)), String(FONT_SCALE_DEFAULT)),
+    initialLabelSize
+  ));
 
   // 6. עובי כתב לכל המדבקה, כולל השם - "רגיל" או "מודגש"
-  const [fontWeight, setFontWeight] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('savedFontWeight') === 'bold' ? 'bold' : 'regular';
-    }
-    return 'regular';
-  });
+  const [fontWeight, setFontWeight] = useState(() =>
+    initialChoice('savedFontWeight', 'fontWeight', (v) => v === 'regular' || v === 'bold', 'regular'));
+
+  // הערכים שנשמרו בחזרה מהתצוגה המקדימה ("שינוי הגדרות הדפסה") נקראים פעם אחת - כבר
+  // נקלטו למעלה - ונמחקים מיד. בלי זה, ערך שנשאר (למשל אחרי הדפסה מהתצוגה המקדימה
+  // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
+  // אפילו עובר למשתמשת אחרת שמתחברת באותה לשונית
+  useEffect(() => {
+    ['savedLabelSize', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
+      .forEach((key) => sessionStorage.removeItem(key));
+  }, []);
+
+  // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
+  // ייפתח אצלה עם הבחירות האלה. לא מחכים לתשובה - ההדפסה לא תלויה בשמירה
+  const rememberChoices = () => {
+    saveLabelPrintSettings({ fontType, labelSize, printer, deliveryMethod, fontScale, fontWeight });
+  };
 
   // מעבר לגודל מדבקה קטן יותר מוריד גודל כתב שכבר לא נכנס בו למקסימום החדש
   const handleLabelSizeChange = (newSize) => {
@@ -215,6 +222,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   };
 
   const handlePrint = () => {
+    rememberChoices();
     // אותו דף הדפסה בדיוק כמו מה"תצוגה מקדימה" - רק עם דגל שגורם לו לפתוח את חלון
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     navigate('/print-preview', {
@@ -235,6 +243,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   };
 
   const handlePreview = () => {
+    rememberChoices();
     navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, emptyLineWhenNoAddress, fontScale, fontWeight } });
   };
 
