@@ -63,6 +63,7 @@ public class Recipients {
 
     // נשמר לתאימות עם רשומות ובדיקות ישנות; העדפת ההדפסה הפעילה נשמרת לפי משתמש
     // ב-RecipientPrintPreference ומוחזרת דרך printEnabled.
+    @Transient
     private boolean print;
 
     private String display;

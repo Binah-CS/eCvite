@@ -28,6 +28,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -124,7 +125,28 @@ public class RecipientController {
         // עדכון ישיר של נמענים קיימים (לפי ה-hashCode שהם כבר מזוהים איתו) - save()
         // על ישות עם @Id שכבר מוגדר מבצע UPDATE על השורה הקיימת, לא יוצר כפילות
         if (!existingRows.isEmpty()) {
-            savedRecipients.addAll(recipientRepository.saveAll(existingRows));
+            // נתוני הטבלה נשלחים גם בלחיצה על "שמור", אחרי ששמירה אוטומטית של אותה
+            // שורה כבר הסתיימה. אין טעם לבצע UPDATE נוסף כששום ערך לא השתנה: הוא
+            // מפעיל שוב את טריגר ההיסטוריה ב-Postgres ועלול לנסות ליצור אותה רשומת
+            // היסטוריה בפעם השנייה.
+            Map<String, Recipients> persistedByHash = recipientRepository.findAllById(
+                            existingRows.stream().map(Recipients::getHashCode).toList())
+                    .stream()
+                    .collect(Collectors.toMap(Recipients::getHashCode, recipient -> recipient));
+
+            List<Recipients> changedExistingRows = existingRows.stream()
+                    .filter(incomingRecipient -> {
+                        Recipients persisted = persistedByHash.get(incomingRecipient.getHashCode());
+                        return persisted == null || recipientDataChanged(persisted, incomingRecipient);
+                    })
+                    .toList();
+
+            if (!changedExistingRows.isEmpty()) {
+                recipientRepository.saveAll(changedExistingRows);
+            }
+            // מחזירים כל שורה שנשלחה, גם אם לא נדרש לה UPDATE, כדי שה-frontend
+            // יוכל לסנכרן את המזהים שלו כרגיל.
+            savedRecipients.addAll(existingRows);
         }
 
         if (!newRows.isEmpty()) {
@@ -214,6 +236,29 @@ public class RecipientController {
             if (!trimmed.isEmpty()) values.add(trimmed);
         }
         return String.join(", ", values);
+    }
+
+    private boolean recipientDataChanged(Recipients persisted, Recipients incoming) {
+        return !Objects.equals(persisted.getMan(), incoming.getMan())
+                || !Objects.equals(persisted.getWoman(), incoming.getWoman())
+                || !Objects.equals(persisted.getLastName(), incoming.getLastName())
+                || !Objects.equals(persisted.getPhone(), incoming.getPhone())
+                || !Objects.equals(persisted.getMail(), incoming.getMail())
+                || !Objects.equals(persisted.getFatherName(), incoming.getFatherName())
+                || !Objects.equals(persisted.getMotherName(), incoming.getMotherName())
+                || !Objects.equals(persisted.getCountry(), incoming.getCountry())
+                || !Objects.equals(persisted.getCity(), incoming.getCity())
+                || !Objects.equals(persisted.getStreet(), incoming.getStreet())
+                || !Objects.equals(persisted.getHouseNo(), incoming.getHouseNo())
+                || !Objects.equals(persisted.getBelongsTo(), incoming.getBelongsTo())
+                || !Objects.equals(persisted.getPrefix(), incoming.getPrefix())
+                || !Objects.equals(persisted.getSuffix(), incoming.getSuffix())
+                || persisted.isChanged() != incoming.isChanged()
+                || !Objects.equals(persisted.getChangeDate(), incoming.getChangeDate())
+                || !Objects.equals(persisted.getChangeBy(), incoming.getChangeBy())
+                || !Objects.equals(persisted.getCreatedBy(), incoming.getCreatedBy())
+                || !Objects.equals(persisted.getAddressNote(), incoming.getAddressNote())
+                || !Objects.equals(persisted.getAddressNoteSources(), incoming.getAddressNoteSources());
     }
 
 
