@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.mockito.Mockito;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -51,7 +53,10 @@ class RecipientControllerTest {
     private RecipientsRepository recipientsRepository;
     @Autowired
     private UserRecipientsRepository userRecipientsRepository;
-    @Autowired
+    // SpyBean ולא Autowired - עובד בדיוק כמו ה-JdbcTemplate האמיתי, אבל אפשר לספור כמה
+    // פקודות SQL הקוד שלח דרכו (המחיקה והקישורים עוברים ב-JDBC ישירות, ולכן הסטטיסטיקה
+    // של Hibernate לא רואה אותם - ר' jdbcUpdatesStartingWith)
+    @SpyBean
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private EntityManagerFactory entityManagerFactory;
@@ -294,13 +299,28 @@ class RecipientControllerTest {
     // ---------- ביצועים: מספר הפקודות ל-DB בשמירה גדולה ----------
 
     // כמה פקודות SQL ש-Hibernate הכין בפועל מאז ה-clear האחרון (batch של INSERT-ים
-    // נספר פעם אחת, לא לכל שורה) - הקישורים ל-user_recipients נשלחים ב-JDBC batch
-    // אחד ולא נספרים כאן בכלל
+    // נספר פעם אחת, לא לכל שורה). המחיקה והקישורים ל-user_recipients עוברים ב-JDBC
+    // ישירות ולא נספרים כאן - בשבילם יש jdbcUpdatesStartingWith
     private long preparedStatementsSince(Runnable action) {
         Statistics stats = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         stats.clear();
         action.run();
         return stats.getPrepareStatementCount();
+    }
+
+    // כמה פקודות jdbcTemplate.update שמתחילות בטקסט הזה נשלחו מאז ה-clear האחרון - כדי
+    // שבדיקות הביצועים יתפסו גם מחיקה/קישור שחזרו להיות פקודה לכל שורה. נספרת רק
+    // הגרסה update(String, Object...) שהקוד קורא לה - בתוכה JdbcTemplate קורא לעוד
+    // update פנימי, וה-spy רושם גם אותו, למרות שזו אותה פקודה אחת ל-DB
+    private long jdbcUpdatesStartingWith(String sqlPrefix) {
+        return Mockito.mockingDetails(jdbcTemplate).getInvocations().stream()
+                .filter(inv -> inv.getMethod().getName().equals("update"))
+                .filter(inv -> inv.getMethod().getParameterCount() == 2
+                        && inv.getMethod().getParameterTypes()[1] == Object[].class)
+                .filter(inv -> inv.getArguments().length > 0
+                        && inv.getArguments()[0] instanceof String sql
+                        && sql.startsWith(sqlPrefix))
+                .count();
     }
 
     private String postSave(SaveRecipientsRequest req) {
@@ -329,10 +349,13 @@ class RecipientControllerTest {
         req.setRecipients(rows);
 
         String[] response = new String[1];
+        Mockito.clearInvocations(jdbcTemplate);
         long statements = preparedStatementsSince(() -> response[0] = postSave(req));
 
         assertThat(objectMapper.readTree(response[0])).hasSize(500);
         assertThat(statements).isLessThan(40);
+        // כל 500 הקישורים למשתמשת - פקודת INSERT אחת, לא אחת לכל נמען
+        assertThat(jdbcUpdatesStartingWith("INSERT INTO user_recipients")).isEqualTo(1);
 
         entityManager.clear();
         mockMvc.perform(get("/api/recipients").param("phone", user.getPhone()))
@@ -398,8 +421,11 @@ class RecipientControllerTest {
         req.setRecipients(List.of());
         req.setHashCodesToDelete(toDelete);
 
+        Mockito.clearInvocations(jdbcTemplate);
         long statements = preparedStatementsSince(() -> postSave(req));
         assertThat(statements).isLessThan(10);
+        // כל 300 המחיקות - פקודת DELETE אחת, לא אחת לכל שורה
+        assertThat(jdbcUpdatesStartingWith("DELETE FROM user_recipients")).isEqualTo(1);
 
         Integer userLinks = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM user_recipients WHERE user_id = ?", Integer.class, user.getHashCode());

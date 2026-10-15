@@ -26,6 +26,7 @@ import jakarta.persistence.PersistenceContext;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -141,11 +142,15 @@ public class RecipientController {
         // עושה merge() שמריץ SELECT נפרד לכל שורה לפני השמירה - ב-500 שורות זה 500
         // round-trips ל-Neon, וזה מה שהפך את "שמור" לאיטי מאוד. ישות שכבר נטענה כאן
         // נמצאת ב-persistence context, וה-merge עליה לא פונה ל-DB בכלל
-        Set<String> requestHashCodes = incoming.stream()
+        // בחלקים של עד 1,000 (forEachChunk), כמו המחיקה וההוספה - שקובץ ענק לא יחרוג
+        // ממגבלת מספר הפרמטרים של Postgres בשאילתה אחת
+        List<String> requestHashCodes = incoming.stream()
                 .map(Recipients::getHashCode)
-                .collect(Collectors.toSet());
-        Map<String, Recipients> managedByHash = recipientRepository.findAllById(requestHashCodes).stream()
-                .collect(Collectors.toMap(Recipients::getHashCode, r -> r));
+                .distinct()
+                .toList();
+        Map<String, Recipients> managedByHash = new HashMap<>();
+        forEachChunk(requestHashCodes, (chunk, placeholders) ->
+                recipientRepository.findAllById(chunk).forEach(r -> managedByHash.put(r.getHashCode(), r)));
 
         List<Recipients> savedRecipients = new ArrayList<>();
 
@@ -393,10 +398,8 @@ public class RecipientController {
 
     // מוחקת רק את הקישור (user_recipients) בין המשתמש הזה לנמענים שנבחרו - לא את
     // שורת ה-Recipients עצמה, כי אותו hashCode (נגזר משם+טלפון+כתובת) יכול להיות
-    // משותף/מקושר גם למשתמשים אחרים, ומחיקה ישירה הייתה מוחקת להם בטעות. שאילתה
-    // אחת ממוקדת (JOIN + IN) - לא טוענים את כל הקישורים של המשתמש (יכולים להיות
-    // מאות) רק כדי לסנן בזיכרון בשביל כמה שנבחרו למחיקה. נקראת מתוך saveRecipients
-    // (מחיקה משולבת בבקשת save).
+    // משותף/מקושר גם למשתמשים אחרים, ומחיקה ישירה הייתה מוחקת להם בטעות. נקראת מתוך
+    // saveRecipients (מחיקה משולבת בבקשת save).
     // פקודת DELETE ישירה ולא טעינת ישויות UserRecipients ואז deleteAll() - הטעינה
     // הייתה מביאה לכל קישור גם את ה-recipient שלו (ManyToOne eager) בשאילתה נפרדת,
     // כלומר round-trip ל-Neon לכל שורה שנמחקה: 585 מחיקות לקחו כמעט 2 דקות
