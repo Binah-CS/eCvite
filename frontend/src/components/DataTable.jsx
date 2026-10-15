@@ -208,7 +208,7 @@ function ColumnHeader({
   );
 }
 
-export default function DataTable({ records, loading, onSave, onAutoSave, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
+export default function DataTable({ records, loading, onSave, onAutoSave, onPersistRow, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
   const [rows, setRows] = useState(records);
   const [selectionModel, setSelectionModel] = useState(initialSelectedIds || []);
   const [activeRowId, setActiveRowId] = useState(null);
@@ -216,6 +216,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const [activeFilters, setActiveFilters] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [fieldDefs, setFieldDefs] = useState([]);
+  const [copyRange, setCopyRange] = useState(null);
 
   const [problemQueue, setProblemQueue] = useState([]); // תור התאים שקופצים ביניהם לתיקון (כפתור "תיקון שדות") - {id, field}
   const [duplicateGroups, setDuplicateGroups] = useState([]); // [[row, row, ...], ...] - קבוצות שורות עם אותה זהות (בעל/אישה/שם משפחה/טלפון/כתובת)
@@ -241,10 +242,20 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // ה-columns מחושבות רק פעם אחת (memo תלוי ב-fieldDefs) והפעולות שבתוכן (renderCell)
   // צריכות תמיד את השורות העדכניות ביותר - לכן משתמשים ב-ref ולא סוגרים על rows ישירות
   const rowsRef = useRef(rows);
+  const fieldDefsRef = useRef(fieldDefs);
+  const filteredRowsRef = useRef([]);
+  const undoStackRef = useRef([]);
+  const copyRangeRef = useRef(copyRange);
 
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
+  useEffect(() => {
+    fieldDefsRef.current = fieldDefs;
+  }, [fieldDefs]);
+  useEffect(() => {
+    copyRangeRef.current = copyRange;
+  }, [copyRange]);
   const gridContainerRef = useRef(null);
   // דגל שמסמן שהיציאה מהשדה (blur) הבאה נגרמה ע"י Enter (ולא ע"י לחיצת עכבר על שדה
   // אחר) - נקבע ממש לפני ה-blur() היזום, ונקרא/מתאפס ב-handleFocusOut. רק Enter אמור
@@ -413,13 +424,21 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // משחזרת פעם אחת בלבד את הבחירה שהייתה קיימת (חוזרים מתצוגה מקדימה), ברגע שהשורות נטענות
   useEffect(() => {
     if (!appliedInitialSelection.current && rows.length && initialSelectedIds && initialSelectedIds.length) {
-      const matched = rows.filter((row) => initialSelectedIds.includes(row.id));
-      if (matched.length) {
-        onSelectionChange(matched);
-      }
+      const savedIds = new Set(initialSelectedIds.map((id) => String(id)));
+      const matched = rows.filter((row) => savedIds.has(String(row.id)));
+      setSelectionModel(matched.map((row) => row.id));
+      onSelectionChange(matched);
       appliedInitialSelection.current = true;
     }
   }, [rows, initialSelectedIds, onSelectionChange]);
+
+  // השורות שנבחרו עוברות למסך ההדפסה כעותקים של הרשומות. לכן בכל עריכה של
+  // הטבלה מרעננים גם את העותקים הנבחרים, כדי שהתצוגה המקדימה תקבל את הערכים החדשים.
+  useEffect(() => {
+    if (!appliedInitialSelection.current && initialSelectedIds?.length) return;
+    const selectedIds = new Set(selectionModel.map((id) => String(id)));
+    onSelectionChange(rows.filter((row) => selectedIds.has(String(row.id))));
+  }, [rows, selectionModel, initialSelectedIds, onSelectionChange]);
 
 // מקבצת שורות לפי אותה זהות (אותם שדות הזהות שמשמשים גם את ה-hash) ומחזירה רק קבוצות שיש בהן יותר משורה אחת - שורות עם זהות ריקה (כל השדות ריקים) לא נחשבות כפילות - כל שורה כזו נשארת לבדה
   const findDuplicateGroups = (rowsToCheck) => {
@@ -544,9 +563,10 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     setProblemQueue(allProblems);
   };
 
-  const handlePrintLabels = () => {
+  const handlePrintLabels = async () => {
+    if (selectionModel.length === 0) return;
     setExportMenuAnchor(null);
-    if (onOpenPrint) onOpenPrint();
+    if (onOpenPrint) await onOpenPrint();
   };
 
   const handleDownloadExcel = () => {
@@ -578,7 +598,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       addressNote: '',
       addressNoteSources: '',
       belongsTo: '',
-      print: false,
     };
   };
 
@@ -696,12 +715,23 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // "מצב עריכה" של ה-DataGrid (דאבל-קליק להיכנס לעריכה) - זה עוקף לגמרי בעיה שנתקלנו
   // בה שבה כניסה למצב עריכה לא תמיד עבדה בצורה עקבית. כל תא הוא קלט חי תמיד, שמעדכן
   // את השורה מיד עם כל הקשה
+  const pushUndoChanges = useCallback((changes) => {
+    if (changes.length === 0) return;
+    undoStackRef.current.push(changes);
+    if (undoStackRef.current.length > 100) undoStackRef.current.shift();
+  }, []);
+
   const updateCellValue = useCallback((id, field, value) => {
+    const currentRow = rowsRef.current.find((row) => String(row.id) === String(id));
+    if (!currentRow || currentRow[field] === value) return;
+    pushUndoChanges([{ id, field, value: currentRow[field] }]);
     const updatedRows = rowsRef.current.map((row) =>
       String(row.id) === String(id) ? { ...row, [field]: value } : row
     );
+    rowsRef.current = updatedRows;
     setRows(updatedRows);
     onAutoSave(updatedRows);
+    onPersistRow?.(updatedRows.find((row) => String(row.id) === String(id)));
 
     // עדכון הצביעה האדומה על "בעל"/"אישה" תלוי בערך של השדה השני באותה שורה
     // (חובה זוגית - ראו isRequiredEmpty), אז כשמקלידים באחד מהם צריך שגם התא השני
@@ -716,7 +746,163 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         apiRef.current.updateRows([updatedRow]);
       }
     }
-  }, [onAutoSave, apiRef]);
+  }, [onAutoSave, onPersistRow, apiRef, pushUndoChanges]);
+
+  const undoLastChange = useCallback(() => {
+    const changes = undoStackRef.current.pop();
+    if (!changes) return;
+
+    const changesById = new Map();
+    changes.forEach(({ id, field, value }) => {
+      const rowChanges = changesById.get(String(id)) ?? {};
+      rowChanges[field] = value;
+      changesById.set(String(id), rowChanges);
+    });
+
+    const restoredRows = [];
+    const updatedRows = rowsRef.current.map((row) => {
+      const rowChanges = changesById.get(String(row.id));
+      if (!rowChanges) return row;
+      const restored = { ...row, ...rowChanges };
+      restoredRows.push(restored);
+      return restored;
+    });
+    rowsRef.current = updatedRows;
+    setRows(updatedRows);
+    onAutoSave(updatedRows);
+    restoredRows.forEach((row) => onPersistRow?.(row));
+  }, [onAutoSave, onPersistRow]);
+
+  // אחרי הדבקה ה-DataGrid יכול להעביר את הפוקוס מה-input אל התא עצמו. מאזינים גם
+  // ברמת החלון כדי ש-Ctrl+Z יבטל את הפעולה האחרונה כל עוד הפוקוס נמצא בטבלה.
+  useEffect(() => {
+    const handleUndoShortcut = (event) => {
+      const isUndo = (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z';
+      if (!isUndo || !gridContainerRef.current?.contains(document.activeElement)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      undoLastChange();
+    };
+
+    window.addEventListener('keydown', handleUndoShortcut, true);
+    return () => window.removeEventListener('keydown', handleUndoShortcut, true);
+  }, [undoLastChange]);
+
+  const focusAdjacentRowInput = useCallback((id, field, direction) => {
+    const sortedIds = apiRef.current?.getSortedRowIds?.() ?? filteredRowsRef.current.map((row) => row.hashCode ?? row.id);
+    const currentIndex = sortedIds.findIndex((rowId) => String(rowId) === String(id));
+    const targetId = sortedIds[currentIndex + direction];
+    if (currentIndex === -1 || targetId === undefined) return;
+
+    const rowIndex = apiRef.current?.getRowIndexRelativeToVisibleRows?.(targetId);
+    const columnIndex = apiRef.current?.getColumnIndex?.(field);
+    if (Number.isInteger(rowIndex) && Number.isInteger(columnIndex)) {
+      apiRef.current.scrollToIndexes({ rowIndex, colIndex: columnIndex });
+    }
+
+    requestAnimationFrame(() => {
+      const targetRow = [...(gridContainerRef.current?.querySelectorAll('.MuiDataGrid-row') ?? [])]
+        .find((row) => String(row.getAttribute('data-id')) === String(targetId));
+      targetRow?.querySelector(`[data-field="${field}"] input`)?.focus();
+    });
+  }, [apiRef]);
+
+  const getVisibleRecipientFields = useCallback(() => {
+    const recipientFields = new Set(fieldDefsRef.current.map((field) => field.technicalName));
+    return (apiRef.current?.getVisibleColumns?.() ?? [])
+      .map((column) => column.field)
+      .filter((field) => recipientFields.has(field));
+  }, [apiRef]);
+
+  const handleCellSelection = useCallback((id, field, event) => {
+    const currentRange = copyRangeRef.current;
+    if (event.shiftKey && currentRange?.anchor && String(currentRange.anchor.id) === String(id)) {
+      const nextRange = { anchor: currentRange.anchor, end: { id, field } };
+      copyRangeRef.current = nextRange;
+      setCopyRange(nextRange);
+      return;
+    }
+    const nextRange = { anchor: { id, field }, end: { id, field } };
+    copyRangeRef.current = nextRange;
+    setCopyRange(nextRange);
+  }, []);
+
+  const copySelectedRange = useCallback((id) => {
+    const currentRange = copyRangeRef.current;
+    if (!currentRange?.anchor || !currentRange?.end || String(currentRange.anchor.id) !== String(id)
+      || String(currentRange.end.id) !== String(id)) return false;
+
+    const fields = getVisibleRecipientFields();
+    const first = fields.indexOf(currentRange.anchor.field);
+    const last = fields.indexOf(currentRange.end.field);
+    if (first === -1 || last === -1 || first === last) return false;
+
+    const row = rowsRef.current.find((candidate) => String(candidate.id) === String(id));
+    if (!row) return false;
+    const text = fields.slice(Math.min(first, last), Math.max(first, last) + 1)
+      .map((field) => String(row[field] ?? ''))
+      .join('\t');
+
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    return true;
+  }, [getVisibleRecipientFields]);
+
+  // הדבקה מאקסל יכולה להכיל שורה אחת או טווח שלם (טאבים בין עמודות ושורות חדשות
+  // בין רשומות). ממלאים רק שדות של הנמען שמופיעים כרגע בטבלה, החל מהתא הפעיל.
+  const pasteTableValues = useCallback((startId, startField, text) => {
+    const values = String(text ?? '').replace(/\r/g, '').split('\n');
+    if (values[values.length - 1] === '') values.pop();
+    const matrix = values.map((line) => line.split('\t'));
+    if (matrix.length === 0 || (matrix.length === 1 && matrix[0].length <= 1)) return false;
+
+    const visibleFields = getVisibleRecipientFields();
+    const startColumn = visibleFields.indexOf(startField);
+    if (startColumn === -1) return false;
+
+    const visibleIds = apiRef.current?.getSortedRowIds?.() ?? filteredRowsRef.current.map((row) => row.id);
+    const startRow = visibleIds.findIndex((id) => String(id) === String(startId));
+    if (startRow === -1) return false;
+
+    const changesById = new Map();
+    matrix.forEach((line, rowOffset) => {
+      const rowId = visibleIds[startRow + rowOffset];
+      if (rowId === undefined) return;
+      line.forEach((value, columnOffset) => {
+        const field = visibleFields[startColumn + columnOffset];
+        if (!field) return;
+        const changes = changesById.get(String(rowId)) ?? {};
+        changes[field] = value;
+        changesById.set(String(rowId), changes);
+      });
+    });
+    if (changesById.size === 0) return false;
+
+    const changedRecipients = [];
+    const undoChanges = [];
+    const updatedRows = rowsRef.current.map((row) => {
+      const changes = changesById.get(String(row.id));
+      if (!changes) return row;
+      const actualChanges = Object.fromEntries(
+        Object.entries(changes).filter(([field, value]) => row[field] !== value)
+      );
+      if (Object.keys(actualChanges).length === 0) return row;
+      Object.entries(actualChanges).forEach(([field]) => {
+        undoChanges.push({ id: row.id, field, value: row[field] });
+      });
+      const updated = { ...row, ...actualChanges };
+      changedRecipients.push(updated);
+      return updated;
+    });
+    if (undoChanges.length === 0) return false;
+    pushUndoChanges(undoChanges);
+    rowsRef.current = updatedRows;
+    setRows(updatedRows);
+    onAutoSave(updatedRows);
+    changedRecipients.forEach((row) => onPersistRow?.(row));
+    return true;
+  }, [apiRef, getVisibleRecipientFields, onAutoSave, onPersistRow, pushUndoChanges]);
 
   // handlers משותפים ל-input בתוך תא טבלה (renderAddressCell/renderTextCell) - בלי
   // stopPropagation ב-onKeyDown ה-DataGrid תופס את מקש הרווח כקיצור מקלדת שלו (למשל
@@ -725,9 +911,37 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // וקופצת אוטומטית לתא הבעייתי הבא
   const createCellInputHandlers = useCallback((id, field) => ({
     onChange: (event) => updateCellValue(id, field, event.target.value),
-    onClick: (event) => event.stopPropagation(),
+    onClick: (event) => {
+      event.stopPropagation();
+      setActiveRowId(id);
+      handleCellSelection(id, field, event);
+    },
     onFocus: () => setActiveRowId(id),
+    onPaste: (event) => {
+      if (pasteTableValues(id, field, event.clipboardData.getData('text'))) {
+        event.preventDefault();
+      }
+    },
     onKeyDown: (event) => {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        event.stopPropagation();
+        undoLastChange();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+        if (copySelectedRange(id)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        // אם לא נבחר חלק מהטקסט, Ctrl+C מעתיק את כל התא הפעיל.
+        if (event.currentTarget.selectionStart === event.currentTarget.selectionEnd) {
+          event.currentTarget.select();
+        }
+        event.stopPropagation();
+        return;
+      }
       if (event.key === ' ') {
         event.stopPropagation();
         return;
@@ -737,9 +951,15 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         event.stopPropagation();
         blurredViaEnterRef.current = true;
         event.currentTarget.blur();
+        return;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        event.stopPropagation();
+        focusAdjacentRowInput(id, field, event.key === 'ArrowDown' ? 1 : -1);
       }
     },
-  }), [updateCellValue]);
+  }), [updateCellValue, focusAdjacentRowInput, pasteTableValues, undoLastChange, handleCellSelection, copySelectedRange]);
 
   // מעבירה את הערך מתא בעמודת כתובת (כשהוא לא מתאים) לעמודת "הערת כתובת" -
   // ומרוקנת את התא המקורי. אם כבר יש תוכן בהערת הכתובת, משרשרת אליו (מופרד ב-";")
@@ -919,7 +1139,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             // ללחוץ בנפרד על חץ - אפשר עדיין להקליד חופשי במקביל. כניסה לעריכה תמיד
             // חושפת את הטקסט המלא (גם אם "שייך ל" מכווץ כרגע), ויציאה ממנה מכווצת שוב
             onFocus={() => {
-              setActiveRowId(id);
               setIsFocused(true);
               setExpanded(true);
               if (pickListField) openMenu();
@@ -949,6 +1168,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
               sx={{
                 position: 'absolute',
                 inset: 0,
+                insetInlineEnd: 28,
                 display: 'flex',
                 alignItems: 'center',
                 px: 1,
@@ -1053,22 +1273,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     return (params) => <TextCell {...params} />;
   }, [updateCellValue, createCellInputHandlers]);
 
-  // תא בוליאני חי (עמודת "הדפסה") - checkbox רגיל, בלי תלות במצב עריכה בכלל
-  const renderBooleanCell = useCallback((params) => {
-    const { id, field, value } = params;
-    return (
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(event) => updateCellValue(id, field, event.target.checked)}
-          onClick={(event) => event.stopPropagation()}
-          onFocus={() => setActiveRowId(id)}
-        />
-      </Box>
-    );
-  }, [updateCellValue]);
-
     const handleInputChange = (e) => {
     setInputValue(e.target.value);
   };
@@ -1126,7 +1330,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // תמיד את השורות העדכניות ביותר, בלי להיות תלוי ב-filteredRows כ-dependency: אחרת
   // כל הקשה בכל שדה בטבלה (שמשנה rows ולכן filteredRows) הייתה מפעילה מחדש את
   // הקפיצה/פוקוס לבעיה הראשונה בתור - גם כשעורכים משהו אחר לגמרי, לא קשור לתיקונים
-  const filteredRowsRef = useRef(filteredRows);
   useEffect(() => {
     filteredRowsRef.current = filteredRows;
   }, [filteredRows]);
@@ -1291,7 +1494,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
 
   const historyVisibleFieldDefs = useMemo(() => {
     return displayFieldDefs.filter((f) => {
-      if (f.technicalName === 'print') return true;
+      if (f.technicalName === 'print') return false;
       // גם הערך הנוכחי של הנמען (לא רק הערכים הישנים ששמורים בהיסטוריה) - אחרת עמודה
       // שהתמלאה לראשונה עכשיו (למשל הוספת שם אישה שלא הייתה קודם) מוסתרת לגמרי, כי
       // בכל שינוי קודם היא הייתה ריקה - זה בדיוק המצב לפני שהתווסף אליה ערך בפעם הראשונה
@@ -1489,7 +1692,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       // אין תקרה עליונה בכוונה - כותרת ארוכה מקבלת בדיוק את הרוחב שהיא צריכה
       const HEADER_OVERHEAD_PX = 56; // ריפוד התא + חץ המיון + מרווח מהקצה
       const autoWidth = Math.max(
-        isBoolean ? 90 : 60,
+        60,
         Math.ceil(measureHeaderTextWidth(headerName)) + HEADER_OVERHEAD_PX,
         minWidthOverrides[f.technicalName] ?? 0
       );
@@ -1504,7 +1707,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         width: customWidth,
         minWidth: autoWidth,
         // העריכה עצמה מתבצעת דרך קלט חי בתוך renderCell (ראו renderTextCell/
-        // renderBooleanCell/renderAddressCell) ולא דרך מצב העריכה של ה-DataGrid -
+        // renderAddressCell) ולא דרך מצב העריכה של ה-DataGrid -
         // editable נשאר false בכוונה כדי שדאבל-קליק לא ינסה גם לפתוח את עורך ברירת
         // המחדל של הרשת מעל הקלט המותאם אישית שלנו
         editable: false,
@@ -1847,6 +2050,21 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         onCellClick={(params) => setActiveRowId(params.id)}
         onCellFocusIn={(params) => setActiveRowId(params.id)}
         getCellClassName={(params) => {
+          let copyRangeClass = '';
+          if (
+            copyRange?.anchor && copyRange?.end &&
+            String(copyRange.anchor.id) === String(params.id) &&
+            String(copyRange.end.id) === String(params.id)
+          ) {
+            const fields = getVisibleRecipientFields();
+            const start = fields.indexOf(copyRange.anchor.field);
+            const end = fields.indexOf(copyRange.end.field);
+            const current = fields.indexOf(params.field);
+            if (start !== -1 && end !== -1 && current >= Math.min(start, end) && current <= Math.max(start, end)) {
+              copyRangeClass = 'copy-range-cell';
+            }
+          }
+
           // התא שעליו נלחץ קליק ימני (בזמן שתפריט "העבר להערת כתובת" פתוח) - מודגש
           // כדי שיהיה ברור על איזה ערך מדובר. יורד אוטומטית כשהתפריט נסגר (contextMenu
           // חוזר ל-null), לא תלוי בכלל בתור התיקונים למטה
@@ -1855,12 +2073,12 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             String(params.id) === String(contextMenu.id) &&
             params.field === contextMenu.field
           ) {
-            return 'context-menu-target-cell';
+            return `${copyRangeClass} context-menu-target-cell`;
           }
 
           // צביעה בכלל לא קורית לפני שלוחצים על "תיקון שדות" - שורה חדשה/ריקה לא נצבעת
           // מיד בזמן שממלאים אותה, רק כשבוחרים במפורש לעבור על השדות לתיקון
-          if (problemQueue.length === 0) return '';
+          if (problemQueue.length === 0) return copyRangeClass;
 
           // התא הספציפי שקפצנו אליו כרגע (הראשון בתור התיקונים) - מודגש הרבה יותר חזק
           // מכל שאר תאי הבעיה, כדי שיהיה ברור בבירור לאיפה קפצו
@@ -1868,11 +2086,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             String(params.id) === String(problemQueue[0].id) &&
             params.field === problemQueue[0].field
           ) {
-            return 'current-problem-cell';
+            return `${copyRangeClass} current-problem-cell`;
           }
-          if (isRequiredEmpty(params.field, params.value, (f) => params.row[f])) return 'required-empty-cell';
-          if (isValueInvalid(params.field, params.value)) return 'invalid-value-cell';
-          return '';
+          if (isRequiredEmpty(params.field, params.value, (f) => params.row[f])) return `${copyRangeClass} required-empty-cell`;
+          if (isValueInvalid(params.field, params.value)) return `${copyRangeClass} invalid-value-cell`;
+          return copyRangeClass;
         }}
         sx={{
           border: 'none',
@@ -1913,8 +2131,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           '& .MuiDataGrid-row.app-row-hovered': {
             backgroundColor: '#eff6ff !important',
           },
-          // השורה שבה המשתמש עובד נשארת מודגשת גם אחרי שהעכבר זז לתא אחר.
-          // המסגרת בלבד נשארת גם בשורה מסומנת, כדי לא להסתיר את צבע הבחירה שלה.
           '& .MuiDataGrid-row.app-active-row': {
             boxShadow: 'inset 0 0 0 1.5px #60a5fa',
             zIndex: 1,
@@ -1961,6 +2177,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           '& .context-menu-target-cell': {
             backgroundColor: '#eff6ff !important',
           },
+          '& .copy-range-cell': {
+            backgroundColor: '#dbeafe !important',
+            outline: '1px solid #60a5fa',
+            outlineOffset: '-1px',
+          },
           '& .current-problem-cell': {
             backgroundColor: '#ffe4e8 !important',
             outline: '2px solid #e11d48',
@@ -1975,7 +2196,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           },
         }}
         columnVisibilityModel={columnVisibilityModel}
-        onColumnVisibilityModelChange={(model) => setColumnVisibilityModel(model)}
+        onColumnVisibilityModelChange={setColumnVisibilityModel}
         initialState={{
           pagination: {
             paginationModel: { pageSize: readSavedPageSize() },
@@ -2045,8 +2266,15 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         editMode="row"
         rowSelectionModel={selectionModel}
         onRowSelectionModelChange={(newSelectionModel) => {
+          // בזמן שחזור הבחירה ה-DataGrid מדווח זמנית על בחירה ריקה, קודם כשהטבלה
+          // ריקה ולעתים גם מיד אחרי שהשורות הגיעו. לא מאפשרים לדיווח הזמני לדרוס
+          // את הבחירה השמורה; אחרי שהשחזור הסתיים כל שינוי של המשתמש נשמר כרגיל.
+          if (!appliedInitialSelection.current && initialSelectedIds?.length) {
+            return;
+          }
           setSelectionModel(newSelectionModel);
-          const fullSelectedRows = rows.filter((row) => newSelectionModel.includes(row.id));
+          const selectedIds = new Set(newSelectionModel.map((id) => String(id)));
+          const fullSelectedRows = rows.filter((row) => selectedIds.has(String(row.id)));
           onSelectionChange(fullSelectedRows);
         }}
         sortModel={sortModel}
@@ -2164,10 +2392,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         anchorEl={exportMenuAnchor}
         onClose={() => setExportMenuAnchor(null)}
       >
-        <MenuItem onClick={handlePrintLabels} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
-          <LocalPrintshopOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
-          הדפסת מדבקות
-        </MenuItem>
         <MenuItem onClick={handleDownloadExcel} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
           <FileDownloadOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
           הורדת קובץ אקסל למחשב
@@ -2237,7 +2461,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           </DialogContentText>
           {duplicateGroups.map((group, groupIndex) => {
             const visibleFieldDefs = displayFieldDefs.filter((f) => {
-              if (f.technicalName === 'print') return true;
+              if (f.technicalName === 'print') return false;
               return group.some((row) => {
                 const value = row[f.technicalName];
                 return value !== null && value !== undefined && String(value).trim() !== '';
@@ -2275,7 +2499,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
                           </TableCell>
                           {visibleFieldDefs.map((f) => {
                             const value = row[f.technicalName];
-                            const display = f.technicalName === 'print' ? (value ? 'כן' : 'לא') : (value ?? '');
+                            const display = value ?? '';
                             return <TableCell key={f.technicalName} sx={{ whiteSpace: 'nowrap' }}>{display}</TableCell>;
                           })}
                         </TableRow>
@@ -2374,7 +2598,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
                         <TableCell sx={{ whiteSpace: 'nowrap' }}>{HISTORY_OPERATION_LABELS[entry.operation] ?? entry.operation}</TableCell>
                         {historyVisibleFieldDefs.map((f) => {
                           const value = oldValues?.[f.technicalName];
-                          const display = f.technicalName === 'print' ? (value ? 'כן' : 'לא') : (value ?? '');
+                          const display = value ?? '';
                           return (
                             <TableCell key={f.technicalName} sx={{ whiteSpace: 'nowrap' }}>{display}</TableCell>
                           );
@@ -2428,12 +2652,21 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           </Typography>
           <Button
             variant="outlined"
+            size="small"
+            startIcon={<LocalPrintshopOutlinedIcon />}
+            onClick={handlePrintLabels}
+            sx={{ borderRadius: 999, textTransform: 'none', fontWeight: 600, whiteSpace: 'nowrap', py: 0.15, px: 1, fontSize: '0.75rem' }}
+          >
+            הדפס
+          </Button>
+          <Button
+            variant="outlined"
             color="error"
             size="small"
             onClick={handleDeleteRows}
             sx={{ borderRadius: 999, textTransform: 'none', fontWeight: 600, whiteSpace: 'nowrap', py: 0.15, px: 1, fontSize: '0.75rem' }}
           >
-            מחק שורות
+            מחק
           </Button>
         </Box>
       )}
