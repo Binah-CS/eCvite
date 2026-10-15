@@ -25,7 +25,7 @@ const EXTRA_PRINT_FIELDS = [
 // שורת "לכבוד ..." - קידומת/בעל/אישה/שם משפחה/סיום מתאחדים לשורה אחת, אבל כל חלק
 // מופיע רק אם הוא מסומן להדפסה. אם row.display קיים (שם מותאם אישית) הוא משמש כמו
 // שהיה קודם, ללא תלות בסימוני בעל/אישה/שם משפחה - קידומת/סיום עדיין חלים סביבו
-function buildNameLine(row, getPrintFlag, printLanguage) {
+function buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) {
   const prefixPart = getPrintFlag('prefix') && row.prefix ? row.prefix : '';
   const suffixPart = getPrintFlag('suffix') && row.suffix ? row.suffix : '';
 
@@ -44,7 +44,8 @@ function buildNameLine(row, getPrintFlag, printLanguage) {
 
   const content = [prefixPart, namePart, suffixPart].filter(Boolean).join(' ');
   if (!content) return '';
-  return printLanguage === 'en' ? `To: ${content}` : `לכבוד ${content}`;
+  if (printLanguage !== 'en') return `לכבוד ${content}`;
+  return englishSalutation ? `${englishSalutation} ${content}` : content;
 }
 
 function buildAddressLine1(row, getPrintFlag, printLanguage) {
@@ -99,15 +100,41 @@ const LABEL_LAYOUT = {
   large: { ...REAL_LABEL_SIZES.large, columns: getRealColumns('large'), nameVariant: 'h4', addrVariant: 'h5' },
 };
 
+const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
+const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+
+function getSavedSelectedRows() {
+  try {
+    const saved = sessionStorage.getItem(SELECTED_ROWS_STORAGE_KEY);
+    const rows = saved ? JSON.parse(saved) : [];
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSelectedRows(rows) {
+  sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
+  sessionStorage.setItem(
+    SELECTED_ROW_IDS_STORAGE_KEY,
+    JSON.stringify(rows.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
+  );
+}
+
 export default function PrintPreviewPage() {
   const location = useLocation();
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', autoPrint = false } = location.state || {};
+const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', englishSalutation = '', autoPrint = false } = location.state || {};
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
-  const actualRows = selectedRows.length > 0 ? selectedRows : selectedItems;
+  const savedSelectedRows = getSavedSelectedRows();
+  const actualRows = selectedRows.length > 0
+    ? selectedRows
+    : selectedItems.length > 0
+      ? selectedItems
+      : savedSelectedRows;
   const rowsToDisplay = actualRows;
   const layout = LABEL_LAYOUT[labelSize] || LABEL_LAYOUT.standard;
 
@@ -121,6 +148,12 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
 
   // כשמגיעים ישר מכפתור "הדפס" (לא מ"תצוגה מקדימה") - פותחים את חלון ההדפסה
   // של הדפדפן מיד, בלי לחכות שילחצו שוב על "הדפס מדבקות" כאן
+  useEffect(() => {
+    if (rowsToDisplay.length > 0) {
+      saveSelectedRows(rowsToDisplay);
+    }
+  }, [rowsToDisplay]);
+
   useEffect(() => {
     if (autoPrint && rowsToDisplay.length > 0) {
       window.print();
@@ -164,7 +197,8 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                sessionStorage.setItem('savedPrinter', printer);
                sessionStorage.setItem('savedFontType', fontType);
                sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
-               sessionStorage.setItem('savedSelectedIds', JSON.stringify(rowsToDisplay.map((r) => r.id)));
+               sessionStorage.setItem('savedEnglishSalutation', englishSalutation);
+               saveSelectedRows(rowsToDisplay);
                 navigate('/dashboard');
             }} 
 >
@@ -180,7 +214,10 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
               הדפס מדבקות
             </Button>
 
-            <Button variant="text" onClick={() => navigate('/dashboard')}>
+            <Button variant="text" onClick={() => {
+              saveSelectedRows(rowsToDisplay);
+              navigate('/dashboard');
+            }}>
               ביטול וחזרה
             </Button>
           </Stack>
@@ -226,12 +263,12 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                 }}
               >
                 {/* שורת השם המכובדת - רק אם יש בה בכלל תוכן לפי מה שסומן להדפסה */}
-                {buildNameLine(row, getPrintFlag, printLanguage) && (
+                {buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
                   <Typography
                     variant={layout.nameVariant}
                     sx={{ fontWeight: 'bold', mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
                   >
-                    {buildNameLine(row, getPrintFlag, printLanguage)}
+                    {buildNameLine(row, getPrintFlag, printLanguage, englishSalutation)}
                   </Typography>
                 )}
 

@@ -18,4 +18,3 @@ INSERT INTO excel_columns (technical_name, display_name, is_required, default_or
 ('houseNo', 'מס'' בית', false, 13, true, 'מספר בית,מס'' בית,house_no,house number,בית'),
 ('belongsTo', 'שייך ל', false, 14, true, 'שייך ל,belongs_to'),
 ('display', 'תצוגה', false, 15, true, 'תצוגה,display,שם לתצוגה'),
-('print', 'הדפסה', false, 16, true, 'הדפסה,print,להדפיס');

@@ -29,6 +29,26 @@ const GRID_PADDING_PX = 16; // padding של 1 (8px) מכל צד
 const PAGE_CONTENT_WIDTH = PREVIEW_PANEL_WIDTH - GRID_PADDING_PX;
 const PAGE_CONTENT_HEIGHT = PAGE_BOX_HEIGHT - GRID_PADDING_PX;
 const { gap: MOCK_GAP_PX, sizes: MOCK_LABEL_SIZES } = getScaledLabelSizes(PAGE_CONTENT_WIDTH);
+const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
+const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+
+function getSavedSelectedRows() {
+  try {
+    const saved = sessionStorage.getItem(SELECTED_ROWS_STORAGE_KEY);
+    const rows = saved ? JSON.parse(saved) : [];
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSelectedRows(rows) {
+  sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
+  sessionStorage.setItem(
+    SELECTED_ROW_IDS_STORAGE_KEY,
+    JSON.stringify(rows.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
+  );
+}
 
 function getLabelsPerPage(size) {
   const columns = getColumns(PAGE_CONTENT_WIDTH, size.width, MOCK_GAP_PX);
@@ -102,11 +122,11 @@ function LabelSheetPreview({ labelSize }) {
   );
 }
 
-export default function PrintModal({ open, onClose, selectedRows, records = [] }) {
+export default function PrintModal({ open, onClose, selectedRows = [] }) {
   const navigate = useNavigate();
 
-  // אם לא סימנו אף שורה - מדפיסים את כולן, במקום לא להדפיס כלום
-  const rowsToPrint = selectedRows.length > 0 ? selectedRows : records;
+  const rowsToPrint = (selectedRows.length > 0 ? selectedRows : getSavedSelectedRows())
+    .filter((row) => row.printEnabled !== false);
   
   // 1. בדיקה בטוחה עבור השלב (Step)
   const [step, setStep] = useState(() => {
@@ -150,6 +170,13 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     return FONT_OPTIONS[0].value;
   });
 
+  const [englishSalutation, setEnglishSalutation] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('savedEnglishSalutation') || '';
+    }
+    return '';
+  });
+
   const [printType, setPrintType] = useState('labels');
   const [notification, setNotification] = useState('');
 
@@ -166,8 +193,9 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   const handlePrint = () => {
     // אותו דף הדפסה בדיוק כמו מה"תצוגה מקדימה" - רק עם דגל שגורם לו לפתוח את חלון
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
+    saveSelectedRows(rowsToPrint);
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, englishSalutation, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
@@ -175,13 +203,15 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     sessionStorage.removeItem('savedPrinter');
     sessionStorage.removeItem('savedFontType');
     sessionStorage.removeItem('savedDeliveryMethod');
+    sessionStorage.removeItem('savedEnglishSalutation');
 
     onClose();
     setStep(1);
   };
 
   const handlePreview = () => {
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod } });
+    saveSelectedRows(rowsToPrint);
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, englishSalutation } });
   };
 
   return (
@@ -226,6 +256,20 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
                         {font.label}
                       </MenuItem>
                     ))}
+                  </Select>
+                </FormControl>
+
+                <FormControl fullWidth>
+                  <InputLabel id="english-salutation-label">פנייה באנגלית</InputLabel>
+                  <Select
+                    labelId="english-salutation-label"
+                    value={englishSalutation}
+                    label="פנייה באנגלית"
+                    onChange={(e) => setEnglishSalutation(e.target.value)}
+                  >
+                    <MenuItem value="">ללא פנייה</MenuItem>
+                    <MenuItem value="To:">To:</MenuItem>
+                    <MenuItem value="Dear">Dear</MenuItem>
                   </Select>
                 </FormControl>
 
