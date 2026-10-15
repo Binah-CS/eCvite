@@ -58,6 +58,29 @@ const TOOLBAR_BUTTON_SX = {
   '&:hover': { bgcolor: '#eff6ff', borderColor: '#60a5fa' },
 };
 
+// "שורות בעמוד" (25/50/100) נשמר בדפדפן (localStorage, לכל מחשב/דפדפן בנפרד) - בלי
+// זה הטבלה חזרה ל-25 בכל רענון או מעבר להגדרות וחזרה. try/catch - localStorage
+// יכול לזרוק (חלון גלישה פרטית, חסימת אחסון), ואז פשוט נשארים עם ברירת המחדל
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
+const PAGE_SIZE_STORAGE_KEY = 'recipientsTable.pageSize';
+
+function readSavedPageSize() {
+  try {
+    const saved = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY));
+    return PAGE_SIZE_OPTIONS.includes(saved) ? saved : PAGE_SIZE_OPTIONS[0];
+  } catch {
+    return PAGE_SIZE_OPTIONS[0];
+  }
+}
+
+function savePageSize(pageSize) {
+  try {
+    localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize));
+  } catch {
+    // לא קריטי - הבחירה פשוט לא תיזכר בפעם הבאה
+  }
+}
+
 // תרגום סוג הפעולה מטבלת recipients_history (נקבע ע"י ה-trigger בבסיס הנתונים,
 // TG_OP הסטנדרטי של פוסטגרס) לתצוגה בעברית בחלונית ההסטוריה
 const HISTORY_OPERATION_LABELS = { INSERT: 'יצירה', UPDATE: 'עדכון', DELETE: 'מחיקה' };
@@ -1935,10 +1958,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         onColumnVisibilityModelChange={(model) => setColumnVisibilityModel(model)}
         initialState={{
           pagination: {
-            paginationModel: { pageSize: 25 },
+            paginationModel: { pageSize: readSavedPageSize() },
           },
         }}
-        pageSizeOptions={[25, 50, 100]}
+        onPaginationModelChange={(model) => savePageSize(model.pageSize)}
+        pageSizeOptions={PAGE_SIZE_OPTIONS}
         localeText={{
           noRowsLabel: 'לא נמצאו רשומות',
           noResultsOverlayLabel: 'לא נמצאו תוצאות',
