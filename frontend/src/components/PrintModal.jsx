@@ -29,6 +29,7 @@ const GRID_PADDING_PX = 16; // padding של 1 (8px) מכל צד
 const PAGE_CONTENT_WIDTH = PREVIEW_PANEL_WIDTH - GRID_PADDING_PX;
 const PAGE_CONTENT_HEIGHT = PAGE_BOX_HEIGHT - GRID_PADDING_PX;
 const { gap: MOCK_GAP_PX, sizes: MOCK_LABEL_SIZES } = getScaledLabelSizes(PAGE_CONTENT_WIDTH);
+const PRINT_LANGUAGE_STORAGE_KEY = 'savedPrintLanguage';
 
 function getLabelsPerPage(size) {
   const columns = getColumns(PAGE_CONTENT_WIDTH, size.width, MOCK_GAP_PX);
@@ -150,6 +151,13 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     return FONT_OPTIONS[0].value;
   });
 
+  const [printLanguage, setPrintLanguage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem(PRINT_LANGUAGE_STORAGE_KEY) === 'en' ? 'en' : 'he';
+    }
+    return 'he';
+  });
+
   const [printType, setPrintType] = useState('labels');
   const [notification, setNotification] = useState('');
 
@@ -167,13 +175,14 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     // אותו דף הדפסה בדיוק כמו מה"תצוגה מקדימה" - רק עם דגל שגורם לו לפתוח את חלון
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, printLanguage, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
     sessionStorage.removeItem('savedLabelSize');
     sessionStorage.removeItem('savedPrinter');
     sessionStorage.removeItem('savedFontType');
+    sessionStorage.removeItem(PRINT_LANGUAGE_STORAGE_KEY);
     sessionStorage.removeItem('savedDeliveryMethod');
 
     onClose();
@@ -181,7 +190,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   };
 
   const handlePreview = () => {
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod } });
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, printLanguage } });
   };
 
   return (
@@ -226,6 +235,19 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
                         {font.label}
                       </MenuItem>
                     ))}
+                  </Select>
+                </FormControl>
+
+                <FormControl fullWidth>
+                  <InputLabel id="print-language-label">שפת המדבקה</InputLabel>
+                  <Select
+                    labelId="print-language-label"
+                    value={printLanguage}
+                    label="שפת המדבקה"
+                    onChange={(event) => setPrintLanguage(event.target.value)}
+                  >
+                    <MenuItem value="he">עברית</MenuItem>
+                    <MenuItem value="en">English</MenuItem>
                   </Select>
                 </FormControl>
 
