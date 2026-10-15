@@ -267,7 +267,11 @@ export default function ExcelImport({ onImport }) {
     setMatchError('');
 
     const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data);
+    const isCsvFile = file.name.toLowerCase().endsWith('.csv');
+    // SheetJS מייצר גם לקובץ CSV גיליון יחיד, ולכן אפשר להמשיך באותו מסלול
+    // של זיהוי ומיפוי עמודות המשמש לקובצי Excel. raw שומר מספרי טלפון ומיקודים
+    // כפי שנכתבו בקובץ, בלי להמיר אותם למספרים.
+    const workbook = XLSX.read(data, { type: 'array', raw: isCsvFile });
 
     // קוראים את כל הגליונות בקובץ (לא רק את הראשון) - כדי לא לפספס גליון נוסף
     // (למשל גליון של כתובות בארץ וגליון נפרד של כתובות בחו"ל) - כולם מיובאים לאותה טבלה
@@ -387,8 +391,8 @@ export default function ExcelImport({ onImport }) {
           '&:hover': { bgcolor: '#eff6ff', borderColor: '#60a5fa' },
         }}
       >
-        ייבוא Excel
-        <input hidden type="file" accept=".xlsx,.xls" onChange={handleFile} />
+        ייבוא Excel / CSV
+        <input hidden type="file" accept=".xlsx,.xls,.csv,text/csv" onChange={handleFile} />
       </Button>
       {fileNames.length > 0 && (
         <Typography
