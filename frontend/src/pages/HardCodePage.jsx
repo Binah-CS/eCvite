@@ -24,6 +24,8 @@ export const MODAL_TEXTS = {
   DELIVERY_COURIER: "שליח",
   DELIVERY_PICKUP: "איסוף עצמאי",
 
+  EMPTY_LINE_NO_ADDRESS: "השאר שורה ריקה כשאין כתובת",
+
   BUTTON_CANCEL: "ביטול",
   BUTTON_NEXT: "המשך",
   BUTTON_BACK: "חזור",
