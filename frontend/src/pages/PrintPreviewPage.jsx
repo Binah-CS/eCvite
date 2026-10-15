@@ -69,6 +69,28 @@ function buildCountryLine(row, getPrintFlag) {
   return DOMESTIC_COUNTRY_NAMES.has(country.toLowerCase()) ? '' : country;
 }
 
+function countCharacters(text, pattern) {
+  return (String(text ?? '').match(pattern) ?? []).length;
+}
+
+function detectPrintLanguage(row, getPrintFlag) {
+  const addressText = ['street', 'city', 'country']
+    .filter((field) => getPrintFlag(field))
+    .map((field) => row[field])
+    .join(' ');
+  const addressLatin = countCharacters(addressText, /[A-Za-z]/g);
+  const addressHebrew = countCharacters(addressText, /[\u0590-\u05FF]/g);
+  if (addressLatin !== addressHebrew) return addressLatin > addressHebrew ? 'en' : 'he';
+
+  const recipientText = ['display', 'prefix', 'man', 'woman', 'lastName', 'suffix']
+    .filter((field) => field === 'display' || getPrintFlag(field))
+    .map((field) => row[field])
+    .join(' ');
+  return countCharacters(recipientText, /[A-Za-z]/g) > countCharacters(recipientText, /[\u0590-\u05FF]/g)
+    ? 'en'
+    : 'he';
+}
+
 // פריסת רשת אמיתית לדף מדבקות - הגדלים ומספר העמודות מגיעים מאותו מקור אמת
 // שמשמש גם את התצוגה הממוזערת במודאל, כדי ששניהם תמיד יתאימו
 const LABEL_LAYOUT = {
@@ -82,7 +104,7 @@ export default function PrintPreviewPage() {
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', printLanguage = 'he', autoPrint = false } = location.state || {};
+const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', autoPrint = false } = location.state || {};
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
   const actualRows = selectedRows.length > 0 ? selectedRows : selectedItems;
@@ -141,7 +163,6 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                sessionStorage.setItem('savedLabelSize', labelSize);
                sessionStorage.setItem('savedPrinter', printer);
                sessionStorage.setItem('savedFontType', fontType);
-               sessionStorage.setItem('savedPrintLanguage', printLanguage);
                sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
                sessionStorage.setItem('savedSelectedIds', JSON.stringify(rowsToDisplay.map((r) => r.id)));
                 navigate('/dashboard');
@@ -182,8 +203,10 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
               '@media print': { columnGap: 0 },
             }}
           >
-            {rowsToDisplay.map((row, index) => (
-              <Box
+            {rowsToDisplay.map((row, index) => {
+              const printLanguage = detectPrintLanguage(row, getPrintFlag);
+              return (
+                <Box
                 key={row.id || index}
                 sx={{
                   boxSizing: 'border-box',
@@ -254,8 +277,9 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                     </Typography>
                   ) : null
                 )}
-              </Box>
-            ))}
+                </Box>
+              );
+            })}
           </Box>
         )}
       </Paper>
