@@ -215,6 +215,36 @@ class RecipientControllerTest {
     }
 
     @Test
+    void save_sameRecipientSavedRepeatedly_staysLinkedExactlyOnce() throws Exception {
+        // הקישור נמען<->משתמשת נוצר עם NOT EXISTS בתוך פקודת ההכנסה (בלי שאילתה
+        // נפרדת מראש) - שמירה חוזרת של אותו נמען, גם כקיים (עם hashCode) וגם כשורה
+        // "חדשה" עם אותה זהות, לא אמורה ליצור קישור כפול
+        User user = seedUser("0531212121", "חוזרת");
+
+        SaveRecipientsRequest first = new SaveRecipientsRequest();
+        first.setPhone(user.getPhone());
+        first.setRecipients(List.of(newUnsavedRecipient("קבוע", "0532323232")));
+        JsonNode saved = objectMapper.readTree(postSave(first)).get(0);
+
+        Recipients asExisting = objectMapper.treeToValue(saved, Recipients.class);
+        asExisting.setCity("עיר אחרת");
+        SaveRecipientsRequest second = new SaveRecipientsRequest();
+        second.setPhone(user.getPhone());
+        second.setRecipients(List.of(asExisting));
+        postSave(second);
+
+        SaveRecipientsRequest third = new SaveRecipientsRequest();
+        third.setPhone(user.getPhone());
+        third.setRecipients(List.of(newUnsavedRecipient("קבוע", "0532323232")));
+        postSave(third);
+
+        Integer links = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_recipients WHERE user_id = ? AND recipient_id = ?",
+                Integer.class, user.getHashCode(), saved.get("hashCode").asText());
+        assertThat(links).isEqualTo(1);
+    }
+
+    @Test
     void save_combinedDeleteAndSave_unlinksRecipientInSameRequest() throws Exception {
         User user = seedUser("0509999999", "טל");
         Recipients toDelete = seedRecipientLinkedTo(user, "למחוק", "0501010101");
