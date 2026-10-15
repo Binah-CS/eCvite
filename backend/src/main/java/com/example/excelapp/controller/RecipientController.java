@@ -46,15 +46,20 @@ public class RecipientController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    // "מציגה" למסד הנתונים מי המשתמשת המבצעת את הפעולה הנוכחית, כדי שהטריגרים
-    // ששומרים היסטוריית שינויים בטבלת הנמענים (recipients_history) ידעו למי לייחס
-    // כל שינוי/מחיקה - חייבת לרוץ באותה טרנזקציה (@Transactional) של הפעולה עצמה,
-    // אחרת ה-DB "ישכח" את זה לפני שהשמירה/מחיקה בפועל קורית
-    private void stampCurrentUserForHistory(String userIdentity) {
-        entityManager
-                .createNativeQuery("SELECT set_config('app.current_user', :val, true)")
-                .setParameter("val", userIdentity)
-                .getSingleResult();
+    // מוצאת את ה-hash של המשתמשת לפי הטלפון, ובאותה שאילתה גם "מציגה" למסד הנתונים
+    // מי המשתמשת המבצעת את הפעולה הנוכחית - כדי שהטריגרים ששומרים היסטוריית שינויים
+    // בטבלת הנמענים (recipients_history) ידעו למי לייחס כל שינוי/מחיקה. חייבת לרוץ
+    // באותה טרנזקציה (@Transactional) של הפעולה עצמה, אחרת ה-DB "ישכח" את זה לפני
+    // שהשמירה/מחיקה בפועל קורית. set_config מחזירה את הערך שהציבה, כלומר את ה-hash
+    // עצמו - פנייה אחת ל-DB במקום שתיים (findByPhone ואז set_config בנפרד). אם אין
+    // משתמשת עם הטלפון הזה - אין שורות, set_config לא רצה, ומוחזר null
+    @SuppressWarnings("unchecked")
+    private String findUserHashAndStampForHistory(String phone) {
+        List<Object> result = entityManager
+                .createNativeQuery("SELECT set_config('app.current_user', u.hash_code, true) FROM users u WHERE u.phone = :phone")
+                .setParameter("phone", phone)
+                .getResultList();
+        return result.isEmpty() ? null : (String) result.get(0);
     }
 
     public RecipientController(
@@ -74,7 +79,11 @@ public class RecipientController {
             @RequestBody SaveRecipientsRequest request
     ) {
 
-        User user = userRepository.findByPhone(request.getPhone());
+        // מציאת המשתמשת ו"הצגתה" לטריגר ההיסטוריה בפנייה אחת ל-DB במקום שתיים (ר'
+        // findUserHashAndStampForHistory). לא טוענים את ישות ה-User המלאה בכלל -
+        // getReference נותן הפניה לפי המפתח בלבד, בלי SELECT, וזה כל מה שצריך כאן
+        String userHashCode = findUserHashAndStampForHistory(request.getPhone());
+        User user = userHashCode != null ? entityManager.getReference(User.class, userHashCode) : null;
 
         // recipients יכול להיות null בבקשת "מחיקה בלבד" (hashCodesToDelete בלי שורות
         // לשמירה) - לא ניגשים ל-size()/ללולאה על ה-request הגולמי לפני שמוודאים את זה
@@ -90,8 +99,6 @@ public class RecipientController {
                     .status(HttpStatus.NOT_FOUND)
                     .body("User not found");
         }
-
-        stampCurrentUserForHistory(user.getHashCode());
 
         // מוחקים (מנתקים) קודם, לפני השמירה - לא אחריה. אם המחיקה הייתה רצה אחרי
         // השמירה, נמען שנמחק ואז יובא/נוסף מחדש עם אותה זהות היה מקבל hash זהה לנמען
@@ -162,28 +169,26 @@ public class RecipientController {
         // hibernate.jdbc.batch_size) - חייבים לפני הוספת הקישורים למטה, שמפנים אליהם
         entityManager.flush();
 
-        // שאילתה אחת שמביאה רק את ה-hash-ים הקיימים (לא את הישויות המלאות - זה היה
-        // גורם ל-N+1 שאילתות, אחת לכל recipient בנפרד, כי ManyToOne ברירת מחדל הוא eager)
-        Set<String> alreadyLinkedHashes = new HashSet<>(
-                userRecipientsRepository.findRecipientHashCodesByUser(user)
-        );
-
         List<String> hashCodesToLink = savedRecipients.stream()
                 .map(Recipients::getHashCode)
-                .filter(hash -> !alreadyLinkedHashes.contains(hash))
                 .distinct()
                 .toList();
 
-        // JDBC batch ולא saveAll() - ל-UserRecipients יש id מסוג IDENTITY, ו-Hibernate
-        // מבטל batching לגמרי לישויות כאלה (כל קישור היה INSERT ו-round-trip נפרד)
+        // קישור נמען<->משתמשת רק אם הוא עוד לא קיים - הבדיקה (NOT EXISTS) בתוך פקודת
+        // ההכנסה עצמה, ולא שאילתה נפרדת מראש של "למי כבר מקושרת" (חוסך פנייה ל-DB
+        // בכל שמירה). JDBC batch ולא saveAll() - ל-UserRecipients יש id מסוג IDENTITY,
+        // ו-Hibernate מבטל batching לגמרי לישויות כאלה (כל קישור היה round-trip נפרד)
         if (!hashCodesToLink.isEmpty()) {
             jdbcTemplate.batchUpdate(
-                    "INSERT INTO user_recipients (user_id, recipient_id) VALUES (?, ?)",
+                    "INSERT INTO user_recipients (user_id, recipient_id) SELECT ?, ? " +
+                            "WHERE NOT EXISTS (SELECT 1 FROM user_recipients WHERE user_id = ? AND recipient_id = ?)",
                     hashCodesToLink,
                     hashCodesToLink.size(),
                     (ps, hash) -> {
-                        ps.setString(1, user.getHashCode());
+                        ps.setString(1, userHashCode);
                         ps.setString(2, hash);
+                        ps.setString(3, userHashCode);
+                        ps.setString(4, hash);
                     }
             );
         }
