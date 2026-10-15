@@ -150,12 +150,14 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     return FONT_OPTIONS[0].value;
   });
 
-  // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - כבוי כברירת מחדל
+  // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - מסומן כברירת מחדל. ערך
+  // שמור (חזרה מ"שינוי הגדרות" בתצוגה המקדימה) גובר - כולל אם הורידו את הסימון
   const [emptyLineWhenNoAddress, setEmptyLineWhenNoAddress] = useState(() => {
     if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('savedEmptyLineWhenNoAddress') === 'true';
+      const saved = sessionStorage.getItem('savedEmptyLineWhenNoAddress');
+      return saved === null ? true : saved === 'true';
     }
-    return false;
+    return true;
   });
 
   const [printType, setPrintType] = useState('labels');
