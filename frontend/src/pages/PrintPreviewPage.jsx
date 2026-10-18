@@ -126,7 +126,7 @@ export default function PrintPreviewPage() {
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', englishSalutation = '', autoPrint = false } = location.state || {};
+  const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', englishSalutation = '', emptyLineWhenNoAddress = true, autoPrint = false } = location.state || {};
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
   const savedSelectedRows = getSavedSelectedRows();
@@ -198,6 +198,7 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                sessionStorage.setItem('savedFontType', fontType);
                sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
                sessionStorage.setItem('savedEnglishSalutation', englishSalutation);
+               sessionStorage.setItem('savedEmptyLineWhenNoAddress', String(emptyLineWhenNoAddress));
                saveSelectedRows(rowsToDisplay);
                 navigate('/dashboard');
             }} 
@@ -272,13 +273,20 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                   </Typography>
                 )}
 
-                {/* שורת הרחוב */}
-                {buildAddressLine1(row, getPrintFlag, printLanguage) && (
+                {/* שורת הרחוב. אם בחרו בחלון ההדפסה "השאר שורה ריקה כשאין כתובת" ואין
+                    רחוב/מספר בית אבל יש עיר - משאירים במקומה שורה ריקה באותו גובה (רווח
+                    קשיח, כדי שהשורה לא תתכווץ לאפס), כך שהעיר לא "קופצת" מיד מתחת לשם. בלי
+                    עיר אין "בין השם לעיר", ולכן גם אין שורה ריקה. ורק אם רחוב/מספר בית בכלל
+                    מסומנים להדפסה ב"ניהול עמודות" - כתובת שהוסתרה בכוונה היא לא "חסרה" */}
+                {(buildAddressLine1(row, getPrintFlag, printLanguage)
+                  || (emptyLineWhenNoAddress
+                    && (getPrintFlag('street') || getPrintFlag('houseNo'))
+                    && buildAddressLine2(row, getPrintFlag))) && (
                   <Typography
                     variant={layout.addrVariant}
                     sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
                   >
-                    {buildAddressLine1(row, getPrintFlag, printLanguage)}
+                    {buildAddressLine1(row, getPrintFlag, printLanguage) || ' '}
                   </Typography>
                 )}
 

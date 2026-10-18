@@ -161,6 +161,26 @@ export default function DashboardPage() {
       sessionStorage.removeItem('fromPreview'); // מנקים מיד כדי שלא יציק ברענונים הבאים
     }
   }, []);
+
+  // Ctrl+P (או Cmd+P במק) בדף הטבלה פותח את חלון "הדפסת מדבקות" שלנו במקום ההדפסה
+  // של הדפדפן, שהייתה מדפיסה את כל הדף - טבלה, כפתורים וחיפוש. e.code ולא e.key -
+  // כשהמקלדת בעברית המקש P כותב "פ", והקיצור צריך לעבוד בכל שפה. capture - כדי
+  // שיתפס לפני הטבלה או קלט בתא שעוצרים את האירוע. בדף התצוגה המקדימה (רכיב אחר)
+  // Ctrl+P נשאר ההדפסה הרגילה של הדפדפן, כי שם מוצגות רק המדבקות
+  // רק Ctrl+P עצמו - Ctrl+Shift+P/Alt הם קיצורים אחרים של הדפדפן (למשל חלון פרטי)
+  // ונשארים שלו. אם כבר פתוח חלון או תפריט (חלונית כפילויות, היסטוריה, "יצוא",
+  // חלון ההדפסה עצמו - כולם MUI Modal) - רק חוסמים את ההדפסה של הדפדפן ולא פותחים
+  // את חלון ההדפסה מעליהם, כדי לא לדלג על החלטה שעוד לא נסגרה
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.code !== 'KeyP') return;
+      event.preventDefault();
+      if (document.querySelector('.MuiModal-root')) return;
+      setIsPrintModalOpen(true);
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, []);
   //  מקפיץ אזהרה ברענן/סגירה רק אם הסטייט השתנה (כלומר יש שינויים שלא נשמרו)
   useEffect(() => {
     const handleBeforeUnload = (e) => {
