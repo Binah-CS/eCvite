@@ -45,7 +45,12 @@ function buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) {
   const content = [prefixPart, namePart, suffixPart].filter(Boolean).join(' ');
   if (!content) return '';
   if (printLanguage !== 'en') return `לכבוד ${content}`;
+  if (hasHebrewEnglishSalutation(englishSalutation)) return content;
   return englishSalutation ? `${englishSalutation} ${content}` : content;
+}
+
+function hasHebrewEnglishSalutation(salutation) {
+  return /[\u0590-\u05FF]/.test(salutation);
 }
 
 function buildAddressLine1(row, getPrintFlag, printLanguage) {
@@ -263,7 +268,17 @@ export default function PrintPreviewPage() {
                   direction: printLanguage === 'en' ? 'ltr' : 'rtl',
                 }}
               >
-                {/* שורת השם המכובדת - רק אם יש בה בכלל תוכן לפי מה שסומן להדפסה */}
+                {/* פנייה עברית שנבחרה למדבקה באנגלית מודפסת מעל השם. */}
+                {printLanguage === 'en' && hasHebrewEnglishSalutation(englishSalutation) && buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
+                  <Typography
+                    variant={layout.nameVariant}
+                    sx={{ fontWeight: 'bold', mb: 0, color: '#000000', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
+                  >
+                    {englishSalutation}
+                  </Typography>
+                )}
+
+                {/* שורת השם - רק אם יש בה בכלל תוכן לפי מה שסומן להדפסה */}
                 {buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
                   <Typography
                     variant={layout.nameVariant}
