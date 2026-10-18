@@ -726,7 +726,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const createCellInputHandlers = useCallback((id, field) => ({
     onChange: (event) => updateCellValue(id, field, event.target.value),
     onClick: (event) => event.stopPropagation(),
-    onFocus: () => setActiveRowId(id),
     onKeyDown: (event) => {
       if (event.key === ' ') {
         event.stopPropagation();
@@ -919,7 +918,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             // ללחוץ בנפרד על חץ - אפשר עדיין להקליד חופשי במקביל. כניסה לעריכה תמיד
             // חושפת את הטקסט המלא (גם אם "שייך ל" מכווץ כרגע), ויציאה ממנה מכווצת שוב
             onFocus={() => {
-              setActiveRowId(id);
               setIsFocused(true);
               setExpanded(true);
               if (pickListField) openMenu();
@@ -1913,8 +1911,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           '& .MuiDataGrid-row.app-row-hovered': {
             backgroundColor: '#eff6ff !important',
           },
-          // השורה שבה המשתמש עובד נשארת מודגשת גם אחרי שהעכבר זז לתא אחר.
-          // המסגרת בלבד נשארת גם בשורה מסומנת, כדי לא להסתיר את צבע הבחירה שלה.
           '& .MuiDataGrid-row.app-active-row': {
             boxShadow: 'inset 0 0 0 1.5px #60a5fa',
             zIndex: 1,

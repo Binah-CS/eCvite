@@ -76,12 +76,19 @@ const api = {
                 }
             }
         ),
-    saveRecords: (phone, rows, hashCodesToDelete) =>
+  saveRecords: (phone, rows, hashCodesToDelete) =>
         apiClient.post('/recipients/save', {
             phone: phone,
             recipients: rows,
             hashCodesToDelete
         }),
+
+  updatePrintPreferences: (phone, recipientHashCodes, printEnabled) =>
+      apiClient.put('/recipients/print-preferences', {
+        phone,
+        recipientHashCodes,
+        printEnabled,
+      }),
 
   importRecipients: (phone, recipients) =>
       apiClient.post('/recipients/import', { phone, recipients }),
@@ -104,6 +111,10 @@ const api = {
 
   updateColumnPreferences: (phone, columnPreferences) =>
       apiClient.put('/auth/column-preferences', { phone, columnPreferences }),
+
+  // הגדרות חלון "הדפסת מדבקות" של המשתמשת (כתב, גודל, עובי, מדבקה, מדפסת)
+  updateLabelPrintSettings: (phone, labelPrintSettings) =>
+      apiClient.put('/auth/label-print-settings', { phone, labelPrintSettings }),
 
   getRecipientHistory: (hashCode, phone) =>
       apiClient.get(`/recipients/${encodeURIComponent(hashCode)}/history`, { params: { phone } }),

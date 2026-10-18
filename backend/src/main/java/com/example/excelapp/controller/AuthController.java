@@ -61,4 +61,27 @@ private final UserRepository userRepository;
         return ResponseEntity.ok(user);
     }
 
+    // שומרת את הבחירות האחרונות בחלון "הדפסת מדבקות" - ר' User.labelPrintSettings.
+    // לא לבלבל עם /api/recipients/print-preferences (האם להדפיס כל נמען)
+    @PutMapping("/label-print-settings")
+    public ResponseEntity<User> updateLabelPrintSettings(@RequestBody Map<String, String> request) {
+        String phone = request.get("phone");
+        String labelPrintSettings = request.get("labelPrintSettings");
+
+        // העמודה מוגבלת ל-1,000 תווים (ר' User.labelPrintSettings) - ערך ארוך יותר היה נכשל
+        // רק בשמירה ל-DB ומחזיר 500 כללי; כאן הוא נדחה מראש כבקשה לא תקינה
+        if (labelPrintSettings != null && labelPrintSettings.length() > 1000) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        User user = userRepository.findByPhone(phone);
+        if (user == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        user.setLabelPrintSettings(labelPrintSettings);
+        userRepository.save(user);
+        return ResponseEntity.ok(user);
+    }
+
 }
