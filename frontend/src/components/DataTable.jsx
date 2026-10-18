@@ -922,8 +922,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         event.preventDefault();
       }
     },
-    onClick: (event) => event.stopPropagation(),
-    onFocus: () => setActiveRowId(id),
     onKeyDown: (event) => {
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
         event.preventDefault();
