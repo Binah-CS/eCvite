@@ -44,6 +44,7 @@ const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
 const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
 const CUSTOM_ENGLISH_SALUTATION = '__custom__';
 const PRESET_ENGLISH_SALUTATIONS = ['', 'To:', 'Dear'];
+const GREETING_ALIGNMENTS = ['right', 'center', 'left'];
 
 function saveSelectedRows(rows) {
   sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
@@ -201,6 +202,16 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   const [emptyLineWhenNoAddress, setEmptyLineWhenNoAddress] = useState(() =>
     initialChoice('savedEmptyLineWhenNoAddress', 'emptyLineWhenNoAddress', (v) => v === 'true' || v === 'false', 'true') === 'true');
 
+  // 7. "לכבוד" במדבקה בעברית - האם להדפיס אותו, האם בשורה נפרדת מעל השם (ברירת
+  // המחדל), ואם כן באיזה צד. נשמר למשתמשת כמו שאר הבחירות
+  const isBooleanString = (v) => v === 'true' || v === 'false';
+  const [greetingShow, setGreetingShow] = useState(() =>
+    initialChoice('savedGreetingShow', 'greetingShow', isBooleanString, 'true') === 'true');
+  const [greetingSeparateLine, setGreetingSeparateLine] = useState(() =>
+    initialChoice('savedGreetingSeparateLine', 'greetingSeparateLine', isBooleanString, 'true') === 'true');
+  const [greetingAlign, setGreetingAlign] = useState(() =>
+    initialChoice('savedGreetingAlign', 'greetingAlign', (v) => GREETING_ALIGNMENTS.includes(v), 'center'));
+
   // הערכים שנשמרו בחזרה מהתצוגה המקדימה ("שינוי הגדרות הדפסה") נקראים פעם אחת - כבר
   // נקלטו למעלה - ונמחקים מיד. בלי זה, ערך שנשאר (למשל אחרי הדפסה מהתצוגה המקדימה
   // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
@@ -209,12 +220,13 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     ['savedLabelSize', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
       .forEach((key) => sessionStorage.removeItem(key));
     sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
+    ['savedGreetingShow', 'savedGreetingSeparateLine', 'savedGreetingAlign'].forEach((key) => sessionStorage.removeItem(key));
   }, []);
 
   // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
   // ייפתח אצלה עם הבחירות האלה. לא מחכים לתשובה - ההדפסה לא תלויה בשמירה
   const rememberChoices = () => {
-    saveLabelPrintSettings({ fontType, labelSize, printer, deliveryMethod, fontScale, fontWeight, emptyLineWhenNoAddress });
+    saveLabelPrintSettings({ fontType, labelSize, printer, deliveryMethod, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign });
   };
 
   // מעבר לגודל מדבקה קטן יותר מוריד גודל כתב שכבר לא נכנס בו למקסימום החדש
@@ -242,7 +254,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     saveSelectedRows(rowsToPrint);
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
@@ -254,6 +266,9 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     sessionStorage.removeItem('savedFontWeight');
     sessionStorage.removeItem('savedEnglishSalutation');
     sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
+    sessionStorage.removeItem('savedGreetingShow');
+    sessionStorage.removeItem('savedGreetingSeparateLine');
+    sessionStorage.removeItem('savedGreetingAlign');
     sessionStorage.removeItem('savedFontScale');
     sessionStorage.removeItem('savedFontWeight');
 
@@ -264,7 +279,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   const handlePreview = () => {
     rememberChoices();
     saveSelectedRows(rowsToPrint);
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress } });
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign } });
   };
 
   return (
@@ -353,6 +368,32 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
                     <FormControlLabel value="bold" control={<Radio size="small" />} label={MODAL_TEXTS.FONT_WEIGHT_BOLD} sx={{ mr: 0 }} />
                   </RadioGroup>
                 </Stack>
+                </Box>
+
+                {/* "לכבוד" במדבקה בעברית - המיקום רלוונטי רק כשהוא בשורה נפרדת */}
+                <Box sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}>
+                  <FormControlLabel
+                    control={<Checkbox size="small" checked={greetingShow} onChange={(e) => setGreetingShow(e.target.checked)} />}
+                    label={MODAL_TEXTS.GREETING_SHOW}
+                  />
+                  {greetingShow && (
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={greetingSeparateLine} onChange={(e) => setGreetingSeparateLine(e.target.checked)} />}
+                      label={MODAL_TEXTS.GREETING_SEPARATE_LINE}
+                    />
+                  )}
+                  {greetingShow && greetingSeparateLine && (
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+                        {MODAL_TEXTS.GREETING_ALIGN_LABEL}
+                      </Typography>
+                      <RadioGroup row value={greetingAlign} onChange={(e) => setGreetingAlign(e.target.value)}>
+                        <FormControlLabel value="right" control={<Radio size="small" />} label={MODAL_TEXTS.GREETING_ALIGN_RIGHT} />
+                        <FormControlLabel value="center" control={<Radio size="small" />} label={MODAL_TEXTS.GREETING_ALIGN_CENTER} />
+                        <FormControlLabel value="left" control={<Radio size="small" />} label={MODAL_TEXTS.GREETING_ALIGN_LEFT} sx={{ mr: 0 }} />
+                      </RadioGroup>
+                    </Stack>
+                  )}
                 </Box>
 
                 <FormControl fullWidth>
