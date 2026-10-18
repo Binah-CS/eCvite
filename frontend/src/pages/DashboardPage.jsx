@@ -435,7 +435,7 @@ export default function DashboardPage() {
         hashCodesToDelete
       });
 
-      const response = await api.saveRecords(
+      const response = await api.saveRecordsInOrder(
           user.phone,
           cleanRows,
           hashCodesToDelete,
