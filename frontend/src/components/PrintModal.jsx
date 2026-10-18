@@ -160,14 +160,10 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     initialChoice('savedFontType', 'fontType', (v) => FONT_OPTIONS.some((f) => f.value === v), FONT_OPTIONS[0].value));
 
   // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - מסומן כברירת מחדל. ערך
-  // שמור (חזרה מ"שינוי הגדרות" בתצוגה המקדימה) גובר - כולל אם הורידו את הסימון
-  const [emptyLineWhenNoAddress, setEmptyLineWhenNoAddress] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem('savedEmptyLineWhenNoAddress');
-      return saved === null ? true : saved === 'true';
-    }
-    return true;
-  });
+  // שמור (חזרה מ"שינוי הגדרות" בתצוגה המקדימה) גובר, ואחריו הבחירה השמורה של
+  // המשתמשת - כולל אם הורידו את הסימון
+  const [emptyLineWhenNoAddress, setEmptyLineWhenNoAddress] = useState(() =>
+    initialChoice('savedEmptyLineWhenNoAddress', 'emptyLineWhenNoAddress', (v) => v === 'true' || v === 'false', 'true') === 'true');
 
   // הערך שנשמר בחזרה מהתצוגה המקדימה נקרא פעם אחת - כבר נקלט למעלה - ונמחק מיד. בלי
   // זה, בחירה שנשארה (למשל אחרי "שינוי הגדרות" וסגירה בלי הדפסה) הייתה גוברת על
@@ -199,7 +195,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
   // ייפתח אצלה עם הבחירות האלה. לא מחכים לתשובה - ההדפסה לא תלויה בשמירה
   const rememberChoices = () => {
-    saveLabelPrintSettings({ fontType, labelSize, printer, deliveryMethod, fontScale, fontWeight });
+    saveLabelPrintSettings({ fontType, labelSize, printer, deliveryMethod, fontScale, fontWeight, emptyLineWhenNoAddress });
   };
 
   // מעבר לגודל מדבקה קטן יותר מוריד גודל כתב שכבר לא נכנס בו למקסימום החדש
