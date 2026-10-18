@@ -20,19 +20,19 @@ function getLoggedUser() {
 // שדות נוספים (לא חלק מהתבנית הקבועה של שם/כתובת) שמופיעים במדבקה כשורה נפרדת רק
 // אם סומנו להדפסה ב"ניהול עמודות" וגם יש להם ערך בפועל אצל הנמען הספציפי
 const EXTRA_PRINT_FIELDS = [
-  { field: 'phone', label: 'טלפון' },
-  { field: 'mail', label: 'מייל' },
-  { field: 'fatherName', label: 'שם האב' },
-  { field: 'motherName', label: 'שם האם' },
-  { field: 'belongsTo', label: 'שייך ל' },
-  { field: 'addressNote', label: 'הערת כתובת' },
-  { field: 'neighborhood', label: 'שכונה' },
+  { field: 'phone', labels: { he: 'טלפון', en: 'Phone' } },
+  { field: 'mail', labels: { he: 'מייל', en: 'Email' } },
+  { field: 'fatherName', labels: { he: 'שם האב', en: "Father's name" } },
+  { field: 'motherName', labels: { he: 'שם האם', en: "Mother's name" } },
+  { field: 'belongsTo', labels: { he: 'שייך ל', en: 'Belongs to' } },
+  { field: 'addressNote', labels: { he: 'הערת כתובת', en: 'Address note' } },
+  { field: 'neighborhood', labels: { he: 'שכונה', en: 'Neighborhood' } },
 ];
 
 // שורת "לכבוד ..." - קידומת/בעל/אישה/שם משפחה/סיום מתאחדים לשורה אחת, אבל כל חלק
 // מופיע רק אם הוא מסומן להדפסה. אם row.display קיים (שם מותאם אישית) הוא משמש כמו
 // שהיה קודם, ללא תלות בסימוני בעל/אישה/שם משפחה - קידומת/סיום עדיין חלים סביבו
-function buildNameLine(row, getPrintFlag) {
+function buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) {
   const prefixPart = getPrintFlag('prefix') && row.prefix ? row.prefix : '';
   const suffixPart = getPrintFlag('suffix') && row.suffix ? row.suffix : '';
 
@@ -42,20 +42,30 @@ function buildNameLine(row, getPrintFlag) {
   } else {
     const manShown = getPrintFlag('man') && row.man;
     const womanShown = getPrintFlag('woman') && row.woman;
-    const womanText = womanShown ? (manShown ? `ו${row.woman}` : row.woman) : '';
+    const womanText = womanShown
+      ? (manShown ? `${printLanguage === 'en' ? 'and ' : 'ו'}${row.woman}` : row.woman)
+      : '';
     const lastNamePart = getPrintFlag('lastName') && row.lastName ? row.lastName : '';
     namePart = [manShown ? row.man : '', womanText, lastNamePart].filter(Boolean).join(' ');
   }
 
   const content = [prefixPart, namePart, suffixPart].filter(Boolean).join(' ');
-  return content ? `לכבוד ${content}` : '';
+  if (!content) return '';
+  if (printLanguage !== 'en') return `לכבוד ${content}`;
+  if (hasHebrewEnglishSalutation(englishSalutation)) return content;
+  return englishSalutation ? `${englishSalutation} ${content}` : content;
 }
 
-function buildAddressLine1(row, getPrintFlag) {
-  return [
-    getPrintFlag('street') && row.street ? row.street : '',
-    getPrintFlag('houseNo') && row.houseNo ? row.houseNo : '',
-  ].filter(Boolean).join(' ');
+function hasHebrewEnglishSalutation(salutation) {
+  return /[\u0590-\u05FF]/.test(salutation);
+}
+
+function buildAddressLine1(row, getPrintFlag, printLanguage) {
+  const street = getPrintFlag('street') && row.street ? row.street : '';
+  const houseNo = getPrintFlag('houseNo') && row.houseNo ? row.houseNo : '';
+  return (printLanguage === 'en' ? [houseNo, street] : [street, houseNo])
+    .filter(Boolean)
+    .join(' ');
 }
 
 function buildAddressLine2(row, getPrintFlag) {
@@ -72,6 +82,28 @@ function buildCountryLine(row, getPrintFlag) {
   return DOMESTIC_COUNTRY_NAMES.has(country.toLowerCase()) ? '' : country;
 }
 
+function countCharacters(text, pattern) {
+  return (String(text ?? '').match(pattern) ?? []).length;
+}
+
+function detectPrintLanguage(row, getPrintFlag) {
+  const addressText = ['street', 'city', 'country']
+    .filter((field) => getPrintFlag(field))
+    .map((field) => row[field])
+    .join(' ');
+  const addressLatin = countCharacters(addressText, /[A-Za-z]/g);
+  const addressHebrew = countCharacters(addressText, /[\u0590-\u05FF]/g);
+  if (addressLatin !== addressHebrew) return addressLatin > addressHebrew ? 'en' : 'he';
+
+  const recipientText = ['display', 'prefix', 'man', 'woman', 'lastName', 'suffix']
+    .filter((field) => field === 'display' || getPrintFlag(field))
+    .map((field) => row[field])
+    .join(' ');
+  return countCharacters(recipientText, /[A-Za-z]/g) > countCharacters(recipientText, /[\u0590-\u05FF]/g)
+    ? 'en'
+    : 'he';
+}
+
 // פריסת רשת אמיתית לדף מדבקות - הגדלים ומספר העמודות מגיעים מאותו מקור אמת
 // שמשמש גם את התצוגה הממוזערת במודאל, כדי ששניהם תמיד יתאימו
 const LABEL_LAYOUT = {
@@ -80,15 +112,41 @@ const LABEL_LAYOUT = {
   large: { ...REAL_LABEL_SIZES.large, columns: getRealColumns('large'), nameVariant: 'h4', addrVariant: 'h5' },
 };
 
+const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
+const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+
+function getSavedSelectedRows() {
+  try {
+    const saved = sessionStorage.getItem(SELECTED_ROWS_STORAGE_KEY);
+    const rows = saved ? JSON.parse(saved) : [];
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSelectedRows(rows) {
+  sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
+  sessionStorage.setItem(
+    SELECTED_ROW_IDS_STORAGE_KEY,
+    JSON.stringify(rows.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
+  );
+}
+
 export default function PrintPreviewPage() {
   const location = useLocation();
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', emptyLineWhenNoAddress = true, fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', autoPrint = false } = location.state || {};
+  const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, autoPrint = false } = location.state || {};
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
-  const actualRows = selectedRows.length > 0 ? selectedRows : selectedItems;
+  const savedSelectedRows = getSavedSelectedRows();
+  const actualRows = selectedRows.length > 0
+    ? selectedRows
+    : selectedItems.length > 0
+      ? selectedItems
+      : savedSelectedRows;
   const rowsToDisplay = actualRows;
   const layout = LABEL_LAYOUT[labelSize] || LABEL_LAYOUT.standard;
 
@@ -99,12 +157,11 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
   const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
   const nameLineSx = {
     fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
-    lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`,
+    lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
   };
   const detailLineSx = {
-    color: '#333333', textAlign: 'center', fontFamily: 'inherit',
-    lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.line * fontFactor}px`,
-    fontWeight: labelFontWeight,
+    color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: LABEL_LINE_HEIGHT,
+    fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
   };
 
   // "עמודות להדפסה" מ"ניהול עמודות" - אותה העדפה שנשמרה למשתמשת, נופלת חזרה
@@ -117,6 +174,12 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
 
   // כשמגיעים ישר מכפתור "הדפס" (לא מ"תצוגה מקדימה") - פותחים את חלון ההדפסה
   // של הדפדפן מיד, בלי לחכות שילחצו שוב על "הדפס מדבקות" כאן
+  useEffect(() => {
+    if (rowsToDisplay.length > 0) {
+      saveSelectedRows(rowsToDisplay);
+    }
+  }, [rowsToDisplay]);
+
   useEffect(() => {
     if (autoPrint && rowsToDisplay.length > 0) {
       window.print();
@@ -160,10 +223,11 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                sessionStorage.setItem('savedPrinter', printer);
                sessionStorage.setItem('savedFontType', fontType);
                sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
-               sessionStorage.setItem('savedEmptyLineWhenNoAddress', String(emptyLineWhenNoAddress));
                sessionStorage.setItem('savedFontScale', String(fontScale));
                sessionStorage.setItem('savedFontWeight', fontWeight);
-               sessionStorage.setItem('savedSelectedIds', JSON.stringify(rowsToDisplay.map((r) => r.id)));
+               sessionStorage.setItem('savedEnglishSalutation', englishSalutation);
+               sessionStorage.setItem('savedEmptyLineWhenNoAddress', String(emptyLineWhenNoAddress));
+               saveSelectedRows(rowsToDisplay);
                 navigate('/dashboard');
             }} 
 >
@@ -179,7 +243,10 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
               הדפס מדבקות
             </Button>
 
-            <Button variant="text" onClick={() => navigate('/dashboard')}>
+            <Button variant="text" onClick={() => {
+              saveSelectedRows(rowsToDisplay);
+              navigate('/dashboard');
+            }}>
               ביטול וחזרה
             </Button>
           </Stack>
@@ -202,8 +269,10 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
               '@media print': { columnGap: 0 },
             }}
           >
-            {rowsToDisplay.map((row, index) => (
-              <Box
+            {rowsToDisplay.map((row, index) => {
+              const printLanguage = detectPrintLanguage(row, getPrintFlag);
+              return (
+                <Box
                 key={row.id || index}
                 sx={{
                   boxSizing: 'border-box',
@@ -219,15 +288,26 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                   backgroundColor: '#ffffff',
                   pageBreakInside: 'avoid',
                   fontFamily: fontType,
+                  direction: printLanguage === 'en' ? 'ltr' : 'rtl',
                 }}
               >
-                {/* שורת השם המכובדת - רק אם יש בה בכלל תוכן לפי מה שסומן להדפסה */}
-                {buildNameLine(row, getPrintFlag) && (
+                {/* פנייה עברית שנבחרה למדבקה באנגלית מודפסת מעל השם. */}
+                {printLanguage === 'en' && hasHebrewEnglishSalutation(englishSalutation) && buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
+                  <Typography
+                    variant={layout.nameVariant}
+                    sx={{ ...nameLineSx, mb: 0 }}
+                  >
+                    {englishSalutation}
+                  </Typography>
+                )}
+
+                {/* שורת השם - רק אם יש בה בכלל תוכן לפי מה שסומן להדפסה */}
+                {buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
                   <Typography
                     variant={layout.nameVariant}
                     sx={nameLineSx}
                   >
-                    {buildNameLine(row, getPrintFlag)}
+                    {buildNameLine(row, getPrintFlag, printLanguage, englishSalutation)}
                   </Typography>
                 )}
 
@@ -236,7 +316,7 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                     קשיח, כדי שהשורה לא תתכווץ לאפס), כך שהעיר לא "קופצת" מיד מתחת לשם. בלי
                     עיר אין "בין השם לעיר", ולכן גם אין שורה ריקה. ורק אם רחוב/מספר בית בכלל
                     מסומנים להדפסה ב"ניהול עמודות" - כתובת שהוסתרה בכוונה היא לא "חסרה" */}
-                {(buildAddressLine1(row, getPrintFlag)
+                {(buildAddressLine1(row, getPrintFlag, printLanguage)
                   || (emptyLineWhenNoAddress
                     && (getPrintFlag('street') || getPrintFlag('houseNo'))
                     && buildAddressLine2(row, getPrintFlag))) && (
@@ -244,7 +324,7 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                     variant={layout.addrVariant}
                     sx={detailLineSx}
                   >
-                    {buildAddressLine1(row, getPrintFlag) || ' '}
+                    {buildAddressLine1(row, getPrintFlag, printLanguage) || ' '}
                   </Typography>
                 )}
 
@@ -269,19 +349,20 @@ const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer =
                 )}
 
                 {/* שדות נוספים - כל אחד בשורה משלו, רק אם סומן להדפסה ויש לו ערך */}
-                {EXTRA_PRINT_FIELDS.map(({ field, label }) =>
+                {EXTRA_PRINT_FIELDS.map(({ field, labels }) =>
                   getPrintFlag(field) && row[field] ? (
                     <Typography
                       key={field}
                       variant={layout.addrVariant}
                       sx={detailLineSx}
                     >
-                      {label}: {row[field]}
+                      {labels[printLanguage] ?? labels.he}: {row[field]}
                     </Typography>
                   ) : null
                 )}
-              </Box>
-            ))}
+                </Box>
+              );
+            })}
           </Box>
         )}
       </Paper>

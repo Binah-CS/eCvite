@@ -1,6 +1,6 @@
 // src/components/PrintModal.jsx
 import { useEffect, useState } from 'react';
-import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert, Checkbox, IconButton } from '@mui/material';
+import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert, Checkbox, IconButton, TextField } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import { useNavigate } from 'react-router-dom';
@@ -40,6 +40,18 @@ const GRID_PADDING_PX = 16; // padding של 1 (8px) מכל צד
 const PAGE_CONTENT_WIDTH = PREVIEW_PANEL_WIDTH - GRID_PADDING_PX;
 const PAGE_CONTENT_HEIGHT = PAGE_BOX_HEIGHT - GRID_PADDING_PX;
 const { gap: MOCK_GAP_PX, sizes: MOCK_LABEL_SIZES } = getScaledLabelSizes(PAGE_CONTENT_WIDTH);
+const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
+const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+const CUSTOM_ENGLISH_SALUTATION = '__custom__';
+const PRESET_ENGLISH_SALUTATIONS = ['', 'To:', 'Dear'];
+
+function saveSelectedRows(rows) {
+  sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
+  sessionStorage.setItem(
+    SELECTED_ROW_IDS_STORAGE_KEY,
+    JSON.stringify(rows.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
+  );
+}
 
 function getLabelsPerPage(size) {
   const columns = getColumns(PAGE_CONTENT_WIDTH, size.width, MOCK_GAP_PX);
@@ -117,7 +129,8 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   const navigate = useNavigate();
 
   // אם לא סימנו אף שורה - מדפיסים את כולן, במקום לא להדפיס כלום
-  const rowsToPrint = selectedRows.length > 0 ? selectedRows : records;
+  const rowsToPrint = (selectedRows.length > 0 ? selectedRows : records)
+    .filter((row) => row.printEnabled !== false);
   
   // 1. בדיקה בטוחה עבור השלב (Step)
   const [step, setStep] = useState(() => {
@@ -159,19 +172,6 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   const [fontType, setFontType] = useState(() =>
     initialChoice('savedFontType', 'fontType', (v) => FONT_OPTIONS.some((f) => f.value === v), FONT_OPTIONS[0].value));
 
-  // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - מסומן כברירת מחדל. ערך
-  // שמור (חזרה מ"שינוי הגדרות" בתצוגה המקדימה) גובר, ואחריו הבחירה השמורה של
-  // המשתמשת - כולל אם הורידו את הסימון
-  const [emptyLineWhenNoAddress, setEmptyLineWhenNoAddress] = useState(() =>
-    initialChoice('savedEmptyLineWhenNoAddress', 'emptyLineWhenNoAddress', (v) => v === 'true' || v === 'false', 'true') === 'true');
-
-  // הערך שנשמר בחזרה מהתצוגה המקדימה נקרא פעם אחת - כבר נקלט למעלה - ונמחק מיד. בלי
-  // זה, בחירה שנשארה (למשל אחרי "שינוי הגדרות" וסגירה בלי הדפסה) הייתה גוברת על
-  // ברירת המחדל גם בהדפסות הבאות, שבכלל לא הגיעו מהתצוגה המקדימה
-  useEffect(() => {
-    sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
-  }, []);
-
   // 5. גודל כתב (אחוז מהגודל הרגיל, 100 = כמו היום) - חופשי, אבל רק עד המקסימום
   // שנכנס בגודל המדבקה שנבחר (ר' getMaxFontScale)
   const [fontScale, setFontScale] = useState(() => clampFontScale(
@@ -183,6 +183,24 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   const [fontWeight, setFontWeight] = useState(() =>
     initialChoice('savedFontWeight', 'fontWeight', (v) => v === 'regular' || v === 'bold', 'regular'));
 
+  const [englishSalutation, setEnglishSalutation] = useState(() => {
+    const saved = typeof window !== 'undefined' ? sessionStorage.getItem('savedEnglishSalutation') || '' : '';
+    return PRESET_ENGLISH_SALUTATIONS.includes(saved) ? saved : CUSTOM_ENGLISH_SALUTATION;
+  });
+  const [customEnglishSalutation, setCustomEnglishSalutation] = useState(() => {
+    const saved = typeof window !== 'undefined' ? sessionStorage.getItem('savedEnglishSalutation') || '' : '';
+    return PRESET_ENGLISH_SALUTATIONS.includes(saved) ? '' : saved;
+  });
+  const selectedEnglishSalutation = englishSalutation === CUSTOM_ENGLISH_SALUTATION
+    ? customEnglishSalutation.trim()
+    : englishSalutation;
+
+  // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - מסומן כברירת מחדל. ערך
+  // שמור (חזרה מ"שינוי הגדרות" בתצוגה המקדימה) גובר, ואחריו הבחירה השמורה של
+  // המשתמשת - כולל אם הורידו את הסימון
+  const [emptyLineWhenNoAddress, setEmptyLineWhenNoAddress] = useState(() =>
+    initialChoice('savedEmptyLineWhenNoAddress', 'emptyLineWhenNoAddress', (v) => v === 'true' || v === 'false', 'true') === 'true');
+
   // הערכים שנשמרו בחזרה מהתצוגה המקדימה ("שינוי הגדרות הדפסה") נקראים פעם אחת - כבר
   // נקלטו למעלה - ונמחקים מיד. בלי זה, ערך שנשאר (למשל אחרי הדפסה מהתצוגה המקדימה
   // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
@@ -190,6 +208,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
   useEffect(() => {
     ['savedLabelSize', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
       .forEach((key) => sessionStorage.removeItem(key));
+    sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
   }, []);
 
   // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
@@ -221,8 +240,9 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     rememberChoices();
     // אותו דף הדפסה בדיוק כמו מה"תצוגה מקדימה" - רק עם דגל שגורם לו לפתוח את חלון
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
+    saveSelectedRows(rowsToPrint);
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, emptyLineWhenNoAddress, fontScale, fontWeight, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
@@ -230,6 +250,9 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     sessionStorage.removeItem('savedPrinter');
     sessionStorage.removeItem('savedFontType');
     sessionStorage.removeItem('savedDeliveryMethod');
+    sessionStorage.removeItem('savedFontScale');
+    sessionStorage.removeItem('savedFontWeight');
+    sessionStorage.removeItem('savedEnglishSalutation');
     sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
     sessionStorage.removeItem('savedFontScale');
     sessionStorage.removeItem('savedFontWeight');
@@ -240,7 +263,8 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
 
   const handlePreview = () => {
     rememberChoices();
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, emptyLineWhenNoAddress, fontScale, fontWeight } });
+    saveSelectedRows(rowsToPrint);
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress } });
   };
 
   return (
@@ -332,6 +356,32 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
                 </Box>
 
                 <FormControl fullWidth>
+                  <InputLabel id="english-salutation-label">פנייה באנגלית</InputLabel>
+                  <Select
+                    labelId="english-salutation-label"
+                    value={englishSalutation}
+                    label="פנייה באנגלית"
+                    onChange={(e) => setEnglishSalutation(e.target.value)}
+                  >
+                    <MenuItem value="">ללא פנייה</MenuItem>
+                    <MenuItem value="To:">To:</MenuItem>
+                    <MenuItem value="Dear">Dear</MenuItem>
+                    <MenuItem value={CUSTOM_ENGLISH_SALUTATION}>פנייה מותאמת אישית</MenuItem>
+                  </Select>
+                </FormControl>
+
+                {englishSalutation === CUSTOM_ENGLISH_SALUTATION && (
+                  <TextField
+                    fullWidth
+                    label="פנייה מותאמת אישית באנגלית"
+                    value={customEnglishSalutation}
+                    onChange={(e) => setCustomEnglishSalutation(e.target.value)}
+                    placeholder="למשל: Attention:"
+                    inputProps={{ dir: 'ltr' }}
+                  />
+                )}
+
+                <FormControl fullWidth>
                   <InputLabel id="size-label">{MODAL_TEXTS.SIZE_INPUT_LABEL}</InputLabel>
                   <Select
                     labelId="size-label"
@@ -377,15 +427,9 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
                 )}
 
                 <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={emptyLineWhenNoAddress}
-                      onChange={(e) => setEmptyLineWhenNoAddress(e.target.checked)}
-                    />
-                  }
+                  control={<Checkbox checked={emptyLineWhenNoAddress} onChange={(e) => setEmptyLineWhenNoAddress(e.target.checked)} />}
                   label={MODAL_TEXTS.EMPTY_LINE_NO_ADDRESS}
                 />
-
               </Stack>
 
               <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
