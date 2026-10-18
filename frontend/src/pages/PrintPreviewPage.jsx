@@ -154,6 +154,21 @@ export default function PrintPreviewPage() {
     fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
   };
 
+  // גודל ועובי הכתב מחלון ההדפסה. הגודל עובר שוב דרך המקסימום של גודל המדבקה - גם
+  // אם הגיע ערך חריג, הטקסט לא ייצא גדול ממה שנכנס. העובי חל על כל השורות, כולל השם
+  const fontBase = LABEL_FONT_BASE_PX[labelSize] || LABEL_FONT_BASE_PX.standard;
+  const fontFactor = clampFontScale(fontScale, labelSize) / 100;
+  const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
+  const nameLineSx = {
+    fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
+    lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`,
+  };
+  const detailLineSx = {
+    color: '#333333', textAlign: 'center', fontFamily: 'inherit',
+    lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.line * fontFactor}px`,
+    fontWeight: labelFontWeight,
+  };
+
   // "עמודות להדפסה" מ"ניהול עמודות" - אותה העדפה שנשמרה למשתמשת, נופלת חזרה
   // לברירת המחדל (השדות שהודפסו תמיד עד היום) אם עדיין לא נשמרה העדפה אישית
   const columnPreferences = parseColumnPreferences(getLoggedUser()?.columnPreferences);
