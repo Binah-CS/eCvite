@@ -162,6 +162,19 @@ function sortRowsByBelongsTo(rows) {
   });
 }
 
+// מספרי סידור אינם חלק משם הקבוצה. מסירים ספרות עבריות, ערביות ואנגליות
+// מכל ערך שמגיע ל"שייך ל", גם אם הן נכתבו באותה עמודה לצד השם.
+function removeNumbersFromBelongsTo(rows) {
+  return rows.map((row) => {
+    if (row.belongsTo === undefined) return row;
+    const belongsTo = String(row.belongsTo ?? '')
+      .replace(/[0-9\u0660-\u0669\u06F0-\u06F9]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return { ...row, belongsTo };
+  });
+}
+
 export default function ExcelImport({ onImport }) {
   const navigate = useNavigate();
   const [fileNames, setFileNames] = useState([]); // כל הקבצים שהועלו בסשן הזה (לא רק האחרון)
@@ -220,7 +233,9 @@ export default function ExcelImport({ onImport }) {
   const runColumnMatching = async (json, rowSheetNames, headerLabels, confirmedSheets, fileName) => {
     const finish = (rows) =>
       onImport(sortRowsByBelongsTo(
-        mergeDuplicateIdentities(applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set()))
+        mergeDuplicateIdentities(removeNumbersFromBelongsTo(
+          applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set())
+        ))
       ));
 
     try {
@@ -406,7 +421,9 @@ export default function ExcelImport({ onImport }) {
 
     const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, finalMatched)));
     onImport(sortRowsByBelongsTo(
-      mergeDuplicateIdentities(applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets))
+      mergeDuplicateIdentities(removeNumbersFromBelongsTo(
+        applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets)
+      ))
     ));
   };
 
