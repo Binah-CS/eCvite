@@ -147,21 +147,6 @@ function mergeDuplicateIdentities(rows) {
   return order.map((mapKey) => map.get(mapKey));
 }
 
-// מציגים את הנמענים שיובאו יחד בקבוצות לפי "שייך ל". ערך ריק נשאר בסוף,
-// כדי שלא יופיע לפני קבוצה שקיבלה שם.
-function sortRowsByBelongsTo(rows) {
-  return [...rows].sort((firstRow, secondRow) => {
-    const firstBelongsTo = String(firstRow.belongsTo ?? '').trim();
-    const secondBelongsTo = String(secondRow.belongsTo ?? '').trim();
-    if (!firstBelongsTo) return secondBelongsTo ? 1 : 0;
-    if (!secondBelongsTo) return -1;
-    return firstBelongsTo.localeCompare(secondBelongsTo, 'he', {
-      numeric: true,
-      sensitivity: 'base',
-    });
-  });
-}
-
 // מספרי סידור אינם חלק משם הקבוצה. מסירים ספרות עבריות, ערביות ואנגליות
 // מכל ערך שמגיע ל"שייך ל", גם אם הן נכתבו באותה עמודה לצד השם.
 function removeNumbersFromBelongsTo(rows) {
@@ -232,11 +217,9 @@ export default function ExcelImport({ onImport }) {
   // confirmedSheets === null אומר "עוד לא שאלנו" - אחרי שהמשתמשת עונה זה הופך ל-Set אמיתי
   const runColumnMatching = async (json, rowSheetNames, headerLabels, confirmedSheets, fileName) => {
     const finish = (rows) =>
-      onImport(sortRowsByBelongsTo(
-        mergeDuplicateIdentities(removeNumbersFromBelongsTo(
-          applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set())
-        ))
-      ));
+      onImport(mergeDuplicateIdentities(removeNumbersFromBelongsTo(
+        applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set())
+      )));
 
     try {
       const loadedColumns = await getExcelColumns();
@@ -420,11 +403,9 @@ export default function ExcelImport({ onImport }) {
     }
 
     const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, finalMatched)));
-    onImport(sortRowsByBelongsTo(
-      mergeDuplicateIdentities(removeNumbersFromBelongsTo(
-        applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets)
-      ))
-    ));
+    onImport(mergeDuplicateIdentities(removeNumbersFromBelongsTo(
+      applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets)
+    )));
   };
 
   // ביטול אמיתי - בניגוד למה שהיה קודם, שום שורה לא נכנסת לטבלה (לא רק מדלגים על
