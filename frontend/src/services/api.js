@@ -112,6 +112,10 @@ const api = {
   updateColumnPreferences: (phone, columnPreferences) =>
       apiClient.put('/auth/column-preferences', { phone, columnPreferences }),
 
+  // הגדרות חלון "הדפסת מדבקות" של המשתמשת (כתב, גודל, עובי, מדבקה, מדפסת)
+  updateLabelPrintSettings: (phone, labelPrintSettings) =>
+      apiClient.put('/auth/label-print-settings', { phone, labelPrintSettings }),
+
   getRecipientHistory: (hashCode, phone) =>
       apiClient.get(`/recipients/${encodeURIComponent(hashCode)}/history`, { params: { phone } }),
 };

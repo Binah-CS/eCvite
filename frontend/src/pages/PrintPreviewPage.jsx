@@ -2,7 +2,7 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Box, Container, Typography, Button, Paper, Stack } from '@mui/material';
-import { REAL_LABEL_SIZES, getRealColumns } from '../utils/labelSheetLayout';
+import { REAL_LABEL_SIZES, getRealColumns, LABEL_FONT_BASE_PX, LABEL_LINE_HEIGHT, FONT_SCALE_DEFAULT, clampFontScale } from '../utils/labelSheetLayout';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 
 function getLoggedUser() {
@@ -131,7 +131,7 @@ export default function PrintPreviewPage() {
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-  const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', englishSalutation = '', emptyLineWhenNoAddress = true, autoPrint = false } = location.state || {};
+  const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, autoPrint = false } = location.state || {};
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
   const savedSelectedRows = getSavedSelectedRows();
@@ -142,6 +142,17 @@ export default function PrintPreviewPage() {
       : savedSelectedRows;
   const rowsToDisplay = actualRows;
   const layout = LABEL_LAYOUT[labelSize] || LABEL_LAYOUT.standard;
+  const fontBase = LABEL_FONT_BASE_PX[labelSize] || LABEL_FONT_BASE_PX.standard;
+  const fontFactor = clampFontScale(fontScale, labelSize) / 100;
+  const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
+  const nameLineSx = {
+    fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
+    lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
+  };
+  const detailLineSx = {
+    color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: LABEL_LINE_HEIGHT,
+    fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
+  };
 
   // "עמודות להדפסה" מ"ניהול עמודות" - אותה העדפה שנשמרה למשתמשת, נופלת חזרה
   // לברירת המחדל (השדות שהודפסו תמיד עד היום) אם עדיין לא נשמרה העדפה אישית
@@ -202,6 +213,8 @@ export default function PrintPreviewPage() {
                sessionStorage.setItem('savedPrinter', printer);
                sessionStorage.setItem('savedFontType', fontType);
                sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
+               sessionStorage.setItem('savedFontScale', String(fontScale));
+               sessionStorage.setItem('savedFontWeight', fontWeight);
                sessionStorage.setItem('savedEnglishSalutation', englishSalutation);
                sessionStorage.setItem('savedEmptyLineWhenNoAddress', String(emptyLineWhenNoAddress));
                saveSelectedRows(rowsToDisplay);
@@ -272,7 +285,7 @@ export default function PrintPreviewPage() {
                 {printLanguage === 'en' && hasHebrewEnglishSalutation(englishSalutation) && buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
                   <Typography
                     variant={layout.nameVariant}
-                    sx={{ fontWeight: 'bold', mb: 0, color: '#000000', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
+                    sx={{ ...nameLineSx, mb: 0 }}
                   >
                     {englishSalutation}
                   </Typography>
@@ -282,7 +295,7 @@ export default function PrintPreviewPage() {
                 {buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
                   <Typography
                     variant={layout.nameVariant}
-                    sx={{ fontWeight: 'bold', mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
+                    sx={nameLineSx}
                   >
                     {buildNameLine(row, getPrintFlag, printLanguage, englishSalutation)}
                   </Typography>
@@ -299,7 +312,7 @@ export default function PrintPreviewPage() {
                     && buildAddressLine2(row, getPrintFlag))) && (
                   <Typography
                     variant={layout.addrVariant}
-                    sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
+                    sx={detailLineSx}
                   >
                     {buildAddressLine1(row, getPrintFlag, printLanguage) || ' '}
                   </Typography>
@@ -309,7 +322,7 @@ export default function PrintPreviewPage() {
                 {buildAddressLine2(row, getPrintFlag) && (
                   <Typography
                     variant={layout.addrVariant}
-                    sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
+                    sx={detailLineSx}
                   >
                     {buildAddressLine2(row, getPrintFlag)}
                   </Typography>
@@ -319,7 +332,7 @@ export default function PrintPreviewPage() {
                 {buildCountryLine(row, getPrintFlag) && (
                   <Typography
                     variant={layout.addrVariant}
-                    sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
+                    sx={detailLineSx}
                   >
                     {buildCountryLine(row, getPrintFlag)}
                   </Typography>
@@ -331,7 +344,7 @@ export default function PrintPreviewPage() {
                     <Typography
                       key={field}
                       variant={layout.addrVariant}
-                      sx={{ color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: 1.2, unicodeBidi: 'plaintext' }}
+                      sx={detailLineSx}
                     >
                       {labels[printLanguage] ?? labels.he}: {row[field]}
                     </Typography>
