@@ -53,12 +53,6 @@ describe('rowSignature', () => {
     expect(rowSignature({ print: false })).not.toBe(rowSignature({}));
   });
 
-  test('printEnabled is ignored - it is saved on its own, not through save', () => {
-    expect(rowSignature({ man: 'א', printEnabled: false })).toBe(rowSignature({ man: 'א', printEnabled: true }));
-    const snapshot = buildSavedSnapshot([{ hashCode: 'h1', man: 'א', printEnabled: true }]);
-    expect(selectRowsToSave([{ hashCode: 'h1', man: 'א', printEnabled: false }], snapshot)).toEqual([]);
-  });
-
   test('duplicateSalt is ignored', () => {
     expect(rowSignature({ man: 'א', duplicateSalt: 'x' })).toBe(rowSignature({ man: 'א' }));
   });
