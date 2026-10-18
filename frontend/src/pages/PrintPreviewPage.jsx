@@ -2,7 +2,14 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Box, Container, Typography, Button, Paper, Stack } from '@mui/material';
-import { REAL_LABEL_SIZES, getRealColumns, LABEL_FONT_BASE_PX, LABEL_LINE_HEIGHT, FONT_SCALE_DEFAULT, clampFontScale } from '../utils/labelSheetLayout';
+import {
+  REAL_LABEL_SIZES,
+  getRealColumns,
+  LABEL_FONT_BASE_PX,
+  LABEL_LINE_HEIGHT,
+  FONT_SCALE_DEFAULT,
+  clampFontScale,
+} from '../utils/labelSheetLayout';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 
 function getLoggedUser() {
@@ -47,6 +54,19 @@ function buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) {
   if (printLanguage !== 'en') return `לכבוד ${content}`;
   if (hasHebrewEnglishSalutation(englishSalutation)) return content;
   return englishSalutation ? `${englishSalutation} ${content}` : content;
+}
+
+// "לכבוד" לפי הבחירות בחלון ההדפסה - רק במדבקה בעברית (לאנגלית יש פנייה משלה,
+// englishSalutation). מחזיר את שורת "לכבוד" הנפרדת (או ריק) ואת שורת השם בלעדיו
+// או איתו, כמו קודם
+const HEBREW_GREETING = 'לכבוד';
+function splitHebrewGreeting(nameLine, printLanguage, greetingShow, greetingSeparateLine) {
+  const prefix = `${HEBREW_GREETING} `;
+  if (printLanguage === 'en' || !nameLine.startsWith(prefix)) return { greetingLine: '', nameLine };
+  const nameOnly = nameLine.slice(prefix.length);
+  if (!greetingShow) return { greetingLine: '', nameLine: nameOnly };
+  if (greetingSeparateLine) return { greetingLine: HEBREW_GREETING, nameLine: nameOnly };
+  return { greetingLine: '', nameLine };
 }
 
 function hasHebrewEnglishSalutation(salutation) {
@@ -131,7 +151,7 @@ export default function PrintPreviewPage() {
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-  const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, autoPrint = false } = location.state || {};
+  const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', autoPrint = false } = location.state || {};
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
   const savedSelectedRows = getSavedSelectedRows();
@@ -153,6 +173,22 @@ export default function PrintPreviewPage() {
     color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: LABEL_LINE_HEIGHT,
     fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
   };
+
+  // גודל ועובי הכתב מחלון ההדפסה. הגודל עובר שוב דרך המקסימום של גודל המדבקה - גם
+  // אם הגיע ערך חריג, הטקסט לא ייצא גדול ממה שנכנס. העובי חל על כל השורות, כולל השם
+  /* Binah_CS: נוצרה פה כפילות של הגדרות שחוזרת על עצמה בכמה מקומות. עושה ביטול ידני לראות אם זה פותר את הבעיה. קשור לאיחוד הגרסאות בין רחלי לחני
+  const fontBase = LABEL_FONT_BASE_PX[labelSize] || LABEL_FONT_BASE_PX.standard;
+  const fontFactor = clampFontScale(fontScale, labelSize) / 100;
+  const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
+  const nameLineSx = {
+    fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
+    lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
+  };
+  const detailLineSx = {
+    color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: LABEL_LINE_HEIGHT,
+    fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
+  };
+   End Binah_CS edit */
 
   // "עמודות להדפסה" מ"ניהול עמודות" - אותה העדפה שנשמרה למשתמשת, נופלת חזרה
   // לברירת המחדל (השדות שהודפסו תמיד עד היום) אם עדיין לא נשמרה העדפה אישית
@@ -217,6 +253,9 @@ export default function PrintPreviewPage() {
                sessionStorage.setItem('savedFontWeight', fontWeight);
                sessionStorage.setItem('savedEnglishSalutation', englishSalutation);
                sessionStorage.setItem('savedEmptyLineWhenNoAddress', String(emptyLineWhenNoAddress));
+               sessionStorage.setItem('savedGreetingShow', String(greetingShow));
+               sessionStorage.setItem('savedGreetingSeparateLine', String(greetingSeparateLine));
+               sessionStorage.setItem('savedGreetingAlign', greetingAlign);
                saveSelectedRows(rowsToDisplay);
                 navigate('/dashboard');
             }} 
@@ -261,6 +300,8 @@ export default function PrintPreviewPage() {
           >
             {rowsToDisplay.map((row, index) => {
               const printLanguage = detectPrintLanguage(row, getPrintFlag);
+              const { greetingLine, nameLine } = splitHebrewGreeting(
+                buildNameLine(row, getPrintFlag, printLanguage, englishSalutation), printLanguage, greetingShow, greetingSeparateLine);
               return (
                 <Box
                 key={row.id || index}
@@ -291,13 +332,24 @@ export default function PrintPreviewPage() {
                   </Typography>
                 )}
 
+                {/* "לכבוד" בשורה נפרדת מעל השם, בצד שנבחר בחלון ההדפסה - על כל רוחב המדבקה,
+                    כדי שימין/שמאל יהיו ביחס למדבקה ולא רק לאורך השם */}
+                {greetingLine && (
+                  <Typography
+                    variant={layout.nameVariant}
+                    sx={{ ...nameLineSx, mb: 0, alignSelf: 'stretch', textAlign: greetingAlign }}
+                  >
+                    {greetingLine}
+                  </Typography>
+                )}
+
                 {/* שורת השם - רק אם יש בה בכלל תוכן לפי מה שסומן להדפסה */}
-                {buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
+                {nameLine && (
                   <Typography
                     variant={layout.nameVariant}
                     sx={nameLineSx}
                   >
-                    {buildNameLine(row, getPrintFlag, printLanguage, englishSalutation)}
+                    {nameLine}
                   </Typography>
                 )}
 
