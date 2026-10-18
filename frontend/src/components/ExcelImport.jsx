@@ -82,6 +82,13 @@ function isBlankRow(row) {
   return Object.values(row).every((value) => String(value ?? '').trim() === '');
 }
 
+function isNumericOnlyColumn(rows, header) {
+  const values = rows
+    .map((row) => String(row[header] ?? '').trim())
+    .filter(Boolean);
+  return values.length > 0 && values.every((value) => /^\d+$/.test(value));
+}
+
 // שורה שאין בה כלום בעמודת מדינה - כנראה כי לא כתבו שם משהו במיוחד - מקבלת כברירת מחדל "ישראל"
 function applyDefaultCountry(rows) {
   return rows.map((row) =>
@@ -220,8 +227,16 @@ export default function ExcelImport({ onImport }) {
 
       Object.assign(matched, matchedByValues);
 
+      // עמודת מספר סידורי עלולה להישמר בטעות ככינוי של "שייך ל" ולהכניס לכל נמען
+      // מספר עולה לפני שם הקבוצה. לא מייבאים עמודה מספרית טהורה לשדה הזה, אלא
+      // מחזירים אותה למסך ההתאמה הידנית שבו גם אי אפשר לבחור עבורה "שייך ל".
+      const blockedBelongsToHeaders = Object.entries(matched)
+        .filter(([header, technicalName]) => technicalName === 'belongsTo' && isNumericOnlyColumn(json, header))
+        .map(([header]) => header);
+      blockedBelongsToHeaders.forEach((header) => delete matched[header]);
+
       // עמודות שאין בהן שום נתון בקובץ בכלל - אין טעם לשאול עליהן, פשוט מדלגים
-      const unmatchedWithData = stillUnmatched.filter((header) =>
+      const unmatchedWithData = [...new Set([...stillUnmatched, ...blockedBelongsToHeaders])].filter((header) =>
         json.some((row) => String(row[header] ?? '').trim() !== '')
       );
 
