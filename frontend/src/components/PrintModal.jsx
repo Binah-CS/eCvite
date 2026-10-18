@@ -1,6 +1,6 @@
 // src/components/PrintModal.jsx
-import { useState } from 'react';
-import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert } from '@mui/material';
+import { useEffect, useState } from 'react';
+import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert, Checkbox } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
 import { MODAL_TEXTS, FONT_OPTIONS } from '../pages/HardCodePage';
@@ -150,6 +150,23 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     return FONT_OPTIONS[0].value;
   });
 
+  // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - מסומן כברירת מחדל. ערך
+  // שמור (חזרה מ"שינוי הגדרות" בתצוגה המקדימה) גובר - כולל אם הורידו את הסימון
+  const [emptyLineWhenNoAddress, setEmptyLineWhenNoAddress] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('savedEmptyLineWhenNoAddress');
+      return saved === null ? true : saved === 'true';
+    }
+    return true;
+  });
+
+  // הערך שנשמר בחזרה מהתצוגה המקדימה נקרא פעם אחת - כבר נקלט למעלה - ונמחק מיד. בלי
+  // זה, בחירה שנשארה (למשל אחרי "שינוי הגדרות" וסגירה בלי הדפסה) הייתה גוברת על
+  // ברירת המחדל גם בהדפסות הבאות, שבכלל לא הגיעו מהתצוגה המקדימה
+  useEffect(() => {
+    sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
+  }, []);
+
   const [printType, setPrintType] = useState('labels');
   const [notification, setNotification] = useState('');
 
@@ -167,7 +184,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     // אותו דף הדפסה בדיוק כמו מה"תצוגה מקדימה" - רק עם דגל שגורם לו לפתוח את חלון
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, emptyLineWhenNoAddress, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
@@ -175,13 +192,14 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     sessionStorage.removeItem('savedPrinter');
     sessionStorage.removeItem('savedFontType');
     sessionStorage.removeItem('savedDeliveryMethod');
+    sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
 
     onClose();
     setStep(1);
   };
 
   const handlePreview = () => {
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod } });
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, emptyLineWhenNoAddress } });
   };
 
   return (
@@ -273,6 +291,17 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
                     </RadioGroup>
                   </Box>
                 )}
+
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={emptyLineWhenNoAddress}
+                      onChange={(e) => setEmptyLineWhenNoAddress(e.target.checked)}
+                    />
+                  }
+                  label={MODAL_TEXTS.EMPTY_LINE_NO_ADDRESS}
+                />
+
               </Stack>
 
               <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />

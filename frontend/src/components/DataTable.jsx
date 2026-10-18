@@ -922,6 +922,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         event.preventDefault();
       }
     },
+    onClick: (event) => event.stopPropagation(),
+    onFocus: () => setActiveRowId(id),
     onKeyDown: (event) => {
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
         event.preventDefault();
@@ -1139,6 +1141,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
             // ללחוץ בנפרד על חץ - אפשר עדיין להקליד חופשי במקביל. כניסה לעריכה תמיד
             // חושפת את הטקסט המלא (גם אם "שייך ל" מכווץ כרגע), ויציאה ממנה מכווצת שוב
             onFocus={() => {
+              setActiveRowId(id);
               setIsFocused(true);
               setExpanded(true);
               if (pickListField) openMenu();
@@ -1272,6 +1275,22 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     // ריאקט "מבלבל" בין hooks של תאים שונים (בדיוק השגיאה "Rendered more hooks...")
     return (params) => <TextCell {...params} />;
   }, [updateCellValue, createCellInputHandlers]);
+
+  // תא בוליאני חי (עמודת "הדפסה") - checkbox רגיל, בלי תלות במצב עריכה בכלל
+  const renderBooleanCell = useCallback((params) => {
+    const { id, field, value } = params;
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+        <input
+          type="checkbox"
+          checked={Boolean(value)}
+          onChange={(event) => updateCellValue(id, field, event.target.checked)}
+          onClick={(event) => event.stopPropagation()}
+          onFocus={() => setActiveRowId(id)}
+        />
+      </Box>
+    );
+  }, [updateCellValue]);
 
     const handleInputChange = (e) => {
     setInputValue(e.target.value);
@@ -2131,6 +2150,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
           '& .MuiDataGrid-row.app-row-hovered': {
             backgroundColor: '#eff6ff !important',
           },
+          // השורה שבה המשתמש עובד נשארת מודגשת גם אחרי שהעכבר זז לתא אחר.
+          // המסגרת בלבד נשארת גם בשורה מסומנת, כדי לא להסתיר את צבע הבחירה שלה.
           '& .MuiDataGrid-row.app-active-row': {
             boxShadow: 'inset 0 0 0 1.5px #60a5fa',
             zIndex: 1,
