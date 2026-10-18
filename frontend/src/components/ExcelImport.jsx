@@ -160,6 +160,18 @@ function removeNumbersFromBelongsTo(rows) {
   });
 }
 
+// מנקים קודם מספרים שהגיעו מהקובץ, ורק אחר כך מחליטים אם השדה ריק ויש למלא אותו
+// בשם הגיליון. ניקוי נוסף בסוף מטפל גם במקרה שבו בשם הגיליון עצמו יש ספרות.
+function prepareBelongsToForImport(rows, rowSheetNames, confirmedSheets) {
+  return removeNumbersFromBelongsTo(
+    applyBelongsToFromSheet(
+      removeNumbersFromBelongsTo(rows),
+      rowSheetNames,
+      confirmedSheets
+    )
+  );
+}
+
 export default function ExcelImport({ onImport }) {
   const navigate = useNavigate();
   const [fileNames, setFileNames] = useState([]); // כל הקבצים שהועלו בסשן הזה (לא רק האחרון)
@@ -217,9 +229,9 @@ export default function ExcelImport({ onImport }) {
   // confirmedSheets === null אומר "עוד לא שאלנו" - אחרי שהמשתמשת עונה זה הופך ל-Set אמיתי
   const runColumnMatching = async (json, rowSheetNames, headerLabels, confirmedSheets, fileName) => {
     const finish = (rows) =>
-      onImport(mergeDuplicateIdentities(removeNumbersFromBelongsTo(
-        applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set())
-      )));
+      onImport(mergeDuplicateIdentities(
+        prepareBelongsToForImport(rows, rowSheetNames, confirmedSheets ?? new Set())
+      ));
 
     try {
       const loadedColumns = await getExcelColumns();
@@ -403,9 +415,9 @@ export default function ExcelImport({ onImport }) {
     }
 
     const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, finalMatched)));
-    onImport(mergeDuplicateIdentities(removeNumbersFromBelongsTo(
-      applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets)
-    )));
+    onImport(mergeDuplicateIdentities(
+      prepareBelongsToForImport(mappedRows, rowSheetNames, confirmedSheets)
+    ));
   };
 
   // ביטול אמיתי - בניגוד למה שהיה קודם, שום שורה לא נכנסת לטבלה (לא רק מדלגים על
