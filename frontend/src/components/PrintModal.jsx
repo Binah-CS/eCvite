@@ -27,6 +27,12 @@ const modalStyle = {
   boxShadow: 24,
   p: 4,
   borderRadius: 2,
+  // חלון גבוה מהמסך (הרבה אפשרויות, או מסך נמוך) לא נחתך: הכותרת והכפתורים נשארים
+  // במקום, ורק האפשרויות שביניהם נגללות (ר' שלב 2)
+  maxHeight: '96vh',
+  display: 'flex',
+  flexDirection: 'column',
+  boxSizing: 'border-box',
 };
 
 // רוחב וגובה קבועים לאזור התצוגה - הם לא זזים/גדלים בעצמם, רק המדבקות בתוכם משתנות
@@ -306,10 +312,12 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
 
         {/* --- שלב 2: הגדרות מדבקה ומדפסת --- */}
         {step === 2 && (
-          <Box>
+          <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <Typography variant="h6" mb={3}>{MODAL_TEXTS.STEP_2_TITLE}</Typography>
 
-            <Stack direction="row" spacing={3} alignItems="stretch">
+            {/* רק האזור הזה נגלל כשהאפשרויות לא נכנסות. pt - כדי שהתווית של השדה העליון
+                (שיושבת מעל המסגרת שלו) לא תיחתך בראש אזור הגלילה */}
+            <Stack direction="row" spacing={3} alignItems="stretch" sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pt: 1 }}>
               <Stack spacing={2} sx={{ flex: 1 }}>
                 <FormControl fullWidth>
                   <InputLabel id="font-label">{MODAL_TEXTS.FONT_INPUT_LABEL}</InputLabel>
@@ -371,7 +379,7 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
                 </Box>
 
                 {/* "לכבוד" במדבקה בעברית - המיקום רלוונטי רק כשהוא בשורה נפרדת */}
-                <Box sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}>
                   <FormControlLabel
                     control={<Checkbox size="small" checked={greetingShow} onChange={(e) => setGreetingShow(e.target.checked)} />}
                     label={MODAL_TEXTS.GREETING_SHOW}

@@ -30,9 +30,9 @@ export const MODAL_TEXTS = {
 
   EMPTY_LINE_NO_ADDRESS: "השאר שורה ריקה כשאין כתובת",
 
-  GREETING_SHOW: 'הדפס "לכבוד"',
-  GREETING_SEPARATE_LINE: '"לכבוד" בשורה נפרדת מעל השם',
-  GREETING_ALIGN_LABEL: 'מיקום "לכבוד"',
+  GREETING_SHOW: 'הדפס פנייה ("לכבוד")',
+  GREETING_SEPARATE_LINE: "פנייה בשורה נפרדת מעל השם",
+  GREETING_ALIGN_LABEL: "מיקום הפנייה",
   GREETING_ALIGN_RIGHT: "ימין",
   GREETING_ALIGN_CENTER: "מרכז",
   GREETING_ALIGN_LEFT: "שמאל",
