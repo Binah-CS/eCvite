@@ -162,6 +162,17 @@ export default function PrintPreviewPage() {
       : savedSelectedRows;
   const rowsToDisplay = actualRows;
   const layout = LABEL_LAYOUT[labelSize] || LABEL_LAYOUT.standard;
+  const fontBase = LABEL_FONT_BASE_PX[labelSize] || LABEL_FONT_BASE_PX.standard;
+  const fontFactor = clampFontScale(fontScale, labelSize) / 100;
+  const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
+  const nameLineSx = {
+    fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
+    lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
+  };
+  const detailLineSx = {
+    color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: LABEL_LINE_HEIGHT,
+    fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
+  };
 
   // גודל ועובי הכתב מחלון ההדפסה. הגודל עובר שוב דרך המקסימום של גודל המדבקה - גם
   // אם הגיע ערך חריג, הטקסט לא ייצא גדול ממה שנכנס. העובי חל על כל השורות, כולל השם
