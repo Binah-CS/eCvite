@@ -1,6 +1,6 @@
 // src/components/PrintModal.jsx
 import { useEffect, useState } from 'react';
-import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert, Checkbox } from '@mui/material';
+import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert, Checkbox, TextField } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
 import { MODAL_TEXTS, FONT_OPTIONS } from '../pages/HardCodePage';
@@ -31,6 +31,8 @@ const PAGE_CONTENT_HEIGHT = PAGE_BOX_HEIGHT - GRID_PADDING_PX;
 const { gap: MOCK_GAP_PX, sizes: MOCK_LABEL_SIZES } = getScaledLabelSizes(PAGE_CONTENT_WIDTH);
 const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
 const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+const CUSTOM_ENGLISH_SALUTATION = '__custom__';
+const PRESET_ENGLISH_SALUTATIONS = ['', 'To:', 'Dear'];
 
 function getSavedSelectedRows() {
   try {
@@ -172,10 +174,21 @@ export default function PrintModal({ open, onClose, selectedRows = [] }) {
 
   const [englishSalutation, setEnglishSalutation] = useState(() => {
     if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('savedEnglishSalutation') || '';
+      const saved = sessionStorage.getItem('savedEnglishSalutation') || '';
+      return PRESET_ENGLISH_SALUTATIONS.includes(saved) ? saved : CUSTOM_ENGLISH_SALUTATION;
     }
     return '';
   });
+  const [customEnglishSalutation, setCustomEnglishSalutation] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('savedEnglishSalutation') || '';
+      return PRESET_ENGLISH_SALUTATIONS.includes(saved) ? '' : saved;
+    }
+    return '';
+  });
+  const selectedEnglishSalutation = englishSalutation === CUSTOM_ENGLISH_SALUTATION
+    ? customEnglishSalutation.trim()
+    : englishSalutation;
 
   // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - מסומן כברירת מחדל. ערך
   // שמור (חזרה מ"שינוי הגדרות" בתצוגה המקדימה) גובר - כולל אם הורידו את הסימון
@@ -212,7 +225,7 @@ export default function PrintModal({ open, onClose, selectedRows = [] }) {
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     saveSelectedRows(rowsToPrint);
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, englishSalutation, emptyLineWhenNoAddress, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
@@ -229,7 +242,7 @@ export default function PrintModal({ open, onClose, selectedRows = [] }) {
 
   const handlePreview = () => {
     saveSelectedRows(rowsToPrint);
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, englishSalutation, emptyLineWhenNoAddress } });
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress } });
   };
 
   return (
@@ -288,8 +301,20 @@ export default function PrintModal({ open, onClose, selectedRows = [] }) {
                     <MenuItem value="">ללא פנייה</MenuItem>
                     <MenuItem value="To:">To:</MenuItem>
                     <MenuItem value="Dear">Dear</MenuItem>
+                    <MenuItem value={CUSTOM_ENGLISH_SALUTATION}>פנייה מותאמת אישית</MenuItem>
                   </Select>
                 </FormControl>
+
+                {englishSalutation === CUSTOM_ENGLISH_SALUTATION && (
+                  <TextField
+                    fullWidth
+                    label="פנייה מותאמת אישית באנגלית"
+                    value={customEnglishSalutation}
+                    onChange={(e) => setCustomEnglishSalutation(e.target.value)}
+                    placeholder="למשל: Attention:"
+                    inputProps={{ dir: 'ltr' }}
+                  />
+                )}
 
                 <FormControl fullWidth>
                   <InputLabel id="size-label">{MODAL_TEXTS.SIZE_INPUT_LABEL}</InputLabel>
