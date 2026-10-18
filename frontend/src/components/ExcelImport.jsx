@@ -147,6 +147,21 @@ function mergeDuplicateIdentities(rows) {
   return order.map((mapKey) => map.get(mapKey));
 }
 
+// מציגים את הנמענים שיובאו יחד בקבוצות לפי "שייך ל". ערך ריק נשאר בסוף,
+// כדי שלא יופיע לפני קבוצה שקיבלה שם.
+function sortRowsByBelongsTo(rows) {
+  return [...rows].sort((firstRow, secondRow) => {
+    const firstBelongsTo = String(firstRow.belongsTo ?? '').trim();
+    const secondBelongsTo = String(secondRow.belongsTo ?? '').trim();
+    if (!firstBelongsTo) return secondBelongsTo ? 1 : 0;
+    if (!secondBelongsTo) return -1;
+    return firstBelongsTo.localeCompare(secondBelongsTo, 'he', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+  });
+}
+
 export default function ExcelImport({ onImport }) {
   const navigate = useNavigate();
   const [fileNames, setFileNames] = useState([]); // כל הקבצים שהועלו בסשן הזה (לא רק האחרון)
@@ -204,7 +219,9 @@ export default function ExcelImport({ onImport }) {
   // confirmedSheets === null אומר "עוד לא שאלנו" - אחרי שהמשתמשת עונה זה הופך ל-Set אמיתי
   const runColumnMatching = async (json, rowSheetNames, headerLabels, confirmedSheets, fileName) => {
     const finish = (rows) =>
-      onImport(mergeDuplicateIdentities(applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set())));
+      onImport(sortRowsByBelongsTo(
+        mergeDuplicateIdentities(applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set()))
+      ));
 
     try {
       const loadedColumns = await getExcelColumns();
@@ -387,8 +404,10 @@ export default function ExcelImport({ onImport }) {
       invalidateExcelColumnsCache();
     }
 
-    const mappedRows = applyDefaultCountry(remapRows(json, finalMatched));
-    onImport(mergeDuplicateIdentities(applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets)));
+    const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, finalMatched)));
+    onImport(sortRowsByBelongsTo(
+      mergeDuplicateIdentities(applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets))
+    ));
   };
 
   // ביטול אמיתי - בניגוד למה שהיה קודם, שום שורה לא נכנסת לטבלה (לא רק מדלגים על
