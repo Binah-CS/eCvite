@@ -250,6 +250,73 @@ class RecipientControllerTest {
     }
 
     @Test
+    void save_printFlag_isPerUser_andDoesNotChangeOtherUsers() throws Exception {
+        // הווי "הדפסה" שייך לקישור של כל משתמשת (user_recipients.print), לא לנמען
+        // המשותף - משתמשת אחת שמורידה אותו לא מורידה אותו לשנייה
+        User userA = seedUser("0536161616", "מדפיסה");
+        User userB = seedUser("0536262626", "שותפה");
+
+        Recipients first = newUnsavedRecipient("משותף", "0536363636");
+        first.setPrint(true);
+        SaveRecipientsRequest saveA = new SaveRecipientsRequest();
+        saveA.setPhone(userA.getPhone());
+        saveA.setRecipients(List.of(first));
+        String hash = objectMapper.readTree(postSave(saveA)).get(0).get("hashCode").asText();
+
+        Recipients same = newUnsavedRecipient("משותף", "0536363636");
+        same.setPrint(true);
+        SaveRecipientsRequest saveB = new SaveRecipientsRequest();
+        saveB.setPhone(userB.getPhone());
+        saveB.setRecipients(List.of(same));
+        postSave(saveB);
+        entityManager.flush();
+        entityManager.clear();
+
+        // A מורידה את הווי
+        Recipients edited = recipientsRepository.findById(hash).orElseThrow();
+        entityManager.detach(edited);
+        edited.setPrint(false);
+        SaveRecipientsRequest uncheck = new SaveRecipientsRequest();
+        uncheck.setPhone(userA.getPhone());
+        uncheck.setRecipients(List.of(edited));
+        postSave(uncheck);
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(get("/api/recipients").param("phone", userA.getPhone()))
+                .andExpect(jsonPath("$[0].print").value(false));
+        mockMvc.perform(get("/api/recipients").param("phone", userB.getPhone()))
+                .andExpect(jsonPath("$[0].print").value(true));
+        Boolean storedForA = jdbcTemplate.queryForObject(
+                "SELECT print FROM user_recipients WHERE user_id = ? AND recipient_id = ?",
+                Boolean.class, userA.getHashCode(), hash);
+        Boolean storedForB = jdbcTemplate.queryForObject(
+                "SELECT print FROM user_recipients WHERE user_id = ? AND recipient_id = ?",
+                Boolean.class, userB.getHashCode(), hash);
+        assertThat(storedForA).isFalse();
+        assertThat(storedForB).isTrue();
+    }
+
+    @Test
+    void getRecipients_oldLinkWithoutPrintValue_fallsBackToRecipientValue() throws Exception {
+        // קישור שנוצר לפני המעבר (print = null) - מוצג הערך הישן מהנמען, לא נאבד
+        User user = seedUser("0536464646", "ותיקה");
+        Recipients r = newUnsavedRecipient("ישן", "0536565656");
+        r.setPrint(true);
+        r.setHashCode(r.generateRowHashCode());
+        recipientsRepository.save(r);
+        UserRecipients link = new UserRecipients();
+        link.setUser(user);
+        link.setRecipient(r);
+        userRecipientsRepository.save(link);
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(get("/api/recipients").param("phone", user.getPhone()))
+                .andExpect(jsonPath("$[0].print").value(true));
+    }
+
+    @Test
     void save_combinedDeleteAndSave_unlinksRecipientInSameRequest() throws Exception {
         User user = seedUser("0509999999", "טל");
         Recipients toDelete = seedRecipientLinkedTo(user, "למחוק", "0501010101");

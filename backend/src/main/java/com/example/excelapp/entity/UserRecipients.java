@@ -23,5 +23,11 @@ import lombok.NoArgsConstructor;
         @ManyToOne
         @JoinColumn(name = "recipient_id", referencedColumnName = "hash_code")
         private Recipients recipient;
+
+        // הווי "הדפסה" של הנמען - בחירה של המשתמשת הזו בלבד, כי הנמען עצמו משותף
+        // לכל המשתמשות שמקושרות אליו. null = קישור ישן שעוד לא נשמר בו ערך - אז
+        // מוצג הערך הישן מהנמען (Recipients.print), כדי שלא יאבד כלום במעבר
+        @Column(name = "print")
+        private Boolean print;
     }
 

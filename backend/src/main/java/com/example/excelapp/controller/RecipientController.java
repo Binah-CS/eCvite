@@ -190,6 +190,10 @@ public class RecipientController {
         // מבטל batching לגמרי לישויות כאלה (כל קישור היה round-trip נפרד)
         linkRecipientsToUser(userHashCode, hashCodesToLink);
 
+        // הווי "הדפסה" נשמר בקישור של המשתמשת הזו (user_recipients), לא על הנמען
+        // המשותף - כך שמשתמשת אחת שמורידה את הווי לא מורידה אותו גם לאחרות
+        updateLinkPrintFlags(userHashCode, savedRecipients);
+
         // save()/saveAll() על ישות עם @Id שכבר מוגדר (המצב תמיד כאן - ה-hash מחושב
         // מראש) מבצע merge(), לא persist() - וה-merge מחזיר אובייקט "רענן" שכולל רק
         // שדות ממופים ל-DB. duplicateSalt הוא @Transient (לא שדה DB בכלל) ולכן נשמט
@@ -246,18 +250,18 @@ public class RecipientController {
                     .body("User not found");
         }
 
-        Map<String, Boolean> printPreferences = recipientPrintPreferenceRepository.findByUser(user).stream()
-                .collect(Collectors.toMap(
-                        preference -> preference.getRecipient().getHashCode(),
-                        RecipientPrintPreference::isPrintEnabled,
-                        (first, ignored) -> first
-                ));
-
+        // הווי "הדפסה" של כל נמען הוא של המשתמשת הזו (UserRecipients.print). הנמען
+        // מנותק (detach) לפני שמשנים בו את print, כדי שהשינוי יישאר רק בתשובה הזו
+        // ולא ייכתב בטעות לנמען המשותף ב-DB. קישור ישן בלי ערך - נשאר הערך מהנמען
         List<Recipients> recipients = userRecipientsRepository.findByUser(user).stream()
-                .map(UserRecipients::getRecipient)
-                .peek(recipient -> recipient.setPrintEnabled(
-                        printPreferences.getOrDefault(recipient.getHashCode(), true)
-                ))
+                .map(link -> {
+                    Recipients recipient = link.getRecipient();
+                    entityManager.detach(recipient);
+                    if (link.getPrint() != null) {
+                        recipient.setPrint(link.getPrint());
+                    }
+                    return recipient;
+                })
                 .toList();
 
         return ResponseEntity.ok(recipients);
@@ -434,6 +438,30 @@ public class RecipientController {
                     params.toArray()
             );
         });
+    }
+
+    // כותבת לכל נמען שנשמר את הווי "הדפסה" שלו בקישור של המשתמשת הזו. מקבצת לפי
+    // הערך - פקודת UPDATE אחת לכל ה"כן" ואחת לכל ה"לא" (בחלקים של 1,000), לא פקודה
+    // לכל שורה. אם אותו נמען מופיע פעמיים בבקשה - הערך האחרון קובע
+    private void updateLinkPrintFlags(String userHashCode, List<Recipients> savedRecipients) {
+        Map<String, Boolean> printByHash = new java.util.LinkedHashMap<>();
+        savedRecipients.forEach(r -> printByHash.put(r.getHashCode(), r.isPrint()));
+        for (boolean value : new boolean[] { true, false }) {
+            List<String> hashes = printByHash.entrySet().stream()
+                    .filter(e -> e.getValue() == value)
+                    .map(Map.Entry::getKey)
+                    .toList();
+            forEachChunk(hashes, (chunk, placeholders) -> {
+                List<Object> params = new ArrayList<>(chunk.size() + 2);
+                params.add(value);
+                params.add(userHashCode);
+                params.addAll(chunk);
+                jdbcTemplate.update(
+                        "UPDATE user_recipients SET print = ? WHERE user_id = ? AND recipient_id IN (" + placeholders + ")",
+                        params.toArray()
+                );
+            });
+        }
     }
 
     // מריצה פעולה על הרשימה בחלקים של עד 1,000 (עם "?,?,..." מוכן לכל חלק) - כדי
