@@ -176,6 +176,7 @@ export default function PrintPreviewPage() {
 
   // גודל ועובי הכתב מחלון ההדפסה. הגודל עובר שוב דרך המקסימום של גודל המדבקה - גם
   // אם הגיע ערך חריג, הטקסט לא ייצא גדול ממה שנכנס. העובי חל על כל השורות, כולל השם
+  /* Binah_CS: נוצרה פה כפילות של הגדרות שחוזרת על עצמה בכמה מקומות. עושה ביטול ידני לראות אם זה פותר את הבעיה. קשור לאיחוד הגרסאות בין רחלי לחני
   const fontBase = LABEL_FONT_BASE_PX[labelSize] || LABEL_FONT_BASE_PX.standard;
   const fontFactor = clampFontScale(fontScale, labelSize) / 100;
   const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
@@ -187,7 +188,8 @@ export default function PrintPreviewPage() {
     color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: LABEL_LINE_HEIGHT,
     fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
   };
-
+   End Binah_CS edit */
+  
   // "עמודות להדפסה" מ"ניהול עמודות" - אותה העדפה שנשמרה למשתמשת, נופלת חזרה
   // לברירת המחדל (השדות שהודפסו תמיד עד היום) אם עדיין לא נשמרה העדפה אישית
   const columnPreferences = parseColumnPreferences(getLoggedUser()?.columnPreferences);
