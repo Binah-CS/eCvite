@@ -29,5 +29,11 @@ import lombok.NoArgsConstructor;
         // מוצג הערך הישן מהנמען (Recipients.print), כדי שלא יאבד כלום במעבר
         @Column(name = "print")
         private Boolean print;
+
+        // המקום של הנמען ברשימה של המשתמשת הזו (0 = ראשון) - כדי ששורה שנוספה באמצע
+        // הטבלה תישאר שם גם אחרי טעינה מהשרת. לכל משתמשת סדר משלה. null בקישורים ישנים
+        // - הם מוצגים אחרי הממוינים, לפי סדר ההוספה (ר' UserRecipientsRepository.findByUser)
+        @Column(name = "sort_order")
+        private Integer sortOrder;
     }
 

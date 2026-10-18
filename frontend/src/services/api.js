@@ -76,11 +76,13 @@ const api = {
                 }
             }
         ),
-  saveRecords: (phone, rows, hashCodesToDelete) =>
+    // order - אופציונלי, סדר הטבלה (ר' buildOrderToSave ב-changedRows.js)
+    saveRecords: (phone, rows, hashCodesToDelete, order) =>
         apiClient.post('/recipients/save', {
             phone: phone,
             recipients: rows,
-            hashCodesToDelete
+            hashCodesToDelete,
+            ...(order ? { order } : {})
         }),
 
   importRecipients: (phone, recipients) =>

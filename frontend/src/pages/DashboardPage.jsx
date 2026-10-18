@@ -9,7 +9,7 @@ import { VisibleRowsContext } from '../utils/visibleRowsContext';
 import PrintModal from '../components/PrintModal'; 
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
-import { buildSavedSnapshot, selectRowsToSave } from '../utils/changedRows';
+import { buildSavedSnapshot, selectRowsToSave, buildOrderToSave } from '../utils/changedRows';
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
@@ -404,10 +404,13 @@ export default function DashboardPage() {
       // changedRows.js) - לא את כל הטבלה בכל שמירה. ההשוואה רצה בזיכרון (אלפיות
       // שנייה גם ל-500 שורות), וחוסכת לשלוח, לבדוק ולהחזיר שורות שלא נגעו בהן
       const rowsToSave = selectRowsToSave(updatedRows, savedSnapshotRef.current);
+      // סדר הטבלה - רק כשיש שורה חדשה או שהסדר השתנה (null אחרת), כדי ששורה שנוספה
+      // באמצע תישאר שם גם כשהרשימה נטענת מחדש מהשרת (#115)
+      const order = buildOrderToSave(updatedRows, rowsToSave, savedSnapshotRef.current);
 
       console.log("2. שולח לבקאנד:", rowsToSave);
 
-      if (rowsToSave.length === 0 && hashCodesToDelete.length === 0) {
+      if (rowsToSave.length === 0 && hashCodesToDelete.length === 0 && !order) {
         console.log('⏱ שמירה: אין שינויים מול ה-DB - לא נשלח לשרת');
         // מסמנים "מסונכרן" רק אחרי שהעותק המקומי באמת שווה למה שמוצג עכשיו
         if (saveLocalRecords(user.phone, updatedRows)) setLocalInSync(user.phone, true);
@@ -435,7 +438,8 @@ export default function DashboardPage() {
       const response = await api.saveRecords(
           user.phone,
           cleanRows,
-          hashCodesToDelete
+          hashCodesToDelete,
+          order
       );
 
       if (hashCodesToDelete.length > 0) {
@@ -450,7 +454,7 @@ export default function DashboardPage() {
       console.log("3. נשמר בהצלחה!", response.data);
       console.log(
         `⏱ שמירה: ${Math.round(performance.now() - saveStartedAt)} ms ` +
-        `(נשלחו ${cleanRows.length} שורות, ${hashCodesToDelete.length} מחיקות)`
+        `(נשלחו ${cleanRows.length} שורות, ${hashCodesToDelete.length} מחיקות${order ? ', כולל סדר הטבלה' : ''})`
       );
 
       // משתמשים ישירות בנתונים שחזרו מהשמירה (hashCode טרי לנמענים חדשים, "שייך ל"
