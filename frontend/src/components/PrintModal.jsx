@@ -132,8 +132,10 @@ function LabelSheetPreview({ labelSize }) {
   );
 }
 
-export default function PrintModal({ open, onClose, selectedRows, records = [] }) {
+export default function PrintModal({ open, onClose, selectedRows, records: allRecords = [], visibleRows = null }) {
   const navigate = useNavigate();
+  // כשהטבלה מסוננת (חיפוש או חלון "סינון") - "כולן" הן השורות שמוצגות בה, לא כל הרשימה
+  const records = visibleRows || allRecords;
 
   // אם לא סימנו אף שורה - מדפיסים את כולן, במקום לא להדפיס כלום
   const rowsToPrint = (selectedRows.length > 0 ? selectedRows : records)

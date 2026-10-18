@@ -5,6 +5,7 @@ import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import DataTable from '../components/DataTable';
 import api from '../services/api';
+import { VisibleRowsContext } from '../utils/visibleRowsContext';
 import PrintModal from '../components/PrintModal'; 
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
@@ -58,6 +59,8 @@ export default function DashboardPage() {
   const [error, setError] = useState('');
   const user = getLoggedUser();
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  // השורות שהטבלה מציגה אחרי חיפוש/סינון (null = אין סינון) - ר' VisibleRowsContext
+  const visibleRowsRef = useRef(null);
   const [selectedRows, setSelectedRows] = useState([]); // 🌟 רק הגדרה אחת, נקייה ותקינה!
   const [isTableDirty, setIsTableDirty] = useState(false);
   const [profileMenuAnchor, setProfileMenuAnchor] = useState(null); // תפריט הפרופיל (עיגול עם אות ראשונה) שנפתח למעלה
@@ -577,6 +580,7 @@ export default function DashboardPage() {
         )}
 
         <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <VisibleRowsContext.Provider value={visibleRowsRef}>
           <DataTable
               records={records}
               loading={loading}
@@ -594,11 +598,13 @@ export default function DashboardPage() {
               onColumnOrderChange={handleColumnOrderChange}
               phone={user?.phone}
           />
+          </VisibleRowsContext.Provider>
         </Box>
 
         {/* רנדור המודאל והעברת הרשומות המסומנות אליו */}
         <PrintModal
             open={isPrintModalOpen}
+            visibleRows={isPrintModalOpen ? visibleRowsRef.current : null}
             onClose={() => setIsPrintModalOpen(false)}
             selectedRows={selectedRows}
         />
