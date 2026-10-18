@@ -252,8 +252,6 @@ export default function PrintModal({ open, onClose, selectedRows, records = [] }
     sessionStorage.removeItem('savedFontWeight');
     sessionStorage.removeItem('savedEnglishSalutation');
     sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
-    sessionStorage.removeItem('savedFontScale');
-    sessionStorage.removeItem('savedFontWeight');
 
     onClose();
     setStep(1);
