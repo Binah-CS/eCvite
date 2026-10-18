@@ -89,6 +89,24 @@ function isNumericOnlyColumn(rows, header) {
   return values.length > 0 && values.every((value) => /^\d+$/.test(value));
 }
 
+function moveDuplicateMappingsToManualMatch(matched, headers) {
+  const usedTechnicalNames = new Set();
+  const duplicateHeaders = [];
+
+  headers.forEach((header) => {
+    const technicalName = matched[header];
+    if (!technicalName) return;
+    if (usedTechnicalNames.has(technicalName)) {
+      delete matched[header];
+      duplicateHeaders.push(header);
+      return;
+    }
+    usedTechnicalNames.add(technicalName);
+  });
+
+  return duplicateHeaders;
+}
+
 // שורה שאין בה כלום בעמודת מדינה - כנראה כי לא כתבו שם משהו במיוחד - מקבלת כברירת מחדל "ישראל"
 function applyDefaultCountry(rows) {
   return rows.map((row) =>
@@ -235,8 +253,16 @@ export default function ExcelImport({ onImport }) {
         .map(([header]) => header);
       blockedBelongsToHeaders.forEach((header) => delete matched[header]);
 
+      // גם אם כותרות שונות זוהו כאותו שדה, לא מחברים את הערכים שלהן יחד. העמודה
+      // השנייה חוזרת למסך ההתאמה הידנית, כדי שלא ייווצר ערך כמו "165 חברות".
+      const duplicateMappedHeaders = moveDuplicateMappingsToManualMatch(matched, headers);
+
       // עמודות שאין בהן שום נתון בקובץ בכלל - אין טעם לשאול עליהן, פשוט מדלגים
-      const unmatchedWithData = [...new Set([...stillUnmatched, ...blockedBelongsToHeaders])].filter((header) =>
+      const unmatchedWithData = [...new Set([
+        ...stillUnmatched,
+        ...blockedBelongsToHeaders,
+        ...duplicateMappedHeaders,
+      ])].filter((header) =>
         json.some((row) => String(row[header] ?? '').trim() !== '')
       );
 
@@ -246,6 +272,7 @@ export default function ExcelImport({ onImport }) {
           matched,
           unmatchedHeaders: unmatchedWithData,
           columns: loadedColumns,
+          alreadyMappedTechnicalNames: Object.values(matched),
           headerLabels,
           rowSheetNames,
           confirmedSheets,
@@ -258,8 +285,9 @@ export default function ExcelImport({ onImport }) {
       finish(mappedRows);
     } catch (err) {
       console.error('לא ניתן היה לטעון את הגדרות השדות מהשרת:', err);
-      setMatchError('לא ניתן היה להתאים עמודות אוטומטית (השרת לא זמין) - הקובץ יובא כמו שהוא.');
-      finish(json);
+      setMatchError('לא ניתן היה להתאים עמודות אוטומטית (השרת לא זמין). הייבוא נעצר כדי למנוע שמירת נתונים בשדות שגויים.');
+      // בלי הגדרות העמודות אין דרך בטוחה לדעת לאיזה שדה שייך כל ערך. עוצרים כאן
+      // במקום להכניס רשומות עם כותרות מקוריות או שדות שגויים.
     }
   };
 

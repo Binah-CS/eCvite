@@ -39,7 +39,7 @@ function isNumericOnlyColumn(rows, header) {
 
 // מסך שמופיע כשיש עמודות בקובץ ה-Excel שלא זוהו אוטומטית - המשתמשת בוחרת ידנית
 // לאיזה שדה כל עמודה שייכת (או להתעלם ממנה), והבחירה נשמרת מיד כ"כינוי" חדש לפעם הבאה
-export default function ColumnMatchDialog({ open, unmatchedHeaders, headerLabels = {}, columns, rows, onConfirm, onCancel, onOpenColumnSettings }) {
+export default function ColumnMatchDialog({ open, unmatchedHeaders, headerLabels = {}, columns, rows, alreadyMappedTechnicalNames = [], onConfirm, onCancel, onOpenColumnSettings }) {
   const [choices, setChoices] = useState({});
   const [expandedHeader, setExpandedHeader] = useState(null);
 
@@ -62,6 +62,12 @@ export default function ColumnMatchDialog({ open, unmatchedHeaders, headerLabels
         {unmatchedHeaders.map((header) => {
           const isExpanded = expandedHeader === header;
           const numericOnly = isNumericOnlyColumn(rows, header);
+          const selectedForOtherHeaders = new Set([
+            ...alreadyMappedTechnicalNames,
+            ...Object.entries(choices)
+              .filter(([otherHeader]) => otherHeader !== header)
+              .map(([, technicalName]) => technicalName),
+          ]);
           return (
             <Box key={header} mb={1}>
               <Box display="flex" alignItems="center" gap={1}>
@@ -84,7 +90,10 @@ export default function ColumnMatchDialog({ open, unmatchedHeaders, headerLabels
                     <MenuItem
                       key={column.technicalName}
                       value={column.technicalName}
-                      disabled={numericOnly && column.technicalName === 'belongsTo'}
+                      disabled={
+                        selectedForOtherHeaders.has(column.technicalName)
+                        || (numericOnly && column.technicalName === 'belongsTo')
+                      }
                     >
                       {column.displayName}
                     </MenuItem>
