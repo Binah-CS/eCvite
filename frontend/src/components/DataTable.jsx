@@ -4,7 +4,6 @@ import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined';
-import LocalPrintshopOutlinedIcon from '@mui/icons-material/LocalPrintshopOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
@@ -549,7 +548,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     if (onOpenPrint) onOpenPrint();
   };
 
-  const handleDownloadExcel = () => {
+  // אותו שם כמו ב-fix/csv-export של רחלי (שם התוכן נכתב מחדש, בלי הכוכביות
+  // בכותרות) - כדי שבמיזוג רק התוכן שלה יחליף את זה, בלי לשנות את מי שקורא לה
+  const handleDownloadCsv = () => {
     setExportMenuAnchor(null);
     apiRef.current.exportDataAsCsv({ utf8WithBom: true });
   };
@@ -1766,6 +1767,17 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         <Stack direction="row" spacing={1}>
           <ExcelImport onImport={onImport} />
 
+          {/* הדפסה ויצוא הם שני כפתורים נפרדים (#87) - "הדפסה" פותח ישר את חלון
+              הדפסת המדבקות (כמו Ctrl+P), ו"יצוא" מכיל רק את אפשרויות ההורדה */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handlePrintLabels}
+            sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
+          >
+            הדפסה
+          </Button>
+
           <Button
             variant="outlined"
             size="small"
@@ -2164,13 +2176,15 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         anchorEl={exportMenuAnchor}
         onClose={() => setExportMenuAnchor(null)}
       >
-        <MenuItem onClick={handlePrintLabels} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
-          <LocalPrintshopOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
-          הדפסת מדבקות
-        </MenuItem>
-        <MenuItem onClick={handleDownloadExcel} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
+        <MenuItem onClick={handleDownloadCsv} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
           <FileDownloadOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
-          הורדת קובץ אקסל למחשב
+          הורדה כ-CSV
+        </MenuItem>
+        {/* XLSX - ממתין לסיכום עם רחלי מאיפה לקחת את פונקציית ההורדה (היא כבר כתבה
+            אחת ב-fix/xlsx-export-headers), כדי שלא יהיו שתי גרסאות לאותו דבר */}
+        <MenuItem disabled sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
+          <FileDownloadOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
+          הורדה כ-XLSX (אקסל)
         </MenuItem>
       </Menu>
 
