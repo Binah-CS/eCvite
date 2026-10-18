@@ -4,12 +4,12 @@ import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined';
-import LocalPrintshopOutlinedIcon from '@mui/icons-material/LocalPrintshopOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import AddIcon from '@mui/icons-material/Add';
-import { DataGrid, useGridApiRef } from '@mui/x-data-grid';
+import { DataGrid, useGridApiRef, gridFilteredSortedRowEntriesSelector } from '@mui/x-data-grid';
+import * as XLSX from 'xlsx';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
 import api from '../services/api';
@@ -549,9 +549,32 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     if (onOpenPrint) onOpenPrint();
   };
 
-  const handleDownloadExcel = () => {
+  // אותו שם כמו ב-fix/csv-export של רחלי (שם התוכן נכתב מחדש, בלי הכוכביות
+  // בכותרות) - כדי שבמיזוג רק התוכן שלה יחליף את זה, בלי לשנות את מי שקורא לה
+  const handleDownloadCsv = () => {
     setExportMenuAnchor(null);
     apiRef.current.exportDataAsCsv({ utf8WithBom: true });
+  };
+
+  // קובץ אקסל אמיתי (.xlsx) - בדיוק העמודות שמוצגות בטבלה, באותו סדר, והשורות כפי
+  // שהן מוצגות (אחרי סינון ומיון), כמו ההורדה כ-CSV. בלי עמודת תיבות הסימון, בלי
+  // ה"*" של שדות חובה בכותרות, "הדפסה" ככן/לא, וגיליון מימין לשמאל
+  const handleDownloadXlsx = () => {
+    setExportMenuAnchor(null);
+    const columns = apiRef.current.getVisibleColumns().filter((col) => !col.field.startsWith('__') && col.headerName);
+    const headers = columns.map((col) => String(col.headerName).replace(/\s*\*$/, ''));
+    const body = gridFilteredSortedRowEntriesSelector(apiRef).map(({ model }) =>
+      columns.map((col) => {
+        const value = model[col.field];
+        if (col.field === 'print') return value ? 'כן' : 'לא';
+        return value ?? '';
+      })
+    );
+    const sheet = XLSX.utils.aoa_to_sheet([headers, ...body]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'מוזמנים');
+    workbook.Workbook = { Views: [{ RTL: true }] };
+    XLSX.writeFile(workbook, 'רשימת מוזמנים.xlsx');
   };
 
   // שורה חדשה וריקה, עם id מקומי-לתצוגה בלבד (לא hashCode אמיתי - ר' handleSave)
@@ -1764,6 +1787,17 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         <Stack direction="row" spacing={1}>
           <ExcelImport onImport={onImport} />
 
+          {/* הדפסה ויצוא הם שני כפתורים נפרדים (#87) - "הדפסה" פותח ישר את חלון
+              הדפסת המדבקות (כמו Ctrl+P), ו"יצוא" מכיל רק את אפשרויות ההורדה */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handlePrintLabels}
+            sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
+          >
+            הדפסה
+          </Button>
+
           <Button
             variant="outlined"
             size="small"
@@ -2160,13 +2194,13 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         anchorEl={exportMenuAnchor}
         onClose={() => setExportMenuAnchor(null)}
       >
-        <MenuItem onClick={handlePrintLabels} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
-          <LocalPrintshopOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
-          הדפסת מדבקות
-        </MenuItem>
-        <MenuItem onClick={handleDownloadExcel} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
+        <MenuItem onClick={handleDownloadCsv} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
           <FileDownloadOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
-          הורדת קובץ אקסל למחשב
+          הורדה כ-CSV
+        </MenuItem>
+        <MenuItem onClick={handleDownloadXlsx} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
+          <FileDownloadOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
+          הורדה כ-XLSX (אקסל)
         </MenuItem>
       </Menu>
 
