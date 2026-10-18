@@ -76,12 +76,19 @@ const api = {
                 }
             }
         ),
-    saveRecords: (phone, rows, hashCodesToDelete) =>
+  saveRecords: (phone, rows, hashCodesToDelete) =>
         apiClient.post('/recipients/save', {
             phone: phone,
             recipients: rows,
             hashCodesToDelete
         }),
+
+  updatePrintPreferences: (phone, recipientHashCodes, printEnabled) =>
+      apiClient.put('/recipients/print-preferences', {
+        phone,
+        recipientHashCodes,
+        printEnabled,
+      }),
 
   importRecipients: (phone, recipients) =>
       apiClient.post('/recipients/import', { phone, recipients }),
