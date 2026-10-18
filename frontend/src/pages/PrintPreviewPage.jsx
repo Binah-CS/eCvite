@@ -189,7 +189,7 @@ export default function PrintPreviewPage() {
     fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
   };
    End Binah_CS edit */
-  
+
   // "עמודות להדפסה" מ"ניהול עמודות" - אותה העדפה שנשמרה למשתמשת, נופלת חזרה
   // לברירת המחדל (השדות שהודפסו תמיד עד היום) אם עדיין לא נשמרה העדפה אישית
   const columnPreferences = parseColumnPreferences(getLoggedUser()?.columnPreferences);
