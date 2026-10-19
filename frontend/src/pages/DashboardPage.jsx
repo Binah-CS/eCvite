@@ -604,7 +604,7 @@ export default function DashboardPage() {
         {/* רנדור המודאל והעברת הרשומות המסומנות אליו */}
         <PrintModal
             open={isPrintModalOpen}
-            visibleRows={isPrintModalOpen ? visibleRowsRef.current : null}
+            visibleRows={isPrintModalOpen ? visibleRowsRef.current?.() ?? null : null}
             onClose={() => setIsPrintModalOpen(false)}
             selectedRows={selectedRows}
         />
