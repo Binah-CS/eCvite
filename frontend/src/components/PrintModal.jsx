@@ -138,8 +138,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const records = visibleRows || allRecords;
 
   // אם לא סימנו אף שורה - מדפיסים את כולן, במקום לא להדפיס כלום
-  const rowsToPrint = (selectedRows.length > 0 ? selectedRows : records)
-    .filter((row) => row.printEnabled !== false);
+  const rowsToPrint = selectedRows.length > 0 ? selectedRows : records;
   
   // 1. בדיקה בטוחה עבור השלב (Step)
   const [step, setStep] = useState(() => {

@@ -3,11 +3,8 @@ package com.example.excelapp.controller;
 import com.example.excelapp.entity.User;
 import com.example.excelapp.entity.UserRecipients;
 import com.example.excelapp.entity.Recipients;
-import com.example.excelapp.entity.RecipientPrintPreference;
 import com.example.excelapp.repository.RecipientsRepository;
-import com.example.excelapp.repository.RecipientPrintPreferenceRepository;
 import com.example.excelapp.dto.SaveRecipientsRequest;
-import com.example.excelapp.dto.UpdatePrintPreferenceRequest;
 import com.example.excelapp.repository.UserRecipientsRepository;
 import com.example.excelapp.repository.UserRepository;
 import com.example.excelapp.service.ExcelService;
@@ -42,7 +39,6 @@ public class RecipientController {
     private final RecipientsRepository recipientRepository;
     private final UserRecipientsRepository userRecipientsRepository;
     private final UserRepository userRepository;
-    private final RecipientPrintPreferenceRepository recipientPrintPreferenceRepository;
 
     @Autowired
     private ExcelService excelService;
@@ -72,13 +68,11 @@ public class RecipientController {
     public RecipientController(
             RecipientsRepository recipientRepository,
             UserRecipientsRepository userRecipientsRepository,
-            UserRepository userRepository,
-            RecipientPrintPreferenceRepository recipientPrintPreferenceRepository
+            UserRepository userRepository
     ) {
         this.recipientRepository = recipientRepository;
         this.userRecipientsRepository = userRecipientsRepository;
         this.userRepository = userRepository;
-        this.recipientPrintPreferenceRepository = recipientPrintPreferenceRepository;
     }
 
 
@@ -266,54 +260,6 @@ public class RecipientController {
 
         return ResponseEntity.ok(recipients);
     }
-
-    @PutMapping("/print-preferences")
-    @Transactional
-    public ResponseEntity<?> updatePrintPreferences(@RequestBody UpdatePrintPreferenceRequest request) {
-        User user = userRepository.findByPhone(request.getPhone());
-        if (user == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found");
-        }
-
-        List<String> requestedHashes = request.getRecipientHashCodes() == null
-                ? List.of()
-                : request.getRecipientHashCodes().stream()
-                        .filter(hash -> hash != null && !hash.isBlank())
-                        .distinct()
-                        .toList();
-        if (requestedHashes.isEmpty()) {
-            return ResponseEntity.ok(List.of());
-        }
-
-        List<UserRecipients> links = userRecipientsRepository
-                .findByUserAndRecipient_HashCodeIn(user, requestedHashes);
-        Map<String, RecipientPrintPreference> existingPreferences = recipientPrintPreferenceRepository
-                .findByUserAndRecipient_HashCodeIn(user, requestedHashes)
-                .stream()
-                .collect(Collectors.toMap(
-                        preference -> preference.getRecipient().getHashCode(),
-                        preference -> preference
-                ));
-
-        List<RecipientPrintPreference> preferencesToSave = links.stream()
-                .map(UserRecipients::getRecipient)
-                .map(recipient -> {
-                    RecipientPrintPreference preference = existingPreferences.get(recipient.getHashCode());
-                    if (preference == null) {
-                        preference = new RecipientPrintPreference();
-                        preference.setUser(user);
-                        preference.setRecipient(recipient);
-                    }
-                    preference.setPrintEnabled(request.isPrintEnabled());
-                    return preference;
-                })
-                .toList();
-
-        recipientPrintPreferenceRepository.saveAll(preferencesToSave);
-        return ResponseEntity.ok(preferencesToSave);
-    }
-
-
 
     @PostMapping("/add")
     public ResponseEntity<Recipients> insertRecipient(

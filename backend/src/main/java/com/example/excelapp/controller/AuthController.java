@@ -62,7 +62,7 @@ private final UserRepository userRepository;
     }
 
     // שומרת את הבחירות האחרונות בחלון "הדפסת מדבקות" - ר' User.labelPrintSettings.
-    // לא לבלבל עם /api/recipients/print-preferences (האם להדפיס כל נמען)
+    // לא לבלבל עם דגל ההדפסה של כל נמען (UserRecipients.print)
     @PutMapping("/label-print-settings")
     public ResponseEntity<User> updateLabelPrintSettings(@RequestBody Map<String, String> request) {
         String phone = request.get("phone");
