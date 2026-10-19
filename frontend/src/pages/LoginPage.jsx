@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -9,6 +9,7 @@ import {
   Paper,
 } from '@mui/material';
 import api from '../services/api';
+import { refreshExcelColumns } from '../services/excelColumnsCache';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -16,14 +17,6 @@ export default function LoginPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
-
-  // "מעיר" את בסיס הנתונים (Neon) כבר במסך ההתחברות - הוא "נרדם" אחרי חוסר פעילות,
-  // וההתעוררות הראשונה לוקחת כמה שניות. עדיף שזה יקרה כאן, בזמן שממלאים שם/טלפון,
-  // מאשר שתחכה לזה אחר כך בטעינת הטבלה עצמה. קריאה קלה שלא דורשת פרטי משתמש, בלי
-  // להציג שגיאה אם היא נכשלת - זו רק "חימום", לא פעולה קריטית
-  useEffect(() => {
-    api.getRecipientColumns().catch(() => {});
-  }, []);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -37,6 +30,9 @@ export default function LoginPage() {
       const response = await api.login({ name, phone });
 
       sessionStorage.setItem('user', JSON.stringify(response.data));
+      // Load the definitions once for this login, before the dashboard mounts.
+      // Components consume the cached result and do not issue their own request.
+      await refreshExcelColumns();
 
       navigate('/');
     } catch (err) {

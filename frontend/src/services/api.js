@@ -18,8 +18,23 @@ apiClient.interceptors.request.use((config) => {
   return Promise.reject(error);
 });
 
+// מדפיסה לקונסול של הדפדפן את שורת הלוג שהשרת עצמו רשם (אם היא הגיעה ב-header,
+// ר' RequestLoggingFilter.setBackendLogHeader בצד ה-Java) - כדי שאפשר יהיה לראות
+// את לוגי ה-backend באותו מקום בדיוק כמו לוגי ה-frontend, גם באתר החי, בלי גישה
+// לדשבורד השרת (Render) בכלל. מקודד ב-URL בצד השרת, אז צריך לפענח כאן בחזרה
+function logBackendHeader(headers) {
+  const raw = headers?.['x-backend-log'];
+  if (!raw) return;
+  try {
+    console.log(`(שרת) ${decodeURIComponent(raw)}`);
+  } catch {
+    console.log(`(שרת) ${raw}`);
+  }
+}
+
 apiClient.interceptors.response.use((response) => {
   console.log(`✓ ${response.config.method?.toUpperCase()} ${response.config.url} -> ${response.status}`);
+  logBackendHeader(response.headers);
   return response;
 }, (error) => {
   const config = error.config ?? {};
@@ -32,6 +47,7 @@ apiClient.interceptors.response.use((response) => {
     error.response?.data ?? error.message,
     error
   );
+  logBackendHeader(error.response?.headers);
   return Promise.reject(error);
 });
 
@@ -60,12 +76,19 @@ const api = {
                 }
             }
         ),
-    saveRecords: (phone, rows, hashCodesToDelete) =>
+  saveRecords: (phone, rows, hashCodesToDelete) =>
         apiClient.post('/recipients/save', {
             phone: phone,
             recipients: rows,
             hashCodesToDelete
         }),
+
+  updatePrintPreferences: (phone, recipientHashCodes, printEnabled) =>
+      apiClient.put('/recipients/print-preferences', {
+        phone,
+        recipientHashCodes,
+        printEnabled,
+      }),
 
   importRecipients: (phone, recipients) =>
       apiClient.post('/recipients/import', { phone, recipients }),
@@ -73,6 +96,8 @@ const api = {
   getRecipientColumns: () =>
 
       apiClient.get('/recipient-columns'),
+  keepDatabaseAlive: () =>
+      apiClient.get('/health/db'),
     importRecords: (phone, rows) =>
         apiClient.post('/recipients/import', {
             phone,
@@ -86,6 +111,10 @@ const api = {
 
   updateColumnPreferences: (phone, columnPreferences) =>
       apiClient.put('/auth/column-preferences', { phone, columnPreferences }),
+
+  // הגדרות חלון "הדפסת מדבקות" של המשתמשת (כתב, גודל, עובי, מדבקה, מדפסת)
+  updateLabelPrintSettings: (phone, labelPrintSettings) =>
+      apiClient.put('/auth/label-print-settings', { phone, labelPrintSettings }),
 
   getRecipientHistory: (hashCode, phone) =>
       apiClient.get(`/recipients/${encodeURIComponent(hashCode)}/history`, { params: { phone } }),

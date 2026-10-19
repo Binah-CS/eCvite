@@ -89,17 +89,6 @@ function applyDefaultCountry(rows) {
   );
 }
 
-// עמודת "הדפסה" (print) חייבת בשרת להיות true/false אמיתי - אבל בקובץ אקסל אנשים כותבים
-// חופשי (כן/לא, Y/N, 1/0) שהשרת לא יודע לפרש כ-boolean וזורק שגיאה - ממירים כאן מראש
-function normalizePrintField(rows) {
-  const truthyValues = new Set(['true', 'כן', 'y', 'yes', '1']);
-  return rows.map((row) => {
-    if (row.print === undefined) return row;
-    const normalized = String(row.print ?? '').trim().toLowerCase();
-    return { ...row, print: truthyValues.has(normalized) };
-  });
-}
-
 // ממלאת "שייך ל" = שם הגליון עבור שורות שמגיעות מגליונות שהמשתמשת אישרה, ורק כשהשדה
 // עדיין ריק (לא דורסת ערך אמיתי שכבר קיים בשורה עצמה מהקובץ)
 function applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets) {
@@ -355,7 +344,7 @@ export default function ExcelImport({ onImport }) {
       invalidateExcelColumnsCache();
     }
 
-    const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, finalMatched)));
+    const mappedRows = applyDefaultCountry(remapRows(json, finalMatched));
     onImport(mergeDuplicateIdentities(applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets)));
   };
 

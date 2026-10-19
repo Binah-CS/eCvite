@@ -58,7 +58,13 @@ public class Recipients {
     @Column(name = "created_by")
     private String createdBy;
 
-    private boolean print; // flag
+    @Transient
+    private Boolean printEnabled;
+
+    // נשמר לתאימות עם רשומות ובדיקות ישנות; העדפת ההדפסה הפעילה נשמרת לפי משתמש
+    // ב-RecipientPrintPreference ומוחזרת דרך printEnabled.
+    private boolean print;
+
     private String display;
 
     @Column(name = "address_note")

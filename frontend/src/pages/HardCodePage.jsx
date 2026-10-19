@@ -10,6 +10,10 @@ export const MODAL_TEXTS = {
   
   STEP_2_TITLE: "הגדרות הדפסה (מדבקות)",
   FONT_INPUT_LABEL: "בחירת כתב",
+  FONT_SIZE_INPUT_LABEL: "גודל כתב",
+  FONT_WEIGHT_INPUT_LABEL: "עובי כתב",
+  FONT_WEIGHT_REGULAR: "רגיל",
+  FONT_WEIGHT_BOLD: "מודגש",
   SIZE_INPUT_LABEL: "בחירת גודל מדבקה",
   PRINTER_INPUT_LABEL: "בחירת מדפסת",
   
@@ -23,6 +27,15 @@ export const MODAL_TEXTS = {
   DELIVERY_INPUT_LABEL: "אופן קבלת ההדפסה",
   DELIVERY_COURIER: "שליח",
   DELIVERY_PICKUP: "איסוף עצמאי",
+
+  EMPTY_LINE_NO_ADDRESS: "השאר שורה ריקה כשאין כתובת",
+
+  GREETING_SHOW: 'הדפס פנייה ("לכבוד")',
+  GREETING_SEPARATE_LINE: "פנייה בשורה נפרדת מעל השם",
+  GREETING_ALIGN_LABEL: "מיקום הפנייה",
+  GREETING_ALIGN_RIGHT: "ימין",
+  GREETING_ALIGN_CENTER: "מרכז",
+  GREETING_ALIGN_LEFT: "שמאל",
 
   BUTTON_CANCEL: "ביטול",
   BUTTON_NEXT: "המשך",

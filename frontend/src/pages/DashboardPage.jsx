@@ -1,14 +1,29 @@
-import { useEffect,useCallback, useState } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Avatar, IconButton, Menu, MenuItem, Snackbar, Alert } from '@mui/material';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import DataTable from '../components/DataTable';
 import api from '../services/api';
+import { VisibleRowsContext } from '../utils/visibleRowsContext';
 import PrintModal from '../components/PrintModal'; 
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
 
+const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
+const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
+const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
+const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+
+function getSavedSelectedIds() {
+  try {
+    const saved = sessionStorage.getItem(SELECTED_ROW_IDS_STORAGE_KEY);
+    const ids = saved ? JSON.parse(saved) : [];
+    return Array.isArray(ids) ? ids : [];
+  } catch {
+    return [];
+  }
+}
 
 
 function getLoggedUser() {
@@ -44,17 +59,67 @@ export default function DashboardPage() {
   const [error, setError] = useState('');
   const user = getLoggedUser();
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  // השורות שהטבלה מציגה אחרי חיפוש/סינון (null = אין סינון) - ר' VisibleRowsContext
+  const visibleRowsRef = useRef(null);
   const [selectedRows, setSelectedRows] = useState([]); // 🌟 רק הגדרה אחת, נקייה ותקינה!
   const [isTableDirty, setIsTableDirty] = useState(false);
   const [profileMenuAnchor, setProfileMenuAnchor] = useState(null); // תפריט הפרופיל (עיגול עם אות ראשונה) שנפתח למעלה
   const [saveSuccessOpen, setSaveSuccessOpen] = useState(false); // הודעת "השמירה נעשתה בהצלחה" שיורדת מלמעלה
+  const lastDashboardActivityAt = useRef(Date.now());
+  const lastDatabaseKeepAliveAt = useRef(Date.now());
+  const pendingRecipientSavesRef = useRef(new Map());
+  const recipientSaveQueueRef = useRef(Promise.resolve());
+  const printPreferenceSaveQueueRef = useRef(Promise.resolve());
 
   // זהות השורות שהיו מסומנות לפני שיצאנו לתצוגה המקדימה - נקרא פעם אחת, בטרם עולה הטבלה
   const [initialSelectedIds] = useState(() => {
     if (typeof window === 'undefined') return [];
-    const saved = sessionStorage.getItem('savedSelectedIds');
-    return saved ? JSON.parse(saved) : [];
+    return getSavedSelectedIds();
   });
+
+  const handleSelectionChange = useCallback((rows) => {
+    const selected = Array.isArray(rows) ? rows : [];
+    setSelectedRows(selected);
+    sessionStorage.setItem(
+      SELECTED_ROW_IDS_STORAGE_KEY,
+      JSON.stringify(selected.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
+    );
+    sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(selected));
+  }, []);
+
+  const handlePrintPreferenceChange = useCallback(async (recipientHashCodes, printEnabled) => {
+    if (!user?.phone) return;
+    const hashes = Array.isArray(recipientHashCodes) ? recipientHashCodes : [recipientHashCodes];
+    const hashSet = new Set(hashes.map(String));
+
+    try {
+      printPreferenceSaveQueueRef.current = printPreferenceSaveQueueRef.current
+        .catch(() => {})
+        .then(() => api.updatePrintPreferences(user.phone, hashes, printEnabled));
+      await printPreferenceSaveQueueRef.current;
+    } catch (err) {
+      setError('לא ניתן לשמור את העדפת ההדפסה. נסי שוב.');
+      throw err;
+    }
+    setRecords((previousRecords) => {
+      const updatedRecords = previousRecords.map((row) =>
+        hashSet.has(String(row.hashCode)) ? { ...row, printEnabled } : row
+      );
+      saveLocalRecords(user.phone, updatedRecords);
+      return updatedRecords;
+    });
+    setSelectedRows((previousRows) => {
+      const updatedSelection = previousRows.map((row) =>
+        hashSet.has(String(row.hashCode ?? row.id)) ? { ...row, printEnabled } : row
+      );
+      sessionStorage.setItem(
+        SELECTED_ROW_IDS_STORAGE_KEY,
+        JSON.stringify(updatedSelection.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
+      );
+      sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(updatedSelection));
+      return updatedSelection;
+    });
+  }, [user?.phone]);
 
  
 
@@ -97,8 +162,27 @@ export default function DashboardPage() {
     if (cameFromPreview === 'true') {
       setIsPrintModalOpen(true);
       sessionStorage.removeItem('fromPreview'); // מנקים מיד כדי שלא יציק ברענונים הבאים
-      sessionStorage.removeItem('savedSelectedIds');
     }
+  }, []);
+
+  // Ctrl+P (או Cmd+P במק) בדף הטבלה פותח את חלון "הדפסת מדבקות" שלנו במקום ההדפסה
+  // של הדפדפן, שהייתה מדפיסה את כל הדף - טבלה, כפתורים וחיפוש. e.code ולא e.key -
+  // כשהמקלדת בעברית המקש P כותב "פ", והקיצור צריך לעבוד בכל שפה. capture - כדי
+  // שיתפס לפני הטבלה או קלט בתא שעוצרים את האירוע. בדף התצוגה המקדימה (רכיב אחר)
+  // Ctrl+P נשאר ההדפסה הרגילה של הדפדפן, כי שם מוצגות רק המדבקות
+  // רק Ctrl+P עצמו - Ctrl+Shift+P/Alt הם קיצורים אחרים של הדפדפן (למשל חלון פרטי)
+  // ונשארים שלו. אם כבר פתוח חלון או תפריט (חלונית כפילויות, היסטוריה, "יצוא",
+  // חלון ההדפסה עצמו - כולם MUI Modal) - רק חוסמים את ההדפסה של הדפדפן ולא פותחים
+  // את חלון ההדפסה מעליהם, כדי לא לדלג על החלטה שעוד לא נסגרה
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.code !== 'KeyP') return;
+      event.preventDefault();
+      if (document.querySelector('.MuiModal-root')) return;
+      setIsPrintModalOpen(true);
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, []);
   //  מקפיץ אזהרה ברענן/סגירה רק אם הסטייט השתנה (כלומר יש שינויים שלא נשמרו)
   useEffect(() => {
@@ -114,15 +198,50 @@ export default function DashboardPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isTableDirty]);
 
-  // "פינג" קל כל 4 דקות כל עוד הדף פתוח - Neon (בסיס הנתונים) "נרדם" אחרי 5 דקות של
-  // חוסר פעילות, וההתעוררות הראשונה אחרי זה איטית (כמה שניות). זה מונע מזה לקרות
-  // שוב ושוב תוך כדי עבודה רציפה בטבלה (לא עוזר לכניסה הראשונה ביום - לזה יש פינג
-  // נפרד במסך ההתחברות)
+  // The dashboard load already queries the DB for recipients. After that, keep
+  // the connection warm only while the user is actively working in this visible
+  // dashboard tab. No request is made from DataTable or from background tabs.
   useEffect(() => {
-    const interval = setInterval(() => {
-      api.getRecipientColumns().catch(() => {});
-    }, 4 * 60 * 1000);
-    return () => clearInterval(interval);
+    const sendKeepAliveIfDue = () => {
+      const now = Date.now();
+      lastDashboardActivityAt.current = now;
+
+      if (document.visibilityState !== 'visible'
+          || now - lastDatabaseKeepAliveAt.current < DB_KEEP_ALIVE_INTERVAL_MS) {
+        return;
+      }
+
+      lastDatabaseKeepAliveAt.current = now;
+      api.keepDatabaseAlive().catch(() => {});
+    };
+
+    const keepAliveWhileActive = () => {
+      const now = Date.now();
+      const hasRecentActivity = now - lastDashboardActivityAt.current <= DASHBOARD_ACTIVITY_WINDOW_MS;
+      const isDue = now - lastDatabaseKeepAliveAt.current >= DB_KEEP_ALIVE_INTERVAL_MS;
+
+      if (document.visibilityState === 'visible' && hasRecentActivity && isDue) {
+        lastDatabaseKeepAliveAt.current = now;
+        api.keepDatabaseAlive().catch(() => {});
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        sendKeepAliveIfDue();
+      }
+    };
+
+    const activityEvents = ['pointerdown', 'keydown', 'scroll', 'touchstart'];
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, sendKeepAliveIfDue, { passive: true }));
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const interval = window.setInterval(keepAliveWhileActive, 60 * 1000);
+
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, sendKeepAliveIfDue));
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(interval);
+    };
   }, []);
 
   // עטוף ב-useCallback (לא פונקציה רגילה) כדי שהזהות שלו תישאר יציבה בין רינדורים -
@@ -134,6 +253,81 @@ export default function DashboardPage() {
     setRecords(updatedRows);
     setIsTableDirty(true); //  בום! ברגע שיש שינוי בטבלה, האבא ננעל רשמית!
   }, [user?.phone]);
+
+  // שומרת שינויי תא לשרת אחרי שההקלדה נעצרת לרגע. לכל שורה יש השהיה נפרדת,
+  // והבקשות נשלחות בתור כדי שערך ישן לא ידרוס ערך חדש אם הרשת איטית.
+  const persistRecipientChange = useCallback((row) => {
+    if (!user?.phone || !row) return;
+
+    const key = String(row.hashCode ?? row.id);
+    const previous = pendingRecipientSavesRef.current.get(key);
+    if (previous) window.clearTimeout(previous.timer);
+
+    let queued = false;
+    const queueSave = () => {
+      if (queued) return;
+      queued = true;
+      pendingRecipientSavesRef.current.delete(key);
+      const { id, ...recipient } = row;
+      recipientSaveQueueRef.current = recipientSaveQueueRef.current
+        .catch(() => {})
+        .then(() => api.saveRecords(user.phone, [recipient], []))
+        .catch((err) => {
+          console.error('לא ניתן לשמור את השינוי בשרת:', err);
+        });
+    };
+
+    const timer = window.setTimeout(queueSave, 350);
+    pendingRecipientSavesRef.current.set(key, { timer, queueSave });
+  }, [user?.phone]);
+
+  const flushPendingRecipientSaves = useCallback(() => {
+    for (const { timer, queueSave } of pendingRecipientSavesRef.current.values()) {
+      window.clearTimeout(timer);
+      queueSave();
+    }
+    return recipientSaveQueueRef.current;
+  }, []);
+
+  const handleOpenPrint = useCallback(async () => {
+    await flushPendingRecipientSaves();
+    await printPreferenceSaveQueueRef.current.catch(() => {});
+
+    if (!user?.phone) return;
+
+    // ההדפסה נשענת על ההעדפות השמורות ב-DB, ולא על עותק ישן של השורות שנבחרו.
+    // כך שינוי ל"לא להדפסה" תמיד נלקח בחשבון גם אם הבחירה נעשתה לפני השינוי.
+    try {
+      const response = await api.getRecipients(user.phone);
+      const currentRecords = Array.isArray(response.data) ? response.data : [];
+      const recordsByHashCode = new Map(
+        currentRecords.map((row) => [String(row.hashCode), { ...row, id: row.id ?? row.hashCode }])
+      );
+
+      setRecords(currentRecords);
+      saveLocalRecords(user.phone, currentRecords);
+      setSelectedRows((previousSelection) => {
+        const refreshedSelection = previousSelection
+          .map((row) => recordsByHashCode.get(String(row.hashCode ?? row.id)))
+          .filter(Boolean);
+        sessionStorage.setItem(
+          SELECTED_ROW_IDS_STORAGE_KEY,
+          JSON.stringify(refreshedSelection.map((row) => row.id)),
+        );
+        sessionStorage.setItem(
+          SELECTED_ROWS_STORAGE_KEY,
+          JSON.stringify(refreshedSelection),
+        );
+        return refreshedSelection;
+      });
+      setError('');
+    } catch (err) {
+      setError('לא ניתן לטעון את העדפות ההדפסה מהשרת. נסי שוב.');
+      return;
+    }
+
+    setIsPrintModalOpen(true);
+  }, [flushPendingRecipientSaves, user?.phone]);
 
   // מחיקה לא נשלחת לשרת מיד - רק נשמרת בתור "ממתינה" ונשלחת בפועל רק כשלוחצים "שמור
   // את כל המוזמנים" (handleSave), יחד עם שאר השינויים. המזהה האמיתי של שורה שמורה
@@ -344,8 +538,9 @@ export default function DashboardPage() {
 
         <Box sx={{ bgcolor: '#f8fafc', borderRadius: 3, p: 0.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
           <MenuItem
-            onClick={() => {
+            onClick={async () => {
               setProfileMenuAnchor(null);
+              await flushPendingRecipientSaves();
               navigate('/settings');
             }}
             sx={{ borderRadius: 2.5, py: 1.25, px: 2, gap: 1.5, '&:hover': { bgcolor: '#eef2f7' } }}
@@ -385,29 +580,33 @@ export default function DashboardPage() {
         )}
 
         <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <VisibleRowsContext.Provider value={visibleRowsRef}>
           <DataTable
               records={records}
               loading={loading}
               onSave={handleSave}
               onAutoSave={handleAutoSaveLocal}
-              onSelectionChange={setSelectedRows}
+              onPersistRow={persistRecipientChange}
+              onPrintPreferenceChange={handlePrintPreferenceChange}
+              onSelectionChange={handleSelectionChange}
               onDeleteRows={handleDeleteRows}
               initialSelectedIds={initialSelectedIds}
               onImport={handleImport}
-              onOpenPrint={() => setIsPrintModalOpen(true)}
+              onOpenPrint={handleOpenPrint}
               columnPreferences={parseColumnPreferences(user?.columnPreferences)}
               profileMenu={profileMenu}
               onColumnOrderChange={handleColumnOrderChange}
               phone={user?.phone}
           />
+          </VisibleRowsContext.Provider>
         </Box>
 
         {/* רנדור המודאל והעברת הרשומות המסומנות אליו */}
         <PrintModal
             open={isPrintModalOpen}
+            visibleRows={isPrintModalOpen ? visibleRowsRef.current : null}
             onClose={() => setIsPrintModalOpen(false)}
             selectedRows={selectedRows}
-            records={records}
         />
 
         <Snackbar

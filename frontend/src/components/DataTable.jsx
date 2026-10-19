@@ -1,19 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,} from '@mui/material';
+import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,Tooltip,} from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined';
-import LocalPrintshopOutlinedIcon from '@mui/icons-material/LocalPrintshopOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import AddIcon from '@mui/icons-material/Add';
-import { DataGrid, useGridApiRef } from '@mui/x-data-grid';
+import { DataGrid, useGridApiRef, gridFilteredSortedRowEntriesSelector } from '@mui/x-data-grid';
+import * as XLSX from 'xlsx';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
 import api from '../services/api';
 import { buildIdentityKey } from '../utils/recipientIdentity';
+import { useContext } from 'react';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import FilterBuilder, { valueLabel, newCondition } from './FilterBuilder';
+import { ColumnFilterContext, ColumnFilterButton, ColumnFilterMenu } from './ColumnValueFilter';
+import { applyColumnFilters, collectColumnValues, conditionsToFilters, withoutColumnFilter } from '../utils/columnFilters';
+import { VisibleRowsContext } from '../utils/visibleRowsContext';
 
 // מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
 const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
@@ -57,6 +63,29 @@ const TOOLBAR_BUTTON_SX = {
   fontSize: '0.75rem',
   '&:hover': { bgcolor: '#eff6ff', borderColor: '#60a5fa' },
 };
+
+// "שורות בעמוד" (25/50/100) נשמר בדפדפן (localStorage, לכל מחשב/דפדפן בנפרד) - בלי
+// זה הטבלה חזרה ל-25 בכל רענון או מעבר להגדרות וחזרה. try/catch - localStorage
+// יכול לזרוק (חלון גלישה פרטית, חסימת אחסון), ואז פשוט נשארים עם ברירת המחדל
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
+const PAGE_SIZE_STORAGE_KEY = 'recipientsTable.pageSize';
+
+function readSavedPageSize() {
+  try {
+    const saved = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY));
+    return PAGE_SIZE_OPTIONS.includes(saved) ? saved : PAGE_SIZE_OPTIONS[0];
+  } catch {
+    return PAGE_SIZE_OPTIONS[0];
+  }
+}
+
+function savePageSize(pageSize) {
+  try {
+    localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize));
+  } catch {
+    // לא קריטי - הבחירה פשוט לא תיזכר בפעם הבאה
+  }
+}
 
 // תרגום סוג הפעולה מטבלת recipients_history (נקבע ע"י ה-trigger בבסיס הנתונים,
 // TG_OP הסטנדרטי של פוסטגרס) לתצוגה בעברית בחלונית ההסטוריה
@@ -164,6 +193,7 @@ function ColumnHeader({
       >
         {headerName}
       </Typography>
+      <ColumnFilterButton field={field} headerName={headerName} />
       <IconButton
         size="small"
         data-sort-icon="true"
@@ -188,17 +218,18 @@ function ColumnHeader({
 export default function DataTable({ records, loading, onSave, onAutoSave, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
   const [rows, setRows] = useState(records);
   const [selectionModel, setSelectionModel] = useState(initialSelectedIds || []);
+  const [activeRowId, setActiveRowId] = useState(null);
   const [sortModel, setSortModel] = useState([]);
   const [activeFilters, setActiveFilters] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [fieldDefs, setFieldDefs] = useState([]);
 
-  const [problemQueue, setProblemQueue] = useState([]); // תורי תאים שצריך לתקן לפני שמירה - {id, field}
-  const [pendingProblems, setPendingProblems] = useState([]); // תאים בעייתיים שממתינים להחלטה - לתקן או לשמור בכל זאת
-  const [saveAnywayDialogOpen, setSaveAnywayDialogOpen] = useState(false);
+  const [problemQueue, setProblemQueue] = useState([]); // תור התאים שקופצים ביניהם לתיקון (כפתור "תיקון שדות") - {id, field}
   const [duplicateGroups, setDuplicateGroups] = useState([]); // [[row, row, ...], ...] - קבוצות שורות עם אותה זהות (בעל/אישה/שם משפחה/טלפון/כתובת)
   const [duplicateChoices, setDuplicateChoices] = useState({}); // groupIndex -> 'both' | id של השורה שנשארת
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const duplicateDialogOpenRef = useRef(duplicateDialogOpen); // ל-Ctrl+S - לא לפתוח שוב את חלונית הכפילויות כשהיא כבר פתוחה
+  duplicateDialogOpenRef.current = duplicateDialogOpen;
   const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא כתובת
   const [exportMenuAnchor, setExportMenuAnchor] = useState(null); // כפתור "יצוא" - תפריט הדפסת מדבקות / הורדת קובץ
   const [secondarySortFields, setSecondarySortFields] = useState([]); // תת-מיון: שרשרת עמודות לשבירת שוויון, לפי בחירת המשתמשת
@@ -423,14 +454,10 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // נקרא שוב, בלי extraDeleteIds, מ-handleSaveAnyway/handleFixProblemsNow)
   const pendingExtraDeleteIdsRef = useRef([]);
 
+  // שדות חסרים/שגויים לא עוצרים את השמירה (ר' #82) - הם מוצגים ומתוקנים דרך כפתור
+  // "תיקון שדות" הנפרד בסרגל הכלים, ושמירה תמיד נשמרת מיד כמו שהטבלה נמצאת
   const proceedAfterDuplicates = (rowsToSave, extraDeleteIds = []) => {
     if (extraDeleteIds.length) pendingExtraDeleteIdsRef.current = extraDeleteIds;
-    const problems = findProblemCells(rowsToSave);
-    if (problems.length > 0) {
-      setPendingProblems(problems);
-      setSaveAnywayDialogOpen(true);
-      return;
-    }
     onSave(rowsToSave, pendingExtraDeleteIdsRef.current);
     pendingExtraDeleteIdsRef.current = [];
   };
@@ -445,6 +472,24 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     }
     proceedAfterDuplicates(rows);
   };
+
+  // Ctrl+S (או Cmd+S במק) = לחיצה על "שמור", כולל בדיקת הכפילויות. ref כדי שהמאזין
+  // (נרשם פעם אחת) תמיד יפעיל את handleSaveClick העדכני, עם השורות הנוכחיות. e.code
+  // ולא e.key - כשהמקלדת בעברית המקש S כותב "ד", והקיצור צריך לעבוד בכל שפה. capture
+  // כדי שיתפס לפני ה-DataGrid או קלט בתא שעוצרים את האירוע. preventDefault - בלי זה
+  // הדפדפן פותח את חלון "שמירת הדף" שלו
+  const saveShortcutRef = useRef(handleSaveClick);
+  saveShortcutRef.current = handleSaveClick;
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.code !== 'KeyS') return;
+      event.preventDefault();
+      if (duplicateDialogOpenRef.current) return;
+      saveShortcutRef.current();
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, []);
 
   // לפי הבחירה של המשתמשת בכל קבוצה - 'both' או ה-id של השורה שנשארת. ברירת מחדל - בדיקה לא נבחרה נשארת 'both' (לא מוחקת בלי בחירה מפורשת)
   const handleConfirmDuplicates = () => {
@@ -496,24 +541,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     setDuplicateGroups([]);
   };
 
-  // "שמור בכל זאת" - מתעלמים מהשדות הבעייתיים ושומרים את הטבלה כמו שהיא
-  const handleSaveAnyway = () => {
-    setSaveAnywayDialogOpen(false);
-    onSave(rows, pendingExtraDeleteIdsRef.current);
-    pendingExtraDeleteIdsRef.current = [];
-  };
-
-  // "לתקן עכשיו" - נכנסים לתהליך הקפיצה האוטומטית לתיקון השדות, כמו שהיה קודם
-  const handleFixProblemsNow = () => {
-    setSaveAnywayDialogOpen(false);
+  // כפתור "תיקון שדות" - נכנסים לתהליך הקפיצה האוטומטית בין כל השדות החסרים/השגויים
+  // שיש כרגע בטבלה (allProblems), בלי קשר לשמירה. לא שומר כלום בעצמו
+  const handleShowProblems = () => {
     // מנקים סינון/מיון כדי שכל השורות יהיו גלויות בסדר קבוע - כדי שאפשר יהיה לקפוץ ביניהן
     setActiveFilters([]);
     setInputValue('');
     setSortModel([]);
-    setProblemQueue(pendingProblems);
-    // לא שומרים עכשיו בכלל (המשתמשת בחרה לתקן קודם) - מזהי המחיקה הממתינים מסבב
-    // כפילויות קודם כבר לא רלוונטיים לניסיון השמירה הבא, שיבדוק כפילויות מחדש בעצמו
-    pendingExtraDeleteIdsRef.current = [];
+    setProblemQueue(allProblems);
   };
 
   const handlePrintLabels = () => {
@@ -521,6 +556,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     if (onOpenPrint) onOpenPrint();
   };
 
+  // אותו שם כמו ב-fix/csv-export של רחלי (שם התוכן נכתב מחדש, בלי הכוכביות
+  // בכותרות) - כדי שבמיזוג רק התוכן שלה יחליף את זה, בלי לשנות את מי שקורא לה
   const handleDownloadCsv = () => {
     setExportMenuAnchor(null);
 
@@ -540,6 +577,27 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     link.download = 'רשימת מוזמנים.csv';
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  // קובץ אקסל אמיתי (.xlsx) - בדיוק העמודות שמוצגות בטבלה, באותו סדר, והשורות כפי
+  // שהן מוצגות (אחרי סינון ומיון), כמו ההורדה כ-CSV. בלי עמודת תיבות הסימון, בלי
+  // ה"*" של שדות חובה בכותרות, "הדפסה" ככן/לא, וגיליון מימין לשמאל
+  const handleDownloadXlsx = () => {
+    setExportMenuAnchor(null);
+    const columns = apiRef.current.getVisibleColumns().filter((col) => !col.field.startsWith('__') && col.headerName);
+    const headers = columns.map((col) => String(col.headerName).replace(/\s*\*$/, ''));
+    const body = gridFilteredSortedRowEntriesSelector(apiRef).map(({ model }) =>
+      columns.map((col) => {
+        const value = model[col.field];
+        if (col.field === 'print') return value ? 'כן' : 'לא';
+        return value ?? '';
+      })
+    );
+    const sheet = XLSX.utils.aoa_to_sheet([headers, ...body]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'מוזמנים');
+    workbook.Workbook = { Views: [{ RTL: true }] };
+    XLSX.writeFile(workbook, 'רשימת מוזמנים.xlsx');
   };
 
   // שורה חדשה וריקה, עם id מקומי-לתצוגה בלבד (לא hashCode אמיתי - ר' handleSave)
@@ -1049,6 +1107,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           checked={Boolean(value)}
           onChange={(event) => updateCellValue(id, field, event.target.checked)}
           onClick={(event) => event.stopPropagation()}
+          onFocus={() => setActiveRowId(id)}
         />
       </Box>
     );
@@ -1074,11 +1133,17 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     setActiveFilters(activeFilters.filter((c) => c !== chipToRemove));
   };
 
+  // התנאים של חלון "סינון" (ר' FilterBuilder.jsx): [{ id, field, mode, values }].
+  // filterBuilderAnchor - הכפתור שהחלון פתוח ממנו, או null כשהוא סגור
+  const [filterConditions, setFilterConditions] = useState([]);
+  const [filterBuilderAnchor, setFilterBuilderAnchor] = useState(null);
+
   const handleFullReset = () => {
     setActiveFilters([]);
     setInputValue('');
     setSortModel([]);
     setSecondarySortFields([]);
+    setFilterConditions([]);
   };
 
   // שדות "פרטי אורח" בלבד (לא שדות מערכת/ביקורת כמו נוצר ע"י/שונה ע"י/מפתח) -
@@ -1090,7 +1155,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   );
 
   // לוגיקת תת-הסינון והפילטור המשולב
-  const filteredRows = useMemo(() => {
+  const searchedRows = useMemo(() => {
     const currentWord = inputValue.trim().toLowerCase();
     const allWords = [...activeFilters.map(f => f.toLowerCase())];
     if (currentWord) allWords.push(currentWord);
@@ -1106,6 +1171,44 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       );
     });
   }, [rows, activeFilters, inputValue, searchableFieldNames]);
+
+  // אחרי החיפוש - הסינון לפי עמודות. אלה השורות שהטבלה מציגה (וש"בחר הכל" מסמן)
+  const columnFilters = useMemo(() => conditionsToFilters(filterConditions), [filterConditions]);
+  const filteredRows = useMemo(
+    () => applyColumnFilters(searchedRows, columnFilters),
+    [searchedRows, columnFilters]
+  );
+
+  // רשימת הערכים של עמודה בחלון הסינון - מהשורות שעוברות את החיפוש ואת התנאים של
+  // שאר העמודות, כמו באקסל (כדי שלא יוצעו ערכים שבכל מקרה לא יוצגו)
+  const getFilterValues = (field) =>
+    collectColumnValues(applyColumnFilters(searchedRows, withoutColumnFilter(columnFilters, field)), field);
+
+  // אייקון הסינון בכותרת עמודה פותח את רשימת תיבות הסימון שלה (ColumnValueFilter.jsx).
+  // היא עורכת את אותו תנאי של העמודה שבחלון "סינון" - כך שתי הדרכים תמיד מסונכרנות
+  const [columnFilterMenu, setColumnFilterMenu] = useState(null);
+  const handleColumnFilterChange = (filter) => {
+    if (!columnFilterMenu) return;
+    const { field } = columnFilterMenu;
+    setFilterConditions((prev) => {
+      if (!filter) return prev.filter((c) => c.field !== field);
+      if (prev.some((c) => c.field === field)) {
+        return prev.map((c) => (c.field === field ? { ...c, mode: filter.mode, values: filter.values } : c));
+      }
+      return [...prev, { ...newCondition(), field, mode: filter.mode, values: filter.values }];
+    });
+  };
+  const columnFilterContext = useMemo(() => ({
+    activeFields: new Set(Object.keys(columnFilters)),
+    openFilterMenu: (field, headerName, anchorEl) => setColumnFilterMenu({ field, headerName, anchorEl }),
+  }), [columnFilters]);
+
+  // ההדפסה בלי שורות מסומנות מדפיסה את מה שהטבלה מציגה - כשיש חיפוש או סינון, רק את
+  // השורות שעברו אותם (ר' VisibleRowsContext). null = אין סינון, מדפיסים הכל כמו קודם
+  const visibleRowsRef = useContext(VisibleRowsContext);
+  useEffect(() => {
+    if (visibleRowsRef) visibleRowsRef.current = filteredRows === rows ? null : filteredRows;
+  }, [visibleRowsRef, filteredRows, rows]);
 
   // ref בנוסף למשתנה עצמו - כדי שאפקט "הקפיצה לתא הבעייתי" (ראו למטה) יוכל לקרוא
   // תמיד את השורות העדכניות ביותר, בלי להיות תלוי ב-filteredRows כ-dependency: אחרת
@@ -1214,14 +1317,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         if (remaining.length !== prev.length) {
           // התור באמת השתנה (תא תוקן) - מעדכנים אותו, ומדכאים את הקפיצה האוטומטית
           // של האפקט למטה: הקפיצה עצמה מטופלת כאן ישירות, רק כשיצאו עם Enter
+          // כשהתור מתרוקן התהליך פשוט נגמר - לא שומרים אוטומטית (התיקון כבר לא חלק
+          // מהשמירה, ר' handleShowProblems). שומרים כרגיל ב"שמור את כל המוזמנים"
           suppressNextJumpRef.current = true;
-          if (remaining.length === 0 && prev.length > 0) {
-            // pendingExtraDeleteIdsRef כבר תמיד ריק בנקודה הזו (handleFixProblemsNow
-            // מאפס אותו לפני שמגיעים לכאן בכלל) - משלבים אותו במפורש בכל זאת, כדי
-            // שכל קריאה ל-onSave בקובץ הזה תשלח את שני הפרמטרים באותו אופן, בלי
-            // להסתמך על ברירת המחדל של handleSave לשמור על התנהגות נכונה
-            onSave(rowsRef.current, pendingExtraDeleteIdsRef.current);
-          }
           setProblemQueue(remaining);
         }
 
@@ -1330,7 +1428,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       const headerEl = event.target.closest ? event.target.closest('.MuiDataGrid-columnHeader[data-field]') : null;
       if (!headerEl) return;
       const isExcluded = event.target.closest(
-        '[data-sort-icon="true"], .MuiDataGrid-menuIcon, .MuiDataGrid-columnSeparator, .MuiDataGrid-checkboxInput'
+        '[data-sort-icon="true"], [data-filter-icon="true"], .MuiDataGrid-menuIcon, .MuiDataGrid-columnSeparator, .MuiDataGrid-checkboxInput'
       );
       if (isExcluded) return;
       const field = headerEl.getAttribute('data-field');
@@ -1600,7 +1698,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     setColumnVisibilityModel(model);
   }, [fieldDefs, columnPreferences]);
 
-  // בכל פעם שתור התיקונים מתעדכן (שמירה נחסמה, או שתוקן תא אחד וקפצנו לבא) -
+  // בכל פעם שתור התיקונים מתעדכן (לחיצה על "תיקון שדות", או שתוקן תא אחד וקפצנו לבא) -
   // גוללים אל התא הראשון בתור וממקדים ישירות ב-input שבתוכו (התאים הם קלטים חיים
   // תמיד, לא מסתמכים על מצב עריכה של ה-DataGrid, אז אין צורך "לפתוח" עריכה בכלל)
   useEffect(() => {
@@ -1608,7 +1706,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     // אם התור התרוקן בדיוק בפעם שדוכאה קפיצה (למשל לחיצת עכבר, לא Enter), הדגל היה
     // נשאר "תקוע" true ומדכא בטעות גם את הקפיצה הבאה האמיתית (למשל אחרי Enter אמיתי).
     // handleFocusOut כבר מטפל בעצמו בקפיצה (jumpToProblem) כשיוצאים עם Enter - האפקט
-    // הזה אחראי רק על המקרה שהתור מתעדכן מבחוץ (בעיקר בלחיצה על "שמור")
+    // הזה אחראי רק על המקרה שהתור מתעדכן מבחוץ (בעיקר בלחיצה על "תיקון שדות")
     const shouldSuppress = suppressNextJumpRef.current;
     suppressNextJumpRef.current = false;
     if (problemQueue.length === 0 || !apiRef.current || shouldSuppress) return undefined;
@@ -1659,7 +1757,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           </Typography>
 
           <TextField
-            label="הקלידי ערך ולחצי Enter לנעילת סינון/פילטור..."
+            label="חיפוש בכל העמודות - הקלידי ולחצי Enter..."
             size="small"
             value={inputValue}
             onChange={handleInputChange}
@@ -1674,6 +1772,47 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             }}
           />
 
+          {/* סינון לפי עמודות - כפתור אחד שפותח את חלון התנאים, ואחריו תגית לכל תנאי
+              פעיל (לחיצה עליה פותחת את החלון, ה-X מוחק אותו) */}
+          <Button
+            variant={Object.keys(columnFilters).length > 0 ? 'contained' : 'outlined'}
+            size="small"
+            startIcon={<FilterListIcon sx={{ fontSize: '1rem !important' }} />}
+            onClick={(e) => setFilterBuilderAnchor(e.currentTarget)}
+            sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
+          >
+            סינון{Object.keys(columnFilters).length > 0 ? ` (${Object.keys(columnFilters).length})` : ''}
+          </Button>
+          {filterConditions.filter((c) => c.field && c.values.length > 0).map((condition) => {
+            const label = displayFieldDefs.find((f) => f.technicalName === condition.field)?.displayName || condition.field;
+            const values = condition.values.map(valueLabel).join(', ');
+            return (
+              <Chip
+                key={condition.id}
+                size="small"
+                color="primary"
+                variant="outlined"
+                label={`${label}: ${condition.mode === 'exclude' ? 'חוץ מ' : ''}${values}`}
+                onClick={(e) => setFilterBuilderAnchor(e.currentTarget)}
+                onDelete={() => setFilterConditions((prev) => prev.filter((c) => c.id !== condition.id))}
+                sx={{ maxWidth: 260 }}
+              />
+            );
+          })}
+          <FilterBuilder
+            anchorEl={filterBuilderAnchor}
+            onClose={() => setFilterBuilderAnchor(null)}
+            // רק העמודות שמוצגות בטבלה, באותו סדר (ועמודה שהוסתרה אחרי שכבר סוננה לפיה -
+            // נשארת ברשימה, כדי שאפשר יהיה לראות ולהסיר את התנאי שלה)
+            fields={displayFieldDefs
+              .filter((f) => columnVisibilityModel[f.technicalName] !== false
+                || filterConditions.some((c) => c.field === f.technicalName))
+              .map((f) => ({ field: f.technicalName, label: f.displayName }))}
+            conditions={filterConditions}
+            onChange={setFilterConditions}
+            getValues={getFilterValues}
+          />
+
           {/* תגיות סינון פעילות + איפוס - ליד תיבת החיפוש עצמה */}
           {activeFilters.map((filter, index) => (
             <Chip
@@ -1686,7 +1825,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             />
           ))}
 
-          {(activeFilters.length > 0 || inputValue.trim() !== '' || sortModel.length > 0 || secondarySortFields.length > 0) && (
+          {(activeFilters.length > 0 || inputValue.trim() !== '' || sortModel.length > 0 || secondarySortFields.length > 0 || filterConditions.length > 0) && (
             <Button
               variant="outlined"
               size="small"
@@ -1756,6 +1895,17 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         <Stack direction="row" spacing={1}>
           <ExcelImport onImport={onImport} />
 
+          {/* הדפסה ויצוא הם שני כפתורים נפרדים (#87) - "הדפסה" פותח ישר את חלון
+              הדפסת המדבקות (כמו Ctrl+P), ו"יצוא" מכיל רק את אפשרויות ההורדה */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handlePrintLabels}
+            sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
+          >
+            הדפסה
+          </Button>
+
           <Button
             variant="outlined"
             size="small"
@@ -1774,13 +1924,34 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           >
             הוסף שורה
           </Button>
+          {/* שדות חובה ריקים או ערכים לא תקינים בכל הטבלה - המספר מתעדכן חי עם כל
+              עריכה (allProblems), ולחיצה קופצת לשדה הראשון ומשם לבא אחרי כל תיקון.
+              ה-span סביב הכפתור - Tooltip לא מקבל אירועי ריחוף מכפתור disabled */}
+          <Tooltip title="השלמת מידע ותיקון בעיות בשדות">
+            <span>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleShowProblems}
+                disabled={allProblems.length === 0}
+                sx={{
+                  ...TOOLBAR_BUTTON_SX,
+                  whiteSpace: 'nowrap',
+                  ...(allProblems.length > 0 && { color: '#b45309', borderColor: '#f59e0b' }),
+                }}
+              >
+                תיקון שדות ({allProblems.length})
+              </Button>
+            </span>
+          </Tooltip>
           <Button
             variant="outlined"
             size="small"
             onClick={handleSaveClick}
+            title="Ctrl+S"
             sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
           >
-            שמור את כל המוזמנים
+            שמור
           </Button>
         </Stack>
       </Box>
@@ -1791,6 +1962,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
        המחיקה/הסטוריה הצפים למטה - ה-DataGrid מקבל את השטח שנשאר ופיזית לא יכול
        לרנדר אף עמודה, לא משנה כמה תורחב, אל תוך השוליים השמורים האלה */}
    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', paddingInlineEnd: `${ROW_ICON_GUTTER_PX}px` }}>
+   <ColumnFilterContext.Provider value={columnFilterContext}>
    <DataGrid
         apiRef={apiRef}
         rows={filteredRows}
@@ -1807,7 +1979,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         // השמורים מחוץ לתחום הרינדור של הטבלה - שם ה-hover הטבעי (CSS) לא עובד כי
         // העכבר לא באמת מעל אלמנט השורה. משתמשת ב-hoveredRow (שנשאר מדויק גם כשהעכבר
         // עובר לאייקון, ר' handleMouseMove) במקום להסתמך רק על :hover
-        getRowClassName={(params) => (hoveredRow?.inGutter && String(params.id) === String(hoveredRow?.id) ? 'app-row-hovered' : '')}
+        getRowClassName={(params) => {
+          const classes = [];
+          if (String(params.id) === String(activeRowId)) classes.push('app-active-row');
+          if (hoveredRow?.inGutter && String(params.id) === String(hoveredRow.id)) classes.push('app-row-hovered');
+          return classes.join(' ');
+        }}
+        onCellClick={(params) => setActiveRowId(params.id)}
+        onCellFocusIn={(params) => setActiveRowId(params.id)}
         getCellClassName={(params) => {
           // התא שעליו נלחץ קליק ימני (בזמן שתפריט "העבר להערת כתובת" פתוח) - מודגש
           // כדי שיהיה ברור על איזה ערך מדובר. יורד אוטומטית כשהתפריט נסגר (contextMenu
@@ -1820,8 +1999,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             return 'context-menu-target-cell';
           }
 
-          // צביעה בכלל לא קורית לפני שהיה ניסיון שמירה שנחסם - שורה חדשה/ריקה לא נצבעת
-          // מיד, רק אחרי שלוחצים "שמור את כל המוזמנים" ונמצאות בעיות בפועל
+          // צביעה בכלל לא קורית לפני שלוחצים על "תיקון שדות" - שורה חדשה/ריקה לא נצבעת
+          // מיד בזמן שממלאים אותה, רק כשבוחרים במפורש לעבור על השדות לתיקון
           if (problemQueue.length === 0) return '';
 
           // התא הספציפי שקפצנו אליו כרגע (הראשון בתור התיקונים) - מודגש הרבה יותר חזק
@@ -1874,6 +2053,13 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           // getRowClassName למעלה
           '& .MuiDataGrid-row.app-row-hovered': {
             backgroundColor: '#eff6ff !important',
+          },
+          '& .MuiDataGrid-row.app-active-row': {
+            boxShadow: 'inset 0 0 0 1.5px #60a5fa',
+            zIndex: 1,
+          },
+          '& .MuiDataGrid-row.app-active-row:not(.Mui-selected)': {
+            backgroundColor: '#f8fbff !important',
           },
           '& .MuiDataGrid-footerContainer': {
             borderTop: '2px solid #e2e8f0',
@@ -1931,11 +2117,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         onColumnVisibilityModelChange={(model) => setColumnVisibilityModel(model)}
         initialState={{
           pagination: {
-            paginationModel: { pageSize: 25 },
+            paginationModel: { pageSize: readSavedPageSize() },
           },
         }}
-        pageSizeOptions={[25, 50, 100]}
+        onPaginationModelChange={(model) => savePageSize(model.pageSize)}
+        pageSizeOptions={PAGE_SIZE_OPTIONS}
         localeText={{
+          noRowsLabel: 'לא נמצאו רשומות',
+          noResultsOverlayLabel: 'לא נמצאו תוצאות',
           toolbarLabel: 'כלים',
           toolbarDensityLabel: 'צפיפות',
           toolbarDensityCompact: 'קומפקטי',
@@ -2002,6 +2191,18 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         sortModel={sortModel}
         onSortModelChange={(model) => setSortModel(model)}
       />
+      </ColumnFilterContext.Provider>
+      {columnFilterMenu && (
+        <ColumnFilterMenu
+          key={columnFilterMenu.field}
+          anchorEl={columnFilterMenu.anchorEl}
+          headerName={columnFilterMenu.headerName}
+          values={getFilterValues(columnFilterMenu.field)}
+          filter={columnFilters[columnFilterMenu.field] || null}
+          onChange={handleColumnFilterChange}
+          onClose={() => setColumnFilterMenu(null)}
+        />
+      )}
       </Box>
       {hoveredRow && (
         <IconButton
@@ -2114,15 +2315,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         anchorEl={exportMenuAnchor}
         onClose={() => setExportMenuAnchor(null)}
       >
-        <MenuItem onClick={handlePrintLabels} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
-          <LocalPrintshopOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
-          הדפסת מדבקות
-        </MenuItem>
         <MenuItem onClick={handleDownloadCsv} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
           <FileDownloadOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
-          הורדת קובץ CSV למחשב
+          הורדה כ-CSV
         </MenuItem>
-      </Menu>
+       
 
       <Menu
         open={contextMenu !== null}
@@ -2258,25 +2455,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         </DialogActions>
       </Dialog>
 
-      {/* disableRestoreFocus - בלי זה ה-Dialog "מחזיר" את הפוקוס לכפתור השמירה אחרי
-          שהוא נסגר, וזה מתנגש עם הקפיצה האוטומטית לתא הבעייתי שקורית באותו רגע בדיוק */}
-      <Dialog open={saveAnywayDialogOpen} onClose={handleFixProblemsNow} disableRestoreFocus>
-        <DialogTitle>יש שדות שגויים או חסרים</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            נמצאו {pendingProblems.length} שדות שדורשים תיקון (חובה שריקים או ערכים לא תקינים).
-            אפשר לתקן אותם עכשיו, או לשמור בכל זאת כמו שהטבלה נמצאת עכשיו.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleFixProblemsNow} color="primary">
-            לתקן עכשיו
-          </Button>
-          <Button onClick={handleSaveAnyway} color="error" variant="contained">
-            שמור בכל זאת
-          </Button>
-        </DialogActions>
-      </Dialog>
       {/* חלונית היסטוריית שינויים - נפתחת מאייקון ההסטוריה הצף על שורה (handleOpenHistory).
           לחיצה על שורת היסטוריה משחזרת את הערכים הישנים לתוך השורה הנוכחית בטבלה
           (handleRestoreFromHistory) - בדיוק כמו עריכה רגילה של תא, נשמר בפועל רק
