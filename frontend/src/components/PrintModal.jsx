@@ -5,6 +5,7 @@ import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import { useNavigate } from 'react-router-dom';
 import { loadLabelPrintSettings, saveLabelPrintSettings } from '../utils/labelPrintSettings';
+import { orderLikeTable } from '../utils/printOrder';
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
 import { MODAL_TEXTS, FONT_OPTIONS } from '../pages/HardCodePage';
 import {
@@ -134,11 +135,13 @@ function LabelSheetPreview({ labelSize }) {
 
 export default function PrintModal({ open, onClose, selectedRows, records: allRecords = [], visibleRows = null }) {
   const navigate = useNavigate();
-  // כשהטבלה מסוננת (חיפוש או חלון "סינון") - "כולן" הן השורות שמוצגות בה, לא כל הרשימה
-  const records = visibleRows || allRecords;
+  // visibleRows - { rows, filtered } מהטבלה (ר' VisibleRowsContext). כשהטבלה מסוננת (חיפוש
+  // או חלון "סינון") - "כולן" הן השורות שמוצגות בה, לא כל הרשימה
+  const records = visibleRows?.filtered ? visibleRows.rows : allRecords;
 
-  // אם לא סימנו אף שורה - מדפיסים את כולן, במקום לא להדפיס כלום
-  const rowsToPrint = (selectedRows.length > 0 ? selectedRows : records)
+  // אם לא סימנו אף שורה - מדפיסים את כולן, במקום לא להדפיס כלום. בכל מקרה - בסדר המיון
+  // של הטבלה, גם שורות שסומנו (אחרת היו יוצאות בסדר שבו סימנו אותן)
+  const rowsToPrint = orderLikeTable(selectedRows.length > 0 ? selectedRows : records, visibleRows?.rows)
     .filter((row) => row.printEnabled !== false);
   
   // 1. בדיקה בטוחה עבור השלב (Step)

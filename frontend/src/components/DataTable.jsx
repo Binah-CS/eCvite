@@ -1410,12 +1410,21 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     openFilterMenu: (field, headerName, anchorEl) => setColumnFilterMenu({ field, headerName, anchorEl }),
   }), [columnFilters]);
 
-  // ההדפסה בלי שורות מסומנות מדפיסה את מה שהטבלה מציגה - כשיש חיפוש או סינון, רק את
-  // השורות שעברו אותם (ר' VisibleRowsContext). null = אין סינון, מדפיסים הכל כמו קודם
+  // ההדפסה מדפיסה את השורות כמו שהטבלה מציגה אותן (ר' VisibleRowsContext): rows - אחרי
+  // החיפוש והסינון, ובסדר המיון של הטבלה (נקרא מה-DataGrid עצמו, כולל תתי-מיון);
+  // filtered - האם יש חיפוש/סינון (בלי שורות מסומנות מדפיסים רק אותן). פונקציה ולא
+  // ערך - נקראת רק כשחלון ההדפסה נפתח, ולכן תמיד מחזירה את המיון העדכני
   const visibleRowsRef = useContext(VisibleRowsContext);
   useEffect(() => {
-    if (visibleRowsRef) visibleRowsRef.current = filteredRows === rows ? null : filteredRows;
-  }, [visibleRowsRef, filteredRows, rows]);
+    if (!visibleRowsRef) return undefined;
+    visibleRowsRef.current = () => ({
+      rows: apiRef.current?.state
+        ? gridFilteredSortedRowEntriesSelector(apiRef).map(({ model }) => model)
+        : filteredRows,
+      filtered: filteredRows !== rows,
+    });
+    return () => { visibleRowsRef.current = null; };
+  }, [visibleRowsRef, filteredRows, rows, apiRef]);
 
   // ref בנוסף למשתנה עצמו - כדי שאפקט "הקפיצה לתא הבעייתי" (ראו למטה) יוכל לקרוא
   // תמיד את השורות העדכניות ביותר, בלי להיות תלוי ב-filteredRows כ-dependency: אחרת

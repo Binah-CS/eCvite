@@ -1,5 +1,5 @@
 -- פונקציית H2 מינימלית שמחליפה את set_config של Postgres (לא קיימת ב-H2 בכלל) -
--- כדי ש-RecipientController.stampCurrentUserForHistory לא ייכשל כשרץ מול מסד
+-- כדי ש-RecipientController.findUserHashAndStampForHistory לא ייכשל כשרץ מול מסד
 -- הבדיקות. לא נוגעת בקוד הייצור בכלל - תשתית בדיקות בלבד
 CREATE ALIAS IF NOT EXISTS SET_CONFIG FOR "com.example.excelapp.testsupport.H2TestFunctions.setConfig";
 

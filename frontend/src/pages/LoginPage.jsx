@@ -30,6 +30,16 @@ export default function LoginPage() {
       const response = await api.login({ name, phone });
 
       sessionStorage.setItem('user', JSON.stringify(response.data));
+      // אחרי כל התחברות, הטעינה הראשונה של הטבלה מגיעה מהשרת ולא מהעותק המקומי - כדי
+      // לראות שינויים שנעשו בינתיים ממקום אחר (משתמשת אחרת שחולקת נמענים, או מחשב
+      // אחר). רענונים אחר כך שוב מהעותק המקומי (ר' DashboardPage). רק דגל 'true' מתאפס -
+      // 'false' (עריכות שלא נשמרו) נשאר, כדי שהטעינה לא תדרוס אותן
+      try {
+        const syncedKey = `records-synced-${response.data?.phone}`;
+        if (localStorage.getItem(syncedKey) === 'true') localStorage.removeItem(syncedKey);
+      } catch {
+        // אחסון חסום - אין עותק מקומי ממילא
+      }
       // Load the definitions once for this login, before the dashboard mounts.
       // Components consume the cached result and do not issue their own request.
       await refreshExcelColumns();
