@@ -83,13 +83,6 @@ const api = {
             hashCodesToDelete
         }),
 
-  updatePrintPreferences: (phone, recipientHashCodes, printEnabled) =>
-      apiClient.put('/recipients/print-preferences', {
-        phone,
-        recipientHashCodes,
-        printEnabled,
-      }),
-
   importRecipients: (phone, recipients) =>
       apiClient.post('/recipients/import', { phone, recipients }),
 

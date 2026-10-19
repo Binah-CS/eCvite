@@ -58,13 +58,13 @@ public class Recipients {
     @Column(name = "created_by")
     private String createdBy;
 
-    @Transient
-    private Boolean printEnabled;
-
-    // נשמר לתאימות עם רשומות ובדיקות ישנות; העדפת ההדפסה הפעילה נשמרת לפי משתמש
-    // ב-RecipientPrintPreference ומוחזרת דרך printEnabled.
+    // הווי "הדפסה" כפי שהוא מוצג למשתמשת המחוברת. מקור האמת הוא UserRecipients.print
+    // (לכל משתמשת בנפרד) - RecipientController מעתיק אותו לכאן בטעינה וכותב אותו לשם
+    // בשמירה. העמודה הישנה ב-recipients נשארת רק כברירת מחדל לקישורים ישנים: נכתבת
+    // ביצירת נמען (היא חובה בטבלה), אבל לא מתעדכנת אחר כך - כדי שהווי של משתמשת אחת
+    // לא ישנה את ברירת המחדל של משתמשות אחרות שחולקות את אותו נמען
+    @Column(name = "print", updatable = false)
     private boolean print;
-
     private String display;
 
     @Column(name = "address_note")
