@@ -172,6 +172,11 @@ export default function PrintPreviewPage() {
     : greetingAlign === 'left'
       ? 'end'
       : 'center';
+  const greetingInsetSx = greetingAlign === 'right'
+    ? { marginInlineStart: '1mm' }
+    : greetingAlign === 'left'
+      ? { marginInlineEnd: '1mm' }
+      : {};
   const nameLineSx = {
     fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
     lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
@@ -344,7 +349,7 @@ export default function PrintPreviewPage() {
                 {greetingLine && (
                   <Typography
                     variant={layout.nameVariant}
-                    sx={{ ...nameLineSx, mb: 0, alignSelf: 'stretch', textAlign: greetingTextAlign }}
+                    sx={{ ...nameLineSx, ...greetingInsetSx, mb: 0, alignSelf: 'stretch', textAlign: greetingTextAlign }}
                   >
                     {greetingLine}
                   </Typography>
