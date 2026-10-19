@@ -4,16 +4,22 @@ import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined';
-import LocalPrintshopOutlinedIcon from '@mui/icons-material/LocalPrintshopOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import AddIcon from '@mui/icons-material/Add';
-import { DataGrid, useGridApiRef } from '@mui/x-data-grid';
+import { DataGrid, useGridApiRef, gridFilteredSortedRowEntriesSelector } from '@mui/x-data-grid';
+import * as XLSX from 'xlsx';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
 import api from '../services/api';
 import { buildIdentityKey } from '../utils/recipientIdentity';
+import { useContext } from 'react';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import FilterBuilder, { valueLabel, newCondition } from './FilterBuilder';
+import { ColumnFilterContext, ColumnFilterButton, ColumnFilterMenu } from './ColumnValueFilter';
+import { applyColumnFilters, collectColumnValues, conditionsToFilters, withoutColumnFilter } from '../utils/columnFilters';
+import { VisibleRowsContext } from '../utils/visibleRowsContext';
 
 // מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
 const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
@@ -187,6 +193,7 @@ function ColumnHeader({
       >
         {headerName}
       </Typography>
+      <ColumnFilterButton field={field} headerName={headerName} />
       <IconButton
         size="small"
         data-sort-icon="true"
@@ -569,9 +576,32 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     if (onOpenPrint) await onOpenPrint();
   };
 
-  const handleDownloadExcel = () => {
+  // אותו שם כמו ב-fix/csv-export של רחלי (שם התוכן נכתב מחדש, בלי הכוכביות
+  // בכותרות) - כדי שבמיזוג רק התוכן שלה יחליף את זה, בלי לשנות את מי שקורא לה
+  const handleDownloadCsv = () => {
     setExportMenuAnchor(null);
     apiRef.current.exportDataAsCsv({ utf8WithBom: true });
+  };
+
+  // קובץ אקסל אמיתי (.xlsx) - בדיוק העמודות שמוצגות בטבלה, באותו סדר, והשורות כפי
+  // שהן מוצגות (אחרי סינון ומיון), כמו ההורדה כ-CSV. בלי עמודת תיבות הסימון, בלי
+  // ה"*" של שדות חובה בכותרות, "הדפסה" ככן/לא, וגיליון מימין לשמאל
+  const handleDownloadXlsx = () => {
+    setExportMenuAnchor(null);
+    const columns = apiRef.current.getVisibleColumns().filter((col) => !col.field.startsWith('__') && col.headerName);
+    const headers = columns.map((col) => String(col.headerName).replace(/\s*\*$/, ''));
+    const body = gridFilteredSortedRowEntriesSelector(apiRef).map(({ model }) =>
+      columns.map((col) => {
+        const value = model[col.field];
+        if (col.field === 'print') return value ? 'כן' : 'לא';
+        return value ?? '';
+      })
+    );
+    const sheet = XLSX.utils.aoa_to_sheet([headers, ...body]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'מוזמנים');
+    workbook.Workbook = { Views: [{ RTL: true }] };
+    XLSX.writeFile(workbook, 'רשימת מוזמנים.xlsx');
   };
 
   // שורה חדשה וריקה, עם id מקומי-לתצוגה בלבד (לא hashCode אמיתי - ר' handleSave)
@@ -1139,7 +1169,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
             // ללחוץ בנפרד על חץ - אפשר עדיין להקליד חופשי במקביל. כניסה לעריכה תמיד
             // חושפת את הטקסט המלא (גם אם "שייך ל" מכווץ כרגע), ויציאה ממנה מכווצת שוב
             onFocus={() => {
-              setActiveRowId(id);
               setIsFocused(true);
               setExpanded(true);
               if (pickListField) openMenu();
@@ -1310,11 +1339,17 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     setActiveFilters(activeFilters.filter((c) => c !== chipToRemove));
   };
 
+  // התנאים של חלון "סינון" (ר' FilterBuilder.jsx): [{ id, field, mode, values }].
+  // filterBuilderAnchor - הכפתור שהחלון פתוח ממנו, או null כשהוא סגור
+  const [filterConditions, setFilterConditions] = useState([]);
+  const [filterBuilderAnchor, setFilterBuilderAnchor] = useState(null);
+
   const handleFullReset = () => {
     setActiveFilters([]);
     setInputValue('');
     setSortModel([]);
     setSecondarySortFields([]);
+    setFilterConditions([]);
   };
 
   // שדות "פרטי אורח" בלבד (לא שדות מערכת/ביקורת כמו נוצר ע"י/שונה ע"י/מפתח) -
@@ -1326,7 +1361,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   );
 
   // לוגיקת תת-הסינון והפילטור המשולב
-  const filteredRows = useMemo(() => {
+  const searchedRows = useMemo(() => {
     const currentWord = inputValue.trim().toLowerCase();
     const allWords = [...activeFilters.map(f => f.toLowerCase())];
     if (currentWord) allWords.push(currentWord);
@@ -1342,6 +1377,44 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
       );
     });
   }, [rows, activeFilters, inputValue, searchableFieldNames]);
+
+  // אחרי החיפוש - הסינון לפי עמודות. אלה השורות שהטבלה מציגה (וש"בחר הכל" מסמן)
+  const columnFilters = useMemo(() => conditionsToFilters(filterConditions), [filterConditions]);
+  const filteredRows = useMemo(
+    () => applyColumnFilters(searchedRows, columnFilters),
+    [searchedRows, columnFilters]
+  );
+
+  // רשימת הערכים של עמודה בחלון הסינון - מהשורות שעוברות את החיפוש ואת התנאים של
+  // שאר העמודות, כמו באקסל (כדי שלא יוצעו ערכים שבכל מקרה לא יוצגו)
+  const getFilterValues = (field) =>
+    collectColumnValues(applyColumnFilters(searchedRows, withoutColumnFilter(columnFilters, field)), field);
+
+  // אייקון הסינון בכותרת עמודה פותח את רשימת תיבות הסימון שלה (ColumnValueFilter.jsx).
+  // היא עורכת את אותו תנאי של העמודה שבחלון "סינון" - כך שתי הדרכים תמיד מסונכרנות
+  const [columnFilterMenu, setColumnFilterMenu] = useState(null);
+  const handleColumnFilterChange = (filter) => {
+    if (!columnFilterMenu) return;
+    const { field } = columnFilterMenu;
+    setFilterConditions((prev) => {
+      if (!filter) return prev.filter((c) => c.field !== field);
+      if (prev.some((c) => c.field === field)) {
+        return prev.map((c) => (c.field === field ? { ...c, mode: filter.mode, values: filter.values } : c));
+      }
+      return [...prev, { ...newCondition(), field, mode: filter.mode, values: filter.values }];
+    });
+  };
+  const columnFilterContext = useMemo(() => ({
+    activeFields: new Set(Object.keys(columnFilters)),
+    openFilterMenu: (field, headerName, anchorEl) => setColumnFilterMenu({ field, headerName, anchorEl }),
+  }), [columnFilters]);
+
+  // ההדפסה בלי שורות מסומנות מדפיסה את מה שהטבלה מציגה - כשיש חיפוש או סינון, רק את
+  // השורות שעברו אותם (ר' VisibleRowsContext). null = אין סינון, מדפיסים הכל כמו קודם
+  const visibleRowsRef = useContext(VisibleRowsContext);
+  useEffect(() => {
+    if (visibleRowsRef) visibleRowsRef.current = filteredRows === rows ? null : filteredRows;
+  }, [visibleRowsRef, filteredRows, rows]);
 
   // ref בנוסף למשתנה עצמו - כדי שאפקט "הקפיצה לתא הבעייתי" (ראו למטה) יוכל לקרוא
   // תמיד את השורות העדכניות ביותר, בלי להיות תלוי ב-filteredRows כ-dependency: אחרת
@@ -1560,7 +1633,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
       const headerEl = event.target.closest ? event.target.closest('.MuiDataGrid-columnHeader[data-field]') : null;
       if (!headerEl) return;
       const isExcluded = event.target.closest(
-        '[data-sort-icon="true"], .MuiDataGrid-menuIcon, .MuiDataGrid-columnSeparator, .MuiDataGrid-checkboxInput'
+        '[data-sort-icon="true"], [data-filter-icon="true"], .MuiDataGrid-menuIcon, .MuiDataGrid-columnSeparator, .MuiDataGrid-checkboxInput'
       );
       if (isExcluded) return;
       const field = headerEl.getAttribute('data-field');
@@ -1889,7 +1962,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
           </Typography>
 
           <TextField
-            label="הקלידי ערך ולחצי Enter לנעילת סינון/פילטור..."
+            label="חיפוש בכל העמודות - הקלידי ולחצי Enter..."
             size="small"
             value={inputValue}
             onChange={handleInputChange}
@@ -1904,6 +1977,47 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
             }}
           />
 
+          {/* סינון לפי עמודות - כפתור אחד שפותח את חלון התנאים, ואחריו תגית לכל תנאי
+              פעיל (לחיצה עליה פותחת את החלון, ה-X מוחק אותו) */}
+          <Button
+            variant={Object.keys(columnFilters).length > 0 ? 'contained' : 'outlined'}
+            size="small"
+            startIcon={<FilterListIcon sx={{ fontSize: '1rem !important' }} />}
+            onClick={(e) => setFilterBuilderAnchor(e.currentTarget)}
+            sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
+          >
+            סינון{Object.keys(columnFilters).length > 0 ? ` (${Object.keys(columnFilters).length})` : ''}
+          </Button>
+          {filterConditions.filter((c) => c.field && c.values.length > 0).map((condition) => {
+            const label = displayFieldDefs.find((f) => f.technicalName === condition.field)?.displayName || condition.field;
+            const values = condition.values.map(valueLabel).join(', ');
+            return (
+              <Chip
+                key={condition.id}
+                size="small"
+                color="primary"
+                variant="outlined"
+                label={`${label}: ${condition.mode === 'exclude' ? 'חוץ מ' : ''}${values}`}
+                onClick={(e) => setFilterBuilderAnchor(e.currentTarget)}
+                onDelete={() => setFilterConditions((prev) => prev.filter((c) => c.id !== condition.id))}
+                sx={{ maxWidth: 260 }}
+              />
+            );
+          })}
+          <FilterBuilder
+            anchorEl={filterBuilderAnchor}
+            onClose={() => setFilterBuilderAnchor(null)}
+            // רק העמודות שמוצגות בטבלה, באותו סדר (ועמודה שהוסתרה אחרי שכבר סוננה לפיה -
+            // נשארת ברשימה, כדי שאפשר יהיה לראות ולהסיר את התנאי שלה)
+            fields={displayFieldDefs
+              .filter((f) => columnVisibilityModel[f.technicalName] !== false
+                || filterConditions.some((c) => c.field === f.technicalName))
+              .map((f) => ({ field: f.technicalName, label: f.displayName }))}
+            conditions={filterConditions}
+            onChange={setFilterConditions}
+            getValues={getFilterValues}
+          />
+
           {/* תגיות סינון פעילות + איפוס - ליד תיבת החיפוש עצמה */}
           {activeFilters.map((filter, index) => (
             <Chip
@@ -1916,7 +2030,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
             />
           ))}
 
-          {(activeFilters.length > 0 || inputValue.trim() !== '' || sortModel.length > 0 || secondarySortFields.length > 0) && (
+          {(activeFilters.length > 0 || inputValue.trim() !== '' || sortModel.length > 0 || secondarySortFields.length > 0 || filterConditions.length > 0) && (
             <Button
               variant="outlined"
               size="small"
@@ -1986,6 +2100,17 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         <Stack direction="row" spacing={1}>
           <ExcelImport onImport={onImport} />
 
+          {/* הדפסה ויצוא הם שני כפתורים נפרדים (#87) - "הדפסה" פותח ישר את חלון
+              הדפסת המדבקות (כמו Ctrl+P), ו"יצוא" מכיל רק את אפשרויות ההורדה */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handlePrintLabels}
+            sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
+          >
+            הדפסה
+          </Button>
+
           <Button
             variant="outlined"
             size="small"
@@ -2042,6 +2167,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
        המחיקה/הסטוריה הצפים למטה - ה-DataGrid מקבל את השטח שנשאר ופיזית לא יכול
        לרנדר אף עמודה, לא משנה כמה תורחב, אל תוך השוליים השמורים האלה */}
    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', paddingInlineEnd: `${ROW_ICON_GUTTER_PX}px` }}>
+   <ColumnFilterContext.Provider value={columnFilterContext}>
    <DataGrid
         apiRef={apiRef}
         rows={filteredRows}
@@ -2148,8 +2274,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
           '& .MuiDataGrid-row.app-row-hovered': {
             backgroundColor: '#eff6ff !important',
           },
-          // השורה שבה המשתמש עובד נשארת מודגשת גם אחרי שהעכבר זז לתא אחר.
-          // המסגרת בלבד נשארת גם בשורה מסומנת, כדי לא להסתיר את צבע הבחירה שלה.
           '& .MuiDataGrid-row.app-active-row': {
             boxShadow: 'inset 0 0 0 1.5px #60a5fa',
             zIndex: 1,
@@ -2299,6 +2423,18 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         sortModel={sortModel}
         onSortModelChange={(model) => setSortModel(model)}
       />
+      </ColumnFilterContext.Provider>
+      {columnFilterMenu && (
+        <ColumnFilterMenu
+          key={columnFilterMenu.field}
+          anchorEl={columnFilterMenu.anchorEl}
+          headerName={columnFilterMenu.headerName}
+          values={getFilterValues(columnFilterMenu.field)}
+          filter={columnFilters[columnFilterMenu.field] || null}
+          onChange={handleColumnFilterChange}
+          onClose={() => setColumnFilterMenu(null)}
+        />
+      )}
       </Box>
       {hoveredRow && (
         <IconButton
@@ -2411,9 +2547,13 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         anchorEl={exportMenuAnchor}
         onClose={() => setExportMenuAnchor(null)}
       >
-        <MenuItem onClick={handleDownloadExcel} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
+        <MenuItem onClick={handleDownloadCsv} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
           <FileDownloadOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
-          הורדת קובץ אקסל למחשב
+          הורדה כ-CSV
+        </MenuItem>
+        <MenuItem onClick={handleDownloadXlsx} sx={{ gap: 1, py: 0.5, px: 1.25, fontSize: '0.75rem', fontWeight: 600, minHeight: 'unset' }}>
+          <FileDownloadOutlinedIcon sx={{ color: '#475569', fontSize: '1rem' }} />
+          הורדה כ-XLSX (אקסל)
         </MenuItem>
       </Menu>
 

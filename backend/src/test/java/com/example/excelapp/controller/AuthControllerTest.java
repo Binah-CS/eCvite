@@ -140,6 +140,56 @@ class AuthControllerTest {
                 .isEqualTo("{\"city\":{\"show\":false}}");
     }
 
+    // ---------- PUT /api/auth/label-print-settings ----------
+
+    @Test
+    void updateLabelPrintSettings_savesPerUser_withoutTouchingOtherUsers() throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(buildValidUser("0505151515"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(buildValidUser("0505252525"))))
+                .andExpect(status().isOk());
+
+        String settings = "{\"fontWeight\":\"bold\",\"fontScale\":110}";
+        mockMvc.perform(put("/api/auth/label-print-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0505151515", "labelPrintSettings", settings))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.labelPrintSettings").value(settings));
+
+        assertThat(userRepository.findByPhone("0505151515").getLabelPrintSettings()).isEqualTo(settings);
+        assertThat(userRepository.findByPhone("0505252525").getLabelPrintSettings()).isNull();
+    }
+
+    @Test
+    void updateLabelPrintSettings_tooLong_returns400() throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(buildValidUser("0505353535"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/auth/label-print-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0505353535", "labelPrintSettings", "x".repeat(1001)))))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userRepository.findByPhone("0505353535").getLabelPrintSettings()).isNull();
+    }
+
+    @Test
+    void updateLabelPrintSettings_unknownPhone_returns404() throws Exception {
+        mockMvc.perform(put("/api/auth/label-print-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0590000003", "labelPrintSettings", "{}"))))
+                .andExpect(status().isNotFound());
+    }
+
     @Test
     void updateColumnPreferences_unknownPhone_returns404() throws Exception {
         mockMvc.perform(put("/api/auth/column-preferences")
