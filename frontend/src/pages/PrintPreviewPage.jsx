@@ -165,6 +165,18 @@ export default function PrintPreviewPage() {
   const fontBase = LABEL_FONT_BASE_PX[labelSize] || LABEL_FONT_BASE_PX.standard;
   const fontFactor = clampFontScale(fontScale, labelSize) / 100;
   const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
+  // מטמון ה-RTL של MUI הופך left/right פיזיים. start/end נשארים לוגיים ביחס
+  // לכיוון העברי של המדבקה: start הוא ימין ו-end הוא שמאל.
+  const greetingTextAlign = greetingAlign === 'right'
+    ? 'start'
+    : greetingAlign === 'left'
+      ? 'end'
+      : 'center';
+  const greetingInsetSx = greetingAlign === 'right'
+    ? { marginInlineStart: '1mm' }
+    : greetingAlign === 'left'
+      ? { marginInlineEnd: '1mm' }
+      : {};
   const nameLineSx = {
     fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
     lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
@@ -337,7 +349,7 @@ export default function PrintPreviewPage() {
                 {greetingLine && (
                   <Typography
                     variant={layout.nameVariant}
-                    sx={{ ...nameLineSx, mb: 0, alignSelf: 'stretch', textAlign: greetingAlign }}
+                    sx={{ ...nameLineSx, ...greetingInsetSx, mb: 0, alignSelf: 'stretch', textAlign: greetingTextAlign }}
                   >
                     {greetingLine}
                   </Typography>
