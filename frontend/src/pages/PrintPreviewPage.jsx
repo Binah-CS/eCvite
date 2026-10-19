@@ -2,6 +2,7 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Box, Container, Typography, Button, Paper, Stack } from '@mui/material';
+import { styled } from '@mui/material/styles';
 import {
   REAL_LABEL_SIZES,
   getRealColumns,
@@ -60,6 +61,31 @@ function buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) {
 // englishSalutation). מחזיר את שורת "לכבוד" הנפרדת (או ריק) ואת שורת השם בלעדיו
 // או איתו, כמו קודם
 const HEBREW_GREETING = 'לכבוד';
+// MUI processes CSS through stylis-plugin-rtl, which flips physical left/right values.
+// @noflip is MUI's documented local opt-out: the selected physical edge is kept
+// for the label while the application's global RTL localization remains enabled.
+const GreetingTypography = styled(Typography, {
+  shouldForwardProp: (prop) => prop !== '$alignment',
+})`
+  ${({ $alignment }) => {
+    if ($alignment === 'right') {
+      return `
+        /* @noflip */
+        text-align: right;
+        margin-right: 1mm;
+      `;
+    }
+    if ($alignment === 'left') {
+      return `
+        /* @noflip */
+        text-align: left;
+        margin-left: 1mm;
+      `;
+    }
+    return 'text-align: center;';
+  }}
+`;
+
 function splitHebrewGreeting(nameLine, printLanguage, greetingShow, greetingSeparateLine) {
   const prefix = `${HEBREW_GREETING} `;
   if (printLanguage === 'en' || !nameLine.startsWith(prefix)) return { greetingLine: '', nameLine };
@@ -165,18 +191,6 @@ export default function PrintPreviewPage() {
   const fontBase = LABEL_FONT_BASE_PX[labelSize] || LABEL_FONT_BASE_PX.standard;
   const fontFactor = clampFontScale(fontScale, labelSize) / 100;
   const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
-  // מטמון ה-RTL של MUI הופך left/right פיזיים. start/end נשארים לוגיים ביחס
-  // לכיוון העברי של המדבקה: start הוא ימין ו-end הוא שמאל.
-  const greetingTextAlign = greetingAlign === 'right'
-    ? 'start'
-    : greetingAlign === 'left'
-      ? 'end'
-      : 'center';
-  const greetingInsetSx = greetingAlign === 'right'
-    ? { marginInlineStart: '1mm' }
-    : greetingAlign === 'left'
-      ? { marginInlineEnd: '1mm' }
-      : {};
   const nameLineSx = {
     fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
     lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
@@ -347,12 +361,13 @@ export default function PrintPreviewPage() {
                 {/* "לכבוד" בשורה נפרדת מעל השם, בצד שנבחר בחלון ההדפסה - על כל רוחב המדבקה,
                     כדי שימין/שמאל יהיו ביחס למדבקה ולא רק לאורך השם */}
                 {greetingLine && (
-                  <Typography
+                  <GreetingTypography
+                    $alignment={greetingAlign}
                     variant={layout.nameVariant}
-                    sx={{ ...nameLineSx, ...greetingInsetSx, mb: 0, alignSelf: 'stretch', textAlign: greetingTextAlign }}
+                    sx={{ ...nameLineSx, mb: 0, alignSelf: 'stretch' }}
                   >
                     {greetingLine}
-                  </Typography>
+                  </GreetingTypography>
                 )}
 
                 {/* שורת השם - רק אם יש בה בכלל תוכן לפי מה שסומן להדפסה */}
