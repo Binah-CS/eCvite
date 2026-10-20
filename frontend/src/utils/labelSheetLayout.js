@@ -3,14 +3,14 @@
 // כדי שמה שרואים בבחירה יתאים בדיוק למה שנראה בהדפסה.
 
 // המרה ממ"ס לפיקסלים לפי 96dpi (התקן הרגיל של דפדפנים, גם בהדפסה) - 1 ס"מ = 37.795 פיקסל
-// בלי לעגל כלפי מעלה - 3 מדבקות של 7 ס"מ = בדיוק 21 ס"מ = כל רוחב עמוד A4, בלי מקום לטעות
+// המרה ממ"מ לפיקסלים לפי 96dpi.
 const CM_TO_PX = 37.795;
 const cmToPx = (cm) => cm * CM_TO_PX;
 
 // גדלי מדבקה ריאליים (בפיקסלים, לתצוגה על מסך/הדפסה מהדפדפן)
-// "סטנדרטי" = 7X2.3 ס"מ, גיליון המדבקות שבשימוש בפועל (יוצא 3X11 בעמוד, בלי שוליים/רווח בין העמודות)
+// "סטנדרטי" = 7X2.6 ס"מ, לפי גיליון המדבקות.
 export const REAL_LABEL_SIZES = {
-  standard: { width: cmToPx(7), height: cmToPx(2.3) },
+  standard: { width: cmToPx(7), height: cmToPx(2.6) },
   large: { width: 400, height: 190 },
 };
 
@@ -47,7 +47,7 @@ export function clampFontScale(scale, sizeKey) {
   return Math.min(Math.max(value, FONT_SCALE_MIN), getMaxFontScale(sizeKey));
 }
 
-// רוחב עמוד A4 המלא (21 ס"מ) - למדבקת ה"סטנדרטי" צריך שוליים=0 ורווח=0 כדי ש-3 בדיוק ייכנסו
+// רוחב עמוד A4 המלא (21 ס"מ).
 export const REAL_PAGE_CONTENT_WIDTH = cmToPx(21);
 export const REAL_GAP_PX = 0;
 
