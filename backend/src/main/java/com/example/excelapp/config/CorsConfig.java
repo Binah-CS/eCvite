@@ -29,5 +29,4 @@ public class CorsConfig implements WebMvcConfigurer {
         org.slf4j.LoggerFactory.getLogger("API")
             .info("CORS allowed origins: {}", java.util.Arrays.toString(allowedOrigins));
     }
-
 }
