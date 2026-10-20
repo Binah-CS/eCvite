@@ -120,7 +120,7 @@ function detectPrintLanguage(row, getPrintFlag) {
 // פריסת רשת אמיתית לדף מדבקות - הגדלים ומספר העמודות מגיעים מאותו מקור אמת
 // שמשמש גם את התצוגה הממוזערת במודאל, כדי ששניהם תמיד יתאימו
 const LABEL_LAYOUT = {
-  // המדבקה גבוהה רק 2.3 ס"מ בפועל - כתב גדול (h5/h6) לא נכנס בכלל, לכן כתב קטן ודחוס
+  // המדבקה גבוהה רק 2.6 ס"מ בפועל - כתב גדול (h5/h6) לא נכנס בכלל, לכן כתב קטן ודחוס
   standard: { ...REAL_LABEL_SIZES.standard, columns: getRealColumns('standard'), nameVariant: 'body2', addrVariant: 'caption' },
   large: { ...REAL_LABEL_SIZES.large, columns: getRealColumns('large'), nameVariant: 'h4', addrVariant: 'h5' },
 };
@@ -227,7 +227,8 @@ export default function PrintPreviewPage() {
 
   return (
     <Container maxWidth="md" sx={{ mt: 4, mb: 4, '@media print': { m: 0, maxWidth: 'none', p: 0 } }}>
-      <style>{`@media print { @page { margin: 0; } }`}</style>
+      {/* לגיליון המדבקות יש שוליים של 1 ס"מ למעלה ולמטה בכל עמוד, ובצדדים 0 (3 מדבקות של 7 ס"מ = כל הרוחב) */}
+      <style>{`@media print { @page { margin: 1cm 0; } }`}</style>
       <Paper
         sx={{
           p: 4,
