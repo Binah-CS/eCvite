@@ -30,3 +30,4 @@ public class CorsConfig implements WebMvcConfigurer {
             .info("CORS allowed origins: {}", java.util.Arrays.toString(allowedOrigins));
     }
 
+}
