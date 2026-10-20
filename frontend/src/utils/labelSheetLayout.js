@@ -34,8 +34,10 @@ export const FONT_SCALE_DEFAULT = 100;
 export const FONT_SCALE_STEP = 5;
 const REFERENCE_LINES_UNDER_NAME = 3;
 
-export function getMaxFontScale(sizeKey) {
-  const size = REAL_LABEL_SIZES[sizeKey] || REAL_LABEL_SIZES.standard;
+export function getMaxFontScale(sizeKey, customHeightPx) {
+  const size = sizeKey === 'custom' && Number.isFinite(customHeightPx)
+    ? { height: customHeightPx }
+    : REAL_LABEL_SIZES[sizeKey] || REAL_LABEL_SIZES.standard;
   const base = LABEL_FONT_BASE_PX[sizeKey] || LABEL_FONT_BASE_PX.standard;
   const available = size.height - 2 * LABEL_PADDING_PX - NAME_LINE_MARGIN_PX;
   const contentAtDefault = LABEL_LINE_HEIGHT * (base.name + REFERENCE_LINES_UNDER_NAME * base.line);
@@ -43,9 +45,9 @@ export function getMaxFontScale(sizeKey) {
   return Math.max(FONT_SCALE_DEFAULT, max);
 }
 
-export function clampFontScale(scale, sizeKey) {
+export function clampFontScale(scale, sizeKey, customHeightPx) {
   const value = Number.isFinite(Number(scale)) ? Number(scale) : FONT_SCALE_DEFAULT;
-  return Math.min(Math.max(value, FONT_SCALE_MIN), getMaxFontScale(sizeKey));
+  return Math.min(Math.max(value, FONT_SCALE_MIN), getMaxFontScale(sizeKey, customHeightPx));
 }
 
 // רוחב עמוד A4 המלא (21 ס"מ) - למדבקת ה"סטנדרטי" צריך שוליים=0 ורווח=0 כדי ש-3 בדיוק ייכנסו

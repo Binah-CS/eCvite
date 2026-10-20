@@ -664,6 +664,7 @@ export default function DashboardPage() {
             visibleRows={isPrintModalOpen ? visibleRowsRef.current?.() ?? null : null}
             onClose={() => setIsPrintModalOpen(false)}
             selectedRows={selectedRows}
+            records={records}
         />
 
         <Snackbar
