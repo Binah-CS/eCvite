@@ -5,6 +5,7 @@ import React from 'react';
 export const MODAL_TEXTS = {
   STEP_1_TITLE: "על מה תרצה להדפיס?",
   LABEL_OPTION: "מדבקות",
+  DISTRIBUTION_LABELS_OPTION: "מדבקות לחלוקה",
   ENVELOPES_OPTION: "מעטפות",
   LISTS_OPTION: "רשימות",
   
@@ -43,7 +44,7 @@ export const MODAL_TEXTS = {
   BUTTON_PREVIEW: "תצוגה מקדימה",
   BUTTON_PRINT: "הדפס",
   
-  NOT_AVAILABLE_ALERT: (type) => `הדפסת ${type === 'envelopes' ? 'מעטפות' : 'רשימות'} אינה זמינה כרגע.`
+  NOT_AVAILABLE_ALERT: (type) => `הדפסת ${{ distributionLabels: 'מדבקות לחלוקה', envelopes: 'מעטפות' }[type] || 'רשימות'} אינה זמינה כרגע.`
 };
 
 // הקבועים הקודמים ששמרנו (נשארים פה כרגיל)

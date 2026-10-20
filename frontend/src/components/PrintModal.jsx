@@ -343,10 +343,13 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
         {step === 1 && (
           <Box>
             <Typography variant="h6" mb={2}>{MODAL_TEXTS.STEP_1_TITLE}</Typography>
-            <RadioGroup value={printType} onChange={(e) => setPrintType(e.target.value)}>
+            {/* שתי עמודות שוות: "מדבקות לחלוקה" בעמודה השנייה מול "מדבקות", ומעטפות ורשימות
+                מתחת ל"מדבקות". "מדבקות לחלוקה" עוד לא מחוברת להדפסה, כמו מעטפות ורשימות */}
+            <RadioGroup value={printType} onChange={(e) => setPrintType(e.target.value)} sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
               <FormControlLabel value="labels" control={<Radio />} label={MODAL_TEXTS.LABEL_OPTION} />
-              <FormControlLabel value="envelopes" control={<Radio />} label={MODAL_TEXTS.ENVELOPES_OPTION} />
-              <FormControlLabel value="lists" control={<Radio />} label={MODAL_TEXTS.LISTS_OPTION} />
+              <FormControlLabel value="distributionLabels" control={<Radio />} label={MODAL_TEXTS.DISTRIBUTION_LABELS_OPTION} />
+              <FormControlLabel value="envelopes" control={<Radio />} label={MODAL_TEXTS.ENVELOPES_OPTION} sx={{ gridColumn: 1 }} />
+              <FormControlLabel value="lists" control={<Radio />} label={MODAL_TEXTS.LISTS_OPTION} sx={{ gridColumn: 1 }} />
             </RadioGroup>
             
             <Stack direction="row" spacing={2} justifyContent="flex-end" mt={3}>
