@@ -30,6 +30,7 @@ public class GeoRoutingService {
     private static final String STREETS_RESOURCE = "9ad3862c-8391-4b2f-84a4-2d4c68625f4b";
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final ObjectMapper mapper = new ObjectMapper();
+    private final Map<String, Location> locationCache = new ConcurrentHashMap<>();
 
     public Map<String, Object> optimize(DistributionRouteRequest request) {
         List<DistributionRouteRequest.Assignment> assignments = request.assignments() == null ? List.of() : request.assignments();
@@ -87,15 +88,17 @@ public class GeoRoutingService {
     private Map<String, Location> findStreetLocations(String city, List<String> streets) {
         if (streets.isEmpty()) return Map.of();
         Map<String, Location> result = new ConcurrentHashMap<>();
-        ExecutorService pool = Executors.newFixedThreadPool(Math.min(6, streets.size()));
+        streets.forEach(street -> { Location cached = locationCache.get(city + "|" + street); if (cached != null) result.put(street, cached); });
+        List<String> missing = streets.stream().filter(street -> !result.containsKey(street)).toList();
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(12, Math.max(1, missing.size())));
         try {
             List<Future<?>> tasks = new ArrayList<>();
-            for (String street : streets) tasks.add(pool.submit(() -> {
+            for (String street : missing) tasks.add(pool.submit(() -> {
                 try {
                     String query = URLEncoder.encode(street + ", " + city + ", ישראל", StandardCharsets.UTF_8);
-                    JsonNode feature = request("https://photon.komoot.io/api/?limit=1&q=" + query).path("features").path(0);
+                    JsonNode feature = request("https://photon.komoot.io/api/?limit=1&q=" + query, Duration.ofSeconds(12)).path("features").path(0);
                     JsonNode coordinates = feature.path("geometry").path("coordinates");
-                    if (coordinates.isArray() && coordinates.size() >= 2) result.put(street, new Location(coordinates.get(1).asDouble(), coordinates.get(0).asDouble()));
+                    if (coordinates.isArray() && coordinates.size() >= 2) { Location location = new Location(coordinates.get(1).asDouble(), coordinates.get(0).asDouble()); result.put(street, location); locationCache.put(city + "|" + street, location); }
                 } catch (Exception ignored) { }
             }));
             for (Future<?> task : tasks) task.get();
@@ -103,7 +106,8 @@ public class GeoRoutingService {
         return result;
     }
 
-    private JsonNode request(String url) throws Exception { HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(55)).header("User-Agent", "eCvite-distribution-planner/1.0").GET().build(); return mapper.readTree(http.send(request, HttpResponse.BodyHandlers.ofString()).body()); }
+    private JsonNode request(String url) throws Exception { return request(url, Duration.ofSeconds(30)); }
+    private JsonNode request(String url, Duration timeout) throws Exception { HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(timeout).header("User-Agent", "eCvite-distribution-planner/1.0").GET().build(); return mapper.readTree(http.send(request, HttpResponse.BodyHandlers.ofString()).body()); }
     private static boolean sameStreet(String a, String b) { return a.replaceAll("[\\s׳'\"״-]", "").equalsIgnoreCase(b.replaceAll("[\\s׳'\"״-]", "")); }
     private static List<String> nearestNeighbour(List<String> streets, Map<String, Location> locations) { List<String> remaining = new ArrayList<>(streets), ordered = new ArrayList<>(); if (remaining.isEmpty()) return ordered; ordered.add(remaining.remove(0)); while (!remaining.isEmpty()) { String current = ordered.get(ordered.size() - 1); String next = remaining.stream().min(Comparator.comparingDouble(s -> distance(locations.get(current), locations.get(s)))).orElseThrow(); ordered.add(next); remaining.remove(next); } return ordered; }
     private static long estimateDistance(List<String> streets, Map<String, Location> locations) { double total = 0; for (int i = 1; i < streets.size(); i++) total += distance(locations.get(streets.get(i - 1)), locations.get(streets.get(i))); return Math.round(total); }
