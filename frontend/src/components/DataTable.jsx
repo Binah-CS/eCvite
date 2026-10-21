@@ -23,6 +23,9 @@ import { VisibleRowsContext } from '../utils/visibleRowsContext';
 
 // מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
 const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
+const streetNameForSuggestion = (value) => String(value ?? '')
+  .replace(/[,\s]+\d+[a-zA-Zא-ת]?\s*$/, '')
+  .trim();
 
 // שדות מערכת/ביקורת (לא "פרטי אורח") - לא מנוהלים דרך excel_columns, נשארים קבועים בקוד
 const systemColumns = [
@@ -748,7 +751,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     }
   }, [onAutoSave, apiRef]);
 
-  // handlers משותפים ל-input בתוך תא טבלה (renderAddressCell/renderTextCell) - בלי
+  // handlers משותפים ל-input בתוך תא טבלה (renderTextCell) - בלי
   // stopPropagation ב-onKeyDown ה-DataGrid תופס את מקש הרווח כקיצור מקלדת שלו (למשל
   // גלילה/בחירה) במקום לתת לו סתם להקליד תו רווח רגיל. Enter מבצע blur על השדה - זה
   // מפעיל את בדיקת ה-focusout הקיימת, שאם השדה תקין מסירה אותו מתור התיקונים
@@ -855,20 +858,10 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     setContextMenu(null);
   };
 
-  // אייקון קטן שמופיע כשעוברים עם העכבר על תא בעמודת כתובת - לחיצה עליו מעבירה
-  // את הערך ישירות ל"הערת כתובת", כדי שהאפשרות תהיה גלויה ולא רק דרך קליק ימני
-  const renderAddressCell = useCallback((params) => {
+  const renderPlainTextCell = useCallback((params) => {
     const { id, field, value } = params;
     return (
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          width: '100%',
-          height: '100%',
-          px: 1,
-        }}
-      >
+      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', px: 1 }}>
         <input
           value={value ?? ''}
           {...createCellInputHandlers(id, field)}
@@ -886,8 +879,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     );
   }, [createCellInputHandlers]);
 
-  // תא טקסט חי - קלט חופשי לגמרי תמיד, ואם יש pickListField (עמודות קידומת/סיום/
-  // שייך ל) גם חץ קטן לצידו שפותח Menu לבחירה מהערכים הקיימים באותה עמודה. שתי
+  // תא טקסט חי - קלט חופשי לגמרי תמיד, עם רשימת הצעות מהערכים הקיימים באותה עמודה. שתי
   // האפשרויות זמינות בו-זמנית. הרשימה מחושבת מ-rowsRef בזמן אמת כשפותחים אותה (לא
   // memo שתלוי ב-rows) - בכוונה, כי memo כזה היה יוצר מערך options חדש בכל הקשה,
   // מה שהיה מכריח את columns כולו להיווצר מחדש וגורם ל-DataGrid לאבד פוקוס מהקלט
@@ -923,7 +915,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         const values = Array.from(
           new Set(
             rowsRef.current
-              .map((row) => row[pickListField])
+              .map((row) => pickListField === 'street'
+                ? streetNameForSuggestion(row[pickListField])
+                : row[pickListField])
               .filter((v) => v && String(v).trim())
           )
         );
@@ -934,23 +928,33 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
 
       // מסננת את הרשימה תוך כדי הקלדה - רק ערכים שמתחילים במה שכבר הוקלד, כדי
       // שאפשר יהיה גם להקליד חופשי וגם לראות מיד אילו ערכים קיימים תואמים
-      const typed = String(value ?? '').trim();
+      const typedValue = pickListField === 'street' ? streetNameForSuggestion(value) : value;
+      const typed = String(typedValue ?? '').trim().toLocaleLowerCase('he');
       const filteredOptions = typed
-        ? menuOptions.filter((option) => option.startsWith(typed))
+        ? menuOptions.filter((option) => String(option).trim().toLocaleLowerCase('he').startsWith(typed))
         : menuOptions;
+
+      const handleInputChange = (event) => {
+        updateCellValue(id, field, event.target.value);
+        const enteredValue = pickListField === 'street'
+          ? streetNameForSuggestion(event.target.value)
+          : event.target.value;
+        if (String(enteredValue ?? '').trim()) openMenu();
+        else closeMenu();
+      };
 
       return (
         <Box ref={boxRef} sx={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', px: 1, position: 'relative' }}>
           <input
             value={value ?? ''}
             {...createCellInputHandlers(id, field)}
-            // לחיצה/כניסה לתא בעמודות הבחירה פותחת את רשימת הערכים הקיימים, בלי צורך
-            // ללחוץ בנפרד על חץ - אפשר עדיין להקליד חופשי במקביל. כניסה לעריכה תמיד
+            onChange={handleInputChange}
+            // ההקלדה הראשונה פותחת את רשימת הערכים התואמים, אבל מיקוד בלבד לא מציג
+            // את כל הערכים. אפשר תמיד להקליד ערך חופשי במקביל. כניסה לעריכה תמיד
             // חושפת את הטקסט המלא (גם אם "שייך ל" מכווץ כרגע), ויציאה ממנה מכווצת שוב
             onFocus={() => {
               setIsFocused(true);
               setExpanded(true);
-              if (pickListField) openMenu();
             }}
             onBlur={() => {
               setIsFocused(false);
@@ -1066,7 +1070,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
                   ))
                 ) : (
                   <MenuItem disabled sx={{ fontSize: '0.875rem', minHeight: 26, py: 0, borderRadius: 1.5 }}>
-                    {menuOptions.length ? 'אין ערך קיים שמתחיל כך' : 'אין עדיין ערכים בעמודה הזו'}
+                    לא נמצאו ערכים
                   </MenuItem>
                 )}
               </Paper>
@@ -1554,9 +1558,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const columns = useMemo(() => {
     const dynamicColumns = displayFieldDefs.map((f) => {
       const isBoolean = f.technicalName === 'print';
-      const pickListField = ['prefix', 'suffix', 'belongsTo'].includes(f.technicalName)
-        ? f.technicalName
-        : null;
+      const pickListField = isBoolean || f.technicalName === 'houseNo' ? null : f.technicalName;
       const showRequiredMark =
         f.isRequired ||
         ((f.technicalName === 'man' || f.technicalName === 'woman') &&
@@ -1585,15 +1587,15 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         width: customWidth,
         minWidth: autoWidth,
         // העריכה עצמה מתבצעת דרך קלט חי בתוך renderCell (ראו renderTextCell/
-        // renderBooleanCell/renderAddressCell) ולא דרך מצב העריכה של ה-DataGrid -
+        // renderBooleanCell) ולא דרך מצב העריכה של ה-DataGrid -
         // editable נשאר false בכוונה כדי שדאבל-קליק לא ינסה גם לפתוח את עורך ברירת
         // המחדל של הרשת מעל הקלט המותאם אישית שלנו
         editable: false,
         type: isBoolean ? 'boolean' : undefined,
         renderCell: isBoolean
           ? renderBooleanCell
-          : ADDRESS_FIELDS.includes(f.technicalName)
-          ? renderAddressCell
+          : f.technicalName === 'houseNo'
+          ? renderPlainTextCell
           : renderTextCell(pickListField),
         sortComparator: isBoolean ? undefined : createTextSortComparator(f.technicalName, secondarySortFields),
         // מיון קורה רק דרך חץ המיון הביתי (renderHeader למטה), לא בכל לחיצה על הכותרת
@@ -1614,7 +1616,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     // handleHeaderSortClick תלוי רק ב-sortModel, שכבר ברשימת התלויות למטה - אין צורך
     // לחשב מחדש את כל העמודות בכל רינדור רק כי הפונקציה עצמה נוצרת מחדש בכל פעם
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayFieldDefs, renderAddressCell, renderBooleanCell, renderTextCell, secondarySortFields, requiredFields, columnWidths, minWidthOverrides, sortModel, dragArmedField]);
+  }, [displayFieldDefs, renderBooleanCell, renderPlainTextCell, renderTextCell, secondarySortFields, requiredFields, columnWidths, minWidthOverrides, sortModel, dragArmedField]);
 
   // רשת ביטחון: הרוחב האוטומטי למעלה הוא הערכה (מדידת טקסט + תקורה קבועה לחץ המיון
   // ולריפוד התא) - אם בכל זאת נשאר קצר מדי בפועל (התקורה האמיתית של עיצוב מסוים
