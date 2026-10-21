@@ -8,7 +8,6 @@ import com.example.excelapp.repository.UserRepository;
 import com.example.excelapp.service.DistributionZoneService.Zone;
 import com.example.excelapp.service.DistributionZoneService.ZoneStreet;
 import com.example.excelapp.service.ZoneStreetTextParser.Side;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,23 +22,13 @@ import java.util.stream.Collectors;
 @Service
 public class DistributionAssignmentService {
 
-    // הקוד (באנגלית) - לבדיקות בקוד ובפרונט; הטקסט (בעברית) - להצגה למשתמשת
+    // הסיבה שנמען לא שויך - קוד בלבד; הטקסט בעברית להצגה למשתמשת שייך לפרונט
     public enum UnassignedReason {
-        MISSING_ADDRESS("כתובת חסרה"),                       // אין רחוב או אין עיר
-        OTHER_CITY("עיר אחרת"),                              // עיר שאינה העיר של הגמ"ח
-        UNKNOWN_STREET("רחוב לא מוכר"),                      // הרחוב לא מופיע באף אזור
-        HOUSE_OUT_OF_RANGE("מספר בית מחוץ לטווח"),            // הרחוב מופיע, אבל מספר הבית לא באף טווח שלו
-        MISSING_HOUSE_NUMBER("חסר מספר בית (רחוב מפוצל)");    // הרחוב מפוצל בין כמה אזורים ואין מספר בית
-
-        private final String text;
-
-        UnassignedReason(String text) {
-            this.text = text;
-        }
-
-        public String text() {
-            return text;
-        }
+        MISSING_ADDRESS,       // אין רחוב או אין עיר
+        OTHER_CITY,            // עיר שאינה העיר של הגמ"ח
+        UNKNOWN_STREET,        // הרחוב לא מופיע באף אזור
+        HOUSE_OUT_OF_RANGE,    // הרחוב מופיע, אבל מספר הבית לא באף טווח שלו
+        MISSING_HOUSE_NUMBER   // הרחוב מפוצל בין כמה אזורים ואין מספר בית
     }
 
     // שורה בטבלת הקשר: הנמען, והשקית והמסלול שלו - כל מה שצריך כדי להדפיס את המדבקה.
@@ -57,12 +46,6 @@ public class DistributionAssignmentService {
             UnassignedReason unassignedReason,
             Recipients recipient
     ) {
-        // הסיבה בעברית, ליד הקוד באנגלית - נכנסת גם ל-JSON
-        @JsonProperty("unassignedReasonText")
-        public String unassignedReasonText() {
-            return unassignedReason == null ? null : unassignedReason.text();
-        }
-
         private AssignmentRow withRouteSequence(int sequence) {
             return new AssignmentRow(recipientHash, zoneNumber, carrierName, className, streetOrder, houseNumber,
                     houseSuffix, routeCode, sequence, unassignedReason, recipient);

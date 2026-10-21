@@ -320,14 +320,40 @@ class DistributionAssignmentServiceTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
 
-        String pretty = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json).toPrettyString();
+        com.fasterxml.jackson.databind.JsonNode tree = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
         // UTF-8 במפורש - אחרת ב-Windows העברית מודפסת בקידוד הישן ויוצאת סימני שאלה
         java.io.PrintStream out = new java.io.PrintStream(System.out, true, java.nio.charset.StandardCharsets.UTF_8);
         out.println("===== GET /api/distribution/assignments?phone=" + PHONE + " - ה-JSON שהפרונט יקבל =====");
-        out.println(pretty);
+        out.println(tree.toPrettyString());
+        out.println("===== סיכום קריא (נבנה בטסט בלבד, לא חלק מה-JSON) =====");
+        for (com.fasterxml.jackson.databind.JsonNode row : tree.get("rows")) {
+            out.println(summaryLine(row));
+        }
         out.println("===== סוף ה-JSON =====");
 
         assertThat(json).contains("\"assigned\":5").contains("\"unassigned\":5");
+    }
+
+    // הסיבות בעברית - רק להדפסה הקריאה בטסט. הבקאנד מחזיר קוד בלבד; בפרונט הטקסט יהיה ב-HardCodePage
+    private static final java.util.Map<String, String> REASON_IN_HEBREW = java.util.Map.of(
+            "MISSING_ADDRESS", "כתובת חסרה",
+            "OTHER_CITY", "עיר אחרת",
+            "UNKNOWN_STREET", "רחוב לא מוכר",
+            "HOUSE_OUT_OF_RANGE", "מספר בית מחוץ לטווח",
+            "MISSING_HOUSE_NUMBER", "חסר מספר בית (רחוב מפוצל)"
+    );
+
+    // שורה לנמען: שם | כתובת | השקית והמסלול, או למה לא שויך
+    private static String summaryLine(com.fasterxml.jackson.databind.JsonNode row) {
+        com.fasterxml.jackson.databind.JsonNode r = row.get("recipient");
+        String city = r.get("city").isNull() ? "(בלי עיר)" : r.get("city").asText();
+        String address = (r.get("street").asText() + " " + r.get("houseNo").asText()).trim() + ", " + city;
+        String result = row.get("zoneNumber").isNull()
+                ? "לא שויך: " + REASON_IN_HEBREW.get(row.get("unassignedReason").asText())
+                : "שקית " + row.get("zoneNumber").asInt() + " (" + row.get("carrierName").asText() + ")"
+                        + ", קוד מסלול " + row.get("routeCode").asText()
+                        + ", מקום " + row.get("routeSequence").asInt() + " בשקית";
+        return r.get("man").asText() + " | " + address + " | " + result;
     }
 
     @Test
@@ -344,9 +370,8 @@ class DistributionAssignmentServiceTest {
                 .andExpect(jsonPath("$.rows[0].routeCode").value("01-42"))
                 .andExpect(jsonPath("$.rows[0].routeSequence").value(1))
                 .andExpect(jsonPath("$.rows[0].recipient.man").value("א"))
-                .andExpect(jsonPath("$.rows[0].unassignedReasonText").value(org.hamcrest.Matchers.nullValue()))
-                .andExpect(jsonPath("$.rows[1].unassignedReason").value("UNKNOWN_STREET"))
-                .andExpect(jsonPath("$.rows[1].unassignedReasonText").value("רחוב לא מוכר"));
+                .andExpect(jsonPath("$.rows[0].unassignedReason").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.rows[1].unassignedReason").value("UNKNOWN_STREET"));
 
         mockMvc.perform(get("/api/distribution/assignments").param("phone", "0000000000"))
                 .andExpect(status().isNotFound());
