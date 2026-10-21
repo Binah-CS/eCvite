@@ -96,6 +96,12 @@ function buildCountryLine(row, getPrintFlag) {
   return DOMESTIC_COUNTRY_NAMES.has(country.toLowerCase()) ? '' : country;
 }
 
+function padCode(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return '--';
+  return /^\d+$/.test(text) ? text.padStart(2, '0') : text;
+}
+
 function countCharacters(text, pattern) {
   return (String(text ?? '').match(pattern) ?? []).length;
 }
@@ -152,7 +158,7 @@ export default function PrintPreviewPage() {
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-  const { selectedRows = [], selectedItems = [], labelSize = 'standard', customFormat, printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', autoPrint = false } = location.state || {};
+  const { selectedRows = [], selectedItems = [], labelSize = 'standard', customFormat, printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', firstBagNumber = '1', routeAssignments = {}, returnPath = '', autoPrint = false } = location.state || {};
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
   const savedSelectedRows = getSavedSelectedRows();
@@ -162,10 +168,12 @@ export default function PrintPreviewPage() {
       ? selectedItems
       : savedSelectedRows;
   const rowsToDisplay = actualRows;
+  const bagStart = Number.parseInt(firstBagNumber, 10) || 1;
   const customLayout = labelSize === 'custom' ? getCustomLabelLayout(customFormat) : null;
   const layout = customLayout
     ? { ...customLayout, nameVariant: 'body2', addrVariant: 'caption' }
     : LABEL_LAYOUT[labelSize] || LABEL_LAYOUT.standard;
+  const labelsPerPage = layout.columns * (customLayout ? layout.rows : 10);
   const fontBase = LABEL_FONT_BASE_PX[labelSize] || LABEL_FONT_BASE_PX.standard;
   const fontFactor = clampFontScale(fontScale, labelSize, customLayout?.height) / 100;
   const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
@@ -276,8 +284,9 @@ export default function PrintPreviewPage() {
                sessionStorage.setItem('savedGreetingShow', String(greetingShow));
                sessionStorage.setItem('savedGreetingSeparateLine', String(greetingSeparateLine));
                sessionStorage.setItem('savedGreetingAlign', greetingAlign);
+               sessionStorage.setItem('savedFirstBagNumber', String(firstBagNumber));
                saveSelectedRows(rowsToDisplay);
-                navigate('/dashboard');
+                navigate(returnPath || '/dashboard');
             }} 
 >
               שינוי הגדרות הדפסה
@@ -294,7 +303,7 @@ export default function PrintPreviewPage() {
 
             <Button variant="text" onClick={() => {
               saveSelectedRows(rowsToDisplay);
-              navigate('/dashboard');
+              navigate(returnPath || '/dashboard');
             }}>
               ביטול וחזרה
             </Button>
@@ -307,9 +316,7 @@ export default function PrintPreviewPage() {
         ) : (
           <Box
             sx={{
-              display: 'grid',
-              gridTemplateColumns: `repeat(${layout.columns}, ${layout.width}px)`,
-              justifyContent: 'center',
+              display: 'block',
               // רווח אופקי קטן בין העמודות - רק במסך התצוגה, לנוחות הקריאה. בהדפסה
               // בפועל זה חוזר ל-0 (למטה) כי 3 מדבקות של 7 ס"מ תופסות בדיוק את כל רוחב
               // הדף, אין מקום לרווח בלי לקלקל את היישור הפיזי מול הגיליון האמיתי
@@ -322,32 +329,104 @@ export default function PrintPreviewPage() {
               },
             }}
           >
-            {rowsToDisplay.map((row, index) => {
-              const printLanguage = detectPrintLanguage(row, getPrintFlag);
+            {Array.from({ length: Math.ceil(rowsToDisplay.length / labelsPerPage) }, (_, pageIndex) => {
+              const pageRows = rowsToDisplay.slice(pageIndex * labelsPerPage, pageIndex * labelsPerPage + labelsPerPage);
+              const hasNextPage = pageIndex < Math.ceil(rowsToDisplay.length / labelsPerPage) - 1;
+              return (
+              <Box
+                key={pageIndex}
+                sx={{
+                  display: 'grid', gridTemplateColumns: `repeat(${layout.columns}, ${layout.width}px)`, justifyContent: 'center',
+                  columnGap: customLayout ? `${layout.horizontalGap}px` : 1, rowGap: customLayout ? `${layout.verticalGap}px` : 1, mb: hasNextPage ? 3 : 0,
+                  breakAfter: hasNextPage ? 'page' : 'auto', pageBreakAfter: hasNextPage ? 'always' : 'auto',
+                  '@media print': { columnGap: customLayout ? `${layout.horizontalGap}px` : 0, rowGap: customLayout ? `${layout.verticalGap}px` : 1, mb: 0, ...(customLayout ? { justifyContent: 'start' } : {}) },
+                }}
+              >
+            {pageRows.map((row, index) => {
+              const absoluteIndex = pageIndex * labelsPerPage + index;
+              const labelPrintFlag = (field) => row.routeAssignment && ['street', 'houseNo', 'city'].includes(field)
+                ? true
+                : getPrintFlag(field);
+              const printLanguage = detectPrintLanguage(row, labelPrintFlag);
+              // במסלולי חלוקה, כל המוזמנים של אותה אחראית מקבלים אותו מספר שקית.
+              // הנתון נשמר גם על השורה עצמה כדי שיישאר תקין במעבר לתצוגה המקדימה.
+              const routeAssignment = routeAssignments[String(row.hashCode ?? row.id)] ?? row.routeAssignment;
+              const bagCode = padCode(routeAssignment?.bagNumber ?? bagStart + absoluteIndex);
+              const streetCode = padCode(routeAssignment?.streetNumber);
+              const houseFromColumn = String(row.houseNo ?? '').match(/\d+/)?.[0];
+              const streetNumbers = String(row.street ?? '').match(/\d+/g) || [];
+              // Some imported records keep the house number at the end of the street field.
+              const houseCode = padCode(houseFromColumn || streetNumbers[streetNumbers.length - 1]);
+              const routeCode = [streetCode, houseCode].filter((code) => code !== '--').join('-');
               const { greetingLine, nameLine } = splitHebrewGreeting(
-                buildNameLine(row, getPrintFlag, printLanguage, englishSalutation), printLanguage, greetingShow, greetingSeparateLine);
+                buildNameLine(row, labelPrintFlag, printLanguage, englishSalutation), printLanguage, greetingShow, greetingSeparateLine);
               return (
                 <Box
-                key={row.id || index}
+                key={row.id || absoluteIndex}
                 sx={{
                   boxSizing: 'border-box',
                   width: layout.width,
                   height: layout.height,
                   flexShrink: 0,
                   display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
+                  flexDirection: 'row',
+                  alignItems: 'stretch',
                   justifyContent: 'center',
                   overflow: 'hidden',
                   p: 0.5,
                   backgroundColor: '#ffffff',
                   pageBreakInside: 'avoid',
                   fontFamily: fontType,
-                  direction: printLanguage === 'en' ? 'ltr' : 'rtl',
+                  // אזור המדבקה הראשי נשאר בכיוון השפה שלו, אך הפריסה החיצונית היא
+                  // תמיד משמאל לימין כדי שפס Click Post יוצב פיזית בצד ימין.
+                  direction: 'ltr',
                 }}
               >
+                <Box
+                  dir="ltr"
+                  sx={{
+                    // בפורמט Click Post השורה נמצאת לרוחב, מסובבת ב-90 מעלות,
+                    // בתוך פס צר בצד ימין של המדבקה.
+                    order: 2, width: '17%', minWidth: 36, borderInlineStart: '1px solid #000', ml: 0.35,
+                    position: 'relative', overflow: 'hidden', color: '#000', fontFamily: 'Arial, sans-serif',
+                  }}
+                >
+                  <Typography
+                    component="div"
+                    sx={{
+                      position: 'absolute', top: '50%', left: '18%', transform: 'translate(-50%, -50%) rotate(90deg)',
+                      fontSize: `${Math.max(6, fontBase.line * fontFactor * 0.65)}px`, fontWeight: 700,
+                      whiteSpace: 'nowrap', lineHeight: 1,
+                    }}
+                  >
+                    Click Post
+                  </Typography>
+                  <Typography
+                    component="div"
+                    sx={{
+                      position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(90deg)',
+                      fontSize: `${Math.max(6, fontBase.line * fontFactor * 0.65)}px`, fontWeight: 700,
+                      whiteSpace: 'nowrap', lineHeight: 1,
+                    }}
+                  >
+                    0533141055
+                  </Typography>
+                  <Typography
+                    component="div"
+                    sx={{
+                      position: 'absolute', top: '50%', left: '82%', transform: 'translate(-50%, -50%) rotate(90deg)',
+                      fontSize: `${Math.max(7, fontBase.line * fontFactor * 0.75)}px`, fontWeight: 700,
+                      width: `${layout.height - 8}px`, display: 'flex', justifyContent: 'space-between',
+                      whiteSpace: 'nowrap', lineHeight: 1, letterSpacing: '0.03em',
+                    }}
+                  >
+                    <span>{bagCode}</span>
+                    {routeCode && <span>{routeCode}</span>}
+                  </Typography>
+                </Box>
+                <Box sx={{ order: 1, flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', direction: printLanguage === 'en' ? 'ltr' : 'rtl' }}>
                 {/* פנייה עברית שנבחרה למדבקה באנגלית מודפסת מעל השם. */}
-                {printLanguage === 'en' && hasHebrewEnglishSalutation(englishSalutation) && buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
+                {printLanguage === 'en' && hasHebrewEnglishSalutation(englishSalutation) && buildNameLine(row, labelPrintFlag, printLanguage, englishSalutation) && (
                   <Typography
                     variant={layout.nameVariant}
                     sx={{ ...nameLineSx, mb: 0 }}
@@ -382,25 +461,25 @@ export default function PrintPreviewPage() {
                     קשיח, כדי שהשורה לא תתכווץ לאפס), כך שהעיר לא "קופצת" מיד מתחת לשם. בלי
                     עיר אין "בין השם לעיר", ולכן גם אין שורה ריקה. ורק אם רחוב/מספר בית בכלל
                     מסומנים להדפסה ב"ניהול עמודות" - כתובת שהוסתרה בכוונה היא לא "חסרה" */}
-                {(buildAddressLine1(row, getPrintFlag, printLanguage)
+                {(buildAddressLine1(row, labelPrintFlag, printLanguage)
                   || (emptyLineWhenNoAddress
-                    && (getPrintFlag('street') || getPrintFlag('houseNo'))
-                    && buildAddressLine2(row, getPrintFlag))) && (
+                    && (labelPrintFlag('street') || labelPrintFlag('houseNo'))
+                    && buildAddressLine2(row, labelPrintFlag))) && (
                   <Typography
                     variant={layout.addrVariant}
                     sx={detailLineSx}
                   >
-                    {buildAddressLine1(row, getPrintFlag, printLanguage) || ' '}
+                    {buildAddressLine1(row, labelPrintFlag, printLanguage) || ' '}
                   </Typography>
                 )}
 
                 {/* שורת העיר - מתחת לרחוב */}
-                {buildAddressLine2(row, getPrintFlag) && (
+                {buildAddressLine2(row, labelPrintFlag) && (
                   <Typography
                     variant={layout.addrVariant}
                     sx={detailLineSx}
                   >
-                    {buildAddressLine2(row, getPrintFlag)}
+                    {buildAddressLine2(row, labelPrintFlag)}
                   </Typography>
                 )}
 
@@ -427,6 +506,10 @@ export default function PrintPreviewPage() {
                   ) : null
                 )}
                 </Box>
+                </Box>
+              );
+            })}
+              </Box>
               );
             })}
           </Box>

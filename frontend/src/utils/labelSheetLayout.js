@@ -3,7 +3,7 @@
 // כדי שמה שרואים בבחירה יתאים בדיוק למה שנראה בהדפסה.
 
 // המרה ממ"ס לפיקסלים לפי 96dpi (התקן הרגיל של דפדפנים, גם בהדפסה) - 1 ס"מ = 37.795 פיקסל
-// בלי לעגל כלפי מעלה - 3 מדבקות של 7 ס"מ = בדיוק 21 ס"מ = כל רוחב עמוד A4, בלי מקום לטעות
+// המרה ממ"מ לפיקסלים לפי 96dpi.
 const CM_TO_PX = 37.795;
 const cmToPx = (cm) => cm * CM_TO_PX;
 
@@ -50,7 +50,7 @@ export function clampFontScale(scale, sizeKey, customHeightPx) {
   return Math.min(Math.max(value, FONT_SCALE_MIN), getMaxFontScale(sizeKey, customHeightPx));
 }
 
-// רוחב עמוד A4 המלא (21 ס"מ) - למדבקת ה"סטנדרטי" צריך שוליים=0 ורווח=0 כדי ש-3 בדיוק ייכנסו
+// רוחב עמוד A4 המלא (21 ס"מ).
 export const REAL_PAGE_CONTENT_WIDTH = cmToPx(21);
 export const REAL_GAP_PX = 0;
 
