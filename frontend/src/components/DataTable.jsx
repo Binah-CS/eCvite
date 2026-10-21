@@ -23,6 +23,9 @@ import { VisibleRowsContext } from '../utils/visibleRowsContext';
 
 // מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
 const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
+const streetNameForSuggestion = (value) => String(value ?? '')
+  .replace(/[,\s]+\d+[a-zA-Zא-ת]?\s*$/, '')
+  .trim();
 
 // שדות מערכת/ביקורת (לא "פרטי אורח") - לא מנוהלים דרך excel_columns, נשארים קבועים בקוד
 const systemColumns = [
@@ -855,6 +858,27 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     setContextMenu(null);
   };
 
+  const renderPlainTextCell = useCallback((params) => {
+    const { id, field, value } = params;
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', px: 1 }}>
+        <input
+          value={value ?? ''}
+          {...createCellInputHandlers(id, field)}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            border: 'none',
+            outline: 'none',
+            height: '100%',
+            font: 'inherit',
+            background: 'transparent',
+          }}
+        />
+      </Box>
+    );
+  }, [createCellInputHandlers]);
+
   // תא טקסט חי - קלט חופשי לגמרי תמיד, עם רשימת הצעות מהערכים הקיימים באותה עמודה. שתי
   // האפשרויות זמינות בו-זמנית. הרשימה מחושבת מ-rowsRef בזמן אמת כשפותחים אותה (לא
   // memo שתלוי ב-rows) - בכוונה, כי memo כזה היה יוצר מערך options חדש בכל הקשה,
@@ -891,7 +915,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         const values = Array.from(
           new Set(
             rowsRef.current
-              .map((row) => row[pickListField])
+              .map((row) => pickListField === 'street'
+                ? streetNameForSuggestion(row[pickListField])
+                : row[pickListField])
               .filter((v) => v && String(v).trim())
           )
         );
@@ -902,23 +928,33 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
 
       // מסננת את הרשימה תוך כדי הקלדה - רק ערכים שמתחילים במה שכבר הוקלד, כדי
       // שאפשר יהיה גם להקליד חופשי וגם לראות מיד אילו ערכים קיימים תואמים
-      const typed = String(value ?? '').trim().toLocaleLowerCase('he');
+      const typedValue = pickListField === 'street' ? streetNameForSuggestion(value) : value;
+      const typed = String(typedValue ?? '').trim().toLocaleLowerCase('he');
       const filteredOptions = typed
         ? menuOptions.filter((option) => String(option).trim().toLocaleLowerCase('he').startsWith(typed))
         : menuOptions;
+
+      const handleInputChange = (event) => {
+        updateCellValue(id, field, event.target.value);
+        const enteredValue = pickListField === 'street'
+          ? streetNameForSuggestion(event.target.value)
+          : event.target.value;
+        if (String(enteredValue ?? '').trim()) openMenu();
+        else closeMenu();
+      };
 
       return (
         <Box ref={boxRef} sx={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', px: 1, position: 'relative' }}>
           <input
             value={value ?? ''}
             {...createCellInputHandlers(id, field)}
-            // לחיצה/כניסה לתא בעמודות הבחירה פותחת את רשימת הערכים הקיימים, בלי צורך
-            // ללחוץ בנפרד על חץ - אפשר עדיין להקליד חופשי במקביל. כניסה לעריכה תמיד
+            onChange={handleInputChange}
+            // ההקלדה הראשונה פותחת את רשימת הערכים התואמים, אבל מיקוד בלבד לא מציג
+            // את כל הערכים. אפשר תמיד להקליד ערך חופשי במקביל. כניסה לעריכה תמיד
             // חושפת את הטקסט המלא (גם אם "שייך ל" מכווץ כרגע), ויציאה ממנה מכווצת שוב
             onFocus={() => {
               setIsFocused(true);
               setExpanded(true);
-              if (pickListField) openMenu();
             }}
             onBlur={() => {
               setIsFocused(false);
@@ -1034,7 +1070,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
                   ))
                 ) : (
                   <MenuItem disabled sx={{ fontSize: '0.875rem', minHeight: 26, py: 0, borderRadius: 1.5 }}>
-                    {menuOptions.length ? 'אין ערך קיים שמתחיל כך' : 'אין עדיין ערכים בעמודה הזו'}
+                    לא נמצאו ערכים
                   </MenuItem>
                 )}
               </Paper>
@@ -1522,7 +1558,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const columns = useMemo(() => {
     const dynamicColumns = displayFieldDefs.map((f) => {
       const isBoolean = f.technicalName === 'print';
-      const pickListField = isBoolean ? null : f.technicalName;
+      const pickListField = isBoolean || f.technicalName === 'houseNo' ? null : f.technicalName;
       const showRequiredMark =
         f.isRequired ||
         ((f.technicalName === 'man' || f.technicalName === 'woman') &&
@@ -1556,7 +1592,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         // המחדל של הרשת מעל הקלט המותאם אישית שלנו
         editable: false,
         type: isBoolean ? 'boolean' : undefined,
-        renderCell: isBoolean ? renderBooleanCell : renderTextCell(pickListField),
+        renderCell: isBoolean
+          ? renderBooleanCell
+          : f.technicalName === 'houseNo'
+          ? renderPlainTextCell
+          : renderTextCell(pickListField),
         sortComparator: isBoolean ? undefined : createTextSortComparator(f.technicalName, secondarySortFields),
         // מיון קורה רק דרך חץ המיון הביתי (renderHeader למטה), לא בכל לחיצה על הכותרת
         sortable: false,
@@ -1576,7 +1616,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     // handleHeaderSortClick תלוי רק ב-sortModel, שכבר ברשימת התלויות למטה - אין צורך
     // לחשב מחדש את כל העמודות בכל רינדור רק כי הפונקציה עצמה נוצרת מחדש בכל פעם
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayFieldDefs, renderBooleanCell, renderTextCell, secondarySortFields, requiredFields, columnWidths, minWidthOverrides, sortModel, dragArmedField]);
+  }, [displayFieldDefs, renderBooleanCell, renderPlainTextCell, renderTextCell, secondarySortFields, requiredFields, columnWidths, minWidthOverrides, sortModel, dragArmedField]);
 
   // רשת ביטחון: הרוחב האוטומטי למעלה הוא הערכה (מדידת טקסט + תקורה קבועה לחץ המיון
   // ולריפוד התא) - אם בכל זאת נשאר קצר מדי בפועל (התקורה האמיתית של עיצוב מסוים
