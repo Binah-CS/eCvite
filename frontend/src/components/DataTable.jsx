@@ -69,6 +69,63 @@ const TOOLBAR_BUTTON_SX = {
 // יכול לזרוק (חלון גלישה פרטית, חסימת אחסון), ואז פשוט נשארים עם ברירת המחדל
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const PAGE_SIZE_STORAGE_KEY = 'recipientsTable.pageSize';
+const ROW_COLOR_RULES_STORAGE_KEY = 'recipientsTable.rowColorRules';
+const ROW_COLOR_PALETTE = [
+  { color: '#FEF3C7', label: 'צהוב' },
+  { color: '#FFEDD5', label: 'כתום' },
+  { color: '#FEE2E2', label: 'אדום' },
+  { color: '#DCFCE7', label: 'ירוק' },
+  { color: '#E7D3B5', label: 'חום' },
+  { color: '#DBEAFE', label: 'כחול' },
+  { color: '#CFFAFE', label: 'תכלת' },
+  { color: '#FCE7F3', label: 'ורוד' },
+  { color: '#FDE2F3', label: 'פוקסיה' },
+  { color: '#EDE9FE', label: 'סגול' },
+  { color: '#E0E7FF', label: 'אינדיגו' },
+  { color: '#CCFBF1', label: 'טורקיז' },
+  { color: '#E5E7EB', label: 'אפור' },
+];
+
+function readRowColorRules(phone) {
+  if (!phone) return [];
+  try {
+    const rules = JSON.parse(localStorage.getItem(`${ROW_COLOR_RULES_STORAGE_KEY}-${phone}`) || '[]');
+    return Array.isArray(rules)
+      ? rules.filter((rule) => rule?.id && rule?.field).map((rule, index) => ({
+        id: String(rule.id), field: String(rule.field), value: String(rule.value ?? ''),
+        color: ROW_COLOR_PALETTE.some((paletteColor) => paletteColor.color === rule.color)
+          ? rule.color
+          : ROW_COLOR_PALETTE[index % ROW_COLOR_PALETTE.length].color,
+      }))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+const normalizedRuleValue = (value) => String(value ?? '').trim().toLocaleLowerCase('he');
+
+// מספרי סדר שמופיעים לפני קטגוריה (למשל "1 משפחת כהן" או "2 - שכנים")
+// אינם חלק משם הקטגוריה, ולכן מוסתרים בתצוגת "שייך ל".
+const removeBelongsToOrderNumber = (value) => String(value ?? '')
+  .replace(/^\s*\d+\s*(?:[-–—.)/:]\s*)?/, '')
+  .trim();
+
+const displayBelongsTo = (value) => String(value ?? '')
+  .split(',')
+  .map(removeBelongsToOrderNumber)
+  .filter(Boolean)
+  .join(', ');
+
+function rowMatchesColorRule(row, rule) {
+  const expected = normalizedRuleValue(rule.value);
+  if (!expected) return false;
+  const actual = String(row[rule.field] ?? '');
+  if (rule.field === 'belongsTo') {
+    return actual.split(',').some((label) => normalizedRuleValue(removeBelongsToOrderNumber(label)) === expected);
+  }
+  return normalizedRuleValue(actual).includes(expected);
+}
 
 function readSavedPageSize() {
   try {
@@ -223,6 +280,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const [activeFilters, setActiveFilters] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [fieldDefs, setFieldDefs] = useState([]);
+  const [rowColorRules, setRowColorRules] = useState([]);
+  const [rowColorRulesLoaded, setRowColorRulesLoaded] = useState(false);
+  const [rowColorDialogOpen, setRowColorDialogOpen] = useState(false);
 
   const [problemQueue, setProblemQueue] = useState([]); // תור התאים שקופצים ביניהם לתיקון (כפתור "תיקון שדות") - {id, field}
   const [duplicateGroups, setDuplicateGroups] = useState([]); // [[row, row, ...], ...] - קבוצות שורות עם אותה זהות (בעל/אישה/שם משפחה/טלפון/כתובת)
@@ -248,6 +308,21 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // ה-columns מחושבות רק פעם אחת (memo תלוי ב-fieldDefs) והפעולות שבתוכן (renderCell)
   // צריכות תמיד את השורות העדכניות ביותר - לכן משתמשים ב-ref ולא סוגרים על rows ישירות
   const rowsRef = useRef(rows);
+
+  useEffect(() => {
+    setRowColorRulesLoaded(false);
+    setRowColorRules(readRowColorRules(phone));
+    setRowColorRulesLoaded(true);
+  }, [phone]);
+
+  useEffect(() => {
+    if (!phone || !rowColorRulesLoaded) return;
+    try {
+      localStorage.setItem(`${ROW_COLOR_RULES_STORAGE_KEY}-${phone}`, JSON.stringify(rowColorRules));
+    } catch {
+      // צבעי השורות הם העדפה מקומית בלבד; אם האחסון חסום, הטבלה ממשיכה לפעול.
+    }
+  }, [phone, rowColorRules, rowColorRulesLoaded]);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -908,7 +983,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       // בפועל לעריכה) לא סוגרת את עצמה לבד ב-blur (כי הפוקוס אף פעם לא עבר ל-input) -
       // לכן יש לה תגית "כווץ" נפרדת לחזרה מפורשת, בעוד שיציאה מעריכה אמיתית עדיין
       // מכווצת אוטומטית
-      const valueParts = String(value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      const displayValue = field === 'belongsTo' ? displayBelongsTo(value) : String(value ?? '');
+      const valueParts = displayValue.split(',').map((s) => s.trim()).filter(Boolean);
       const isMultiValue = field === 'belongsTo' && valueParts.length > 1;
       const showCollapsed = isMultiValue && !expanded;
       const showExpandedPeek = isMultiValue && expanded && !isFocused;
@@ -923,7 +999,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         const values = Array.from(
           new Set(
             rowsRef.current
-              .map((row) => row[pickListField])
+              .map((row) => pickListField === 'belongsTo'
+                ? displayBelongsTo(row[pickListField])
+                : row[pickListField])
               .filter((v) => v && String(v).trim())
           )
         );
@@ -934,7 +1012,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
 
       // מסננת את הרשימה תוך כדי הקלדה - רק ערכים שמתחילים במה שכבר הוקלד, כדי
       // שאפשר יהיה גם להקליד חופשי וגם לראות מיד אילו ערכים קיימים תואמים
-      const typed = String(value ?? '').trim();
+      const typed = displayValue.trim();
       const filteredOptions = typed
         ? menuOptions.filter((option) => option.startsWith(typed))
         : menuOptions;
@@ -942,7 +1020,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       return (
         <Box ref={boxRef} sx={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', px: 1, position: 'relative' }}>
           <input
-            value={value ?? ''}
+            value={displayValue}
             {...createCellInputHandlers(id, field)}
             // לחיצה/כניסה לתא בעמודות הבחירה פותחת את רשימת הערכים הקיימים, בלי צורך
             // ללחוץ בנפרד על חץ - אפשר עדיין להקליד חופשי במקביל. כניסה לעריכה תמיד
@@ -1551,6 +1629,23 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     [allProblems]
   );
 
+  const addRowColorRule = () => {
+    const firstField = displayFieldDefs.find((field) => field.technicalName === 'belongsTo') || displayFieldDefs[0];
+    if (!firstField) return;
+    setRowColorRules((current) => [...current, {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      field: firstField.technicalName,
+      value: '',
+      color: ROW_COLOR_PALETTE[current.length % ROW_COLOR_PALETTE.length].color,
+    }]);
+  };
+
+  const updateRowColorRule = (ruleId, update) => {
+    setRowColorRules((current) => current.map((rule) => rule.id === ruleId ? { ...rule, ...update } : rule));
+  };
+
+  const rowColorRuleIndex = (row) => rowColorRules.findIndex((rule) => rowMatchesColorRule(row, rule));
+
   const columns = useMemo(() => {
     const dynamicColumns = displayFieldDefs.map((f) => {
       const isBoolean = f.technicalName === 'print';
@@ -1886,6 +1981,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         </Box>
 
         <Stack direction="row" spacing={1}>
+          <Button
+            variant={rowColorRules.some((rule) => rule.value.trim()) ? 'contained' : 'outlined'}
+            size="small"
+            onClick={() => setRowColorDialogOpen(true)}
+            sx={{ ...TOOLBAR_BUTTON_SX, whiteSpace: 'nowrap' }}
+          >
+            צביעת שורות{rowColorRules.some((rule) => rule.value.trim()) ? ` (${rowColorRules.filter((rule) => rule.value.trim()).length})` : ''}
+          </Button>
           <ExcelImport onImport={onImport} />
 
           {/* הדפסה ויצוא הם שני כפתורים נפרדים (#87) - "הדפסה" פותח ישר את חלון
@@ -1974,6 +2077,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         // עובר לאייקון, ר' handleMouseMove) במקום להסתמך רק על :hover
         getRowClassName={(params) => {
           const classes = [];
+          const colorRuleIndex = rowColorRuleIndex(params.row);
+          if (colorRuleIndex >= 0) classes.push(`row-color-rule-${colorRuleIndex}`);
           if (String(params.id) === String(activeRowId)) classes.push('app-active-row');
           if (hoveredRow?.inGutter && String(params.id) === String(hoveredRow.id)) classes.push('app-row-hovered');
           return classes.join(' ');
@@ -2054,6 +2159,12 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           '& .MuiDataGrid-row.app-active-row:not(.Mui-selected)': {
             backgroundColor: '#f8fbff !important',
           },
+          ...rowColorRules.reduce((styles, rule, index) => ({
+            ...styles,
+            [`& .MuiDataGrid-row.row-color-rule-${index}, & .MuiDataGrid-row.row-color-rule-${index}:hover`]: {
+              backgroundColor: `${rule.color} !important`,
+            },
+          }), {}),
           '& .MuiDataGrid-footerContainer': {
             borderTop: '2px solid #e2e8f0',
             backgroundColor: '#f8fafc',
@@ -2540,6 +2651,71 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseHistory}>סגור</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={rowColorDialogOpen} onClose={() => setRowColorDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>צביעת שורות</DialogTitle>
+        <DialogContent dividers>
+          <Typography color="text.secondary" variant="body2" mb={2}>
+            הוסיפי כלל לפי עמודה וערך. כל שורה תיצבע כאשר הערך שלה מכיל את הערך שהוגדר; בשדה „שייך ל” ההתאמה היא לתווית שלמה.
+          </Typography>
+          <Stack spacing={1.5}>
+            {rowColorRules.map((rule) => (
+              <Stack key={rule.id} direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+                <TextField
+                  select
+                  size="small"
+                  label="עמודה"
+                  value={rule.field}
+                  onChange={(event) => updateRowColorRule(rule.id, { field: event.target.value })}
+                  sx={{ minWidth: 130 }}
+                >
+                  {displayFieldDefs.filter((field) => field.technicalName !== 'print').map((field) => (
+                    <MenuItem key={field.technicalName} value={field.technicalName}>{field.displayName}</MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  size="small"
+                  label="ערך או תווית"
+                  value={rule.value}
+                  onChange={(event) => updateRowColorRule(rule.id, { value: event.target.value })}
+                  fullWidth
+                />
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 16px)', gap: 0.25 }} aria-label="בחירת צבע">
+                  {ROW_COLOR_PALETTE.map((paletteColor) => (
+                    <Tooltip key={paletteColor.color} title={paletteColor.label}>
+                      <Box
+                        component="button"
+                        type="button"
+                        aria-label={`צבע ${paletteColor.label}`}
+                        onClick={() => updateRowColorRule(rule.id, { color: paletteColor.color })}
+                        sx={{
+                          width: 16,
+                          height: 16,
+                          p: 0,
+                          borderRadius: '50%',
+                          border: rule.color === paletteColor.color ? '2px solid #334155' : '1px solid #cbd5e1',
+                          bgcolor: paletteColor.color,
+                          cursor: 'pointer',
+                        }}
+                      />
+                    </Tooltip>
+                  ))}
+                </Box>
+                <IconButton aria-label="מחיקת כלל צבע" onClick={() => setRowColorRules((current) => current.filter((item) => item.id !== rule.id))}>
+                  <DeleteOutlineIcon />
+                </IconButton>
+              </Stack>
+            ))}
+            {!rowColorRules.length && <Typography color="text.secondary">לא הוגדרו כללי צבע עדיין.</Typography>}
+            <Button variant="outlined" startIcon={<AddIcon />} onClick={addRowColorRule} sx={{ alignSelf: 'start' }}>
+              הוסף כלל צבע
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRowColorDialogOpen(false)}>סיום</Button>
         </DialogActions>
       </Dialog>
     </Paper>
