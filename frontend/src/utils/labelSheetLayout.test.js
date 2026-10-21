@@ -4,6 +4,7 @@ import {
   LABEL_LINE_HEIGHT,
   FONT_SCALE_MIN,
   FONT_SCALE_DEFAULT,
+  FONT_SCALE_STEP,
   getMaxFontScale,
   clampFontScale,
 } from './labelSheetLayout';
@@ -23,8 +24,10 @@ describe('getMaxFontScale', () => {
     expect(getMaxFontScale(sizeKey)).toBeGreaterThanOrEqual(FONT_SCALE_DEFAULT);
   });
 
+  // בפיקסלים ולא באחוזים - האחוז הוא יחסית לכתב הבסיסי של כל גודל, והבסיס בגדולה גדול בהרבה
   test('the large label allows a bigger font than the standard one', () => {
-    expect(getMaxFontScale('large')).toBeGreaterThan(getMaxFontScale('standard'));
+    const maxNamePx = (sizeKey) => LABEL_FONT_BASE_PX[sizeKey].name * getMaxFontScale(sizeKey) / 100;
+    expect(maxNamePx('large')).toBeGreaterThan(maxNamePx('standard'));
   });
 });
 
@@ -34,8 +37,9 @@ describe('clampFontScale', () => {
   });
 
   test('switching to a smaller label lowers a size that no longer fits', () => {
-    const bigOnLarge = getMaxFontScale('large');
-    expect(clampFontScale(bigOnLarge, 'standard')).toBe(getMaxFontScale('standard'));
+    const tooBigForStandard = getMaxFontScale('standard') + FONT_SCALE_STEP;
+    expect(clampFontScale(tooBigForStandard, 'large')).toBe(Math.min(tooBigForStandard, getMaxFontScale('large')));
+    expect(clampFontScale(tooBigForStandard, 'standard')).toBe(getMaxFontScale('standard'));
   });
 
   test('below the minimum is raised to the minimum; missing values fall back to 100', () => {

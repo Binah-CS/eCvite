@@ -6,6 +6,11 @@ import RemoveIcon from '@mui/icons-material/Remove';
 import { useNavigate } from 'react-router-dom';
 import { loadLabelPrintSettings, saveLabelPrintSettings } from '../utils/labelPrintSettings';
 import { orderLikeTable } from '../utils/printOrder';
+import {
+  DEFAULT_CUSTOM_LABEL_FORMAT,
+  getCustomLabelLayout,
+  isValidCustomLabelFormat,
+} from '../utils/labelFormats';
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
 import { MODAL_TEXTS, FONT_OPTIONS } from '../pages/HardCodePage';
 import {
@@ -61,12 +66,6 @@ function saveSelectedRows(rows) {
   );
 }
 
-function getLabelsPerPage(size) {
-  const columns = getColumns(PAGE_CONTENT_WIDTH, size.width, MOCK_GAP_PX);
-  const rows = Math.max(1, Math.floor((PAGE_CONTENT_HEIGHT + MOCK_GAP_PX) / (size.height + MOCK_GAP_PX)));
-  return { columns, rows, count: columns * rows };
-}
-
 // מדבקה "ריקה" - ריבוע עם פסים במקום טקסט אמיתי, בדיוק כמו שהדבר נראה בתבניות מדבקות של Word
 function MockLabel({ width, height }) {
   return (
@@ -93,9 +92,31 @@ function MockLabel({ width, height }) {
 
 // תצוגה קטנה בצד: מדבקה בודדת + רשת מדבקות שמדמה איך הדף המודפס ייראה.
 // הרוחב הכולל של הפאנל קבוע (PREVIEW_PANEL_WIDTH) ולא משתנה - רק המדבקות עצמן גדלות/קטנות בתוכו.
-function LabelSheetPreview({ labelSize }) {
-  const size = MOCK_LABEL_SIZES[labelSize] || MOCK_LABEL_SIZES.standard;
-  const { columns, count } = getLabelsPerPage(size);
+function LabelSheetPreview({ labelSize, customFormat }) {
+  const customLayout = labelSize === 'custom' ? getCustomLabelLayout(customFormat) : null;
+  const customScale = customLayout
+    ? PAGE_CONTENT_WIDTH / (customLayout.pageWidthMm * (96 / 25.4))
+    : 1;
+  const size = customLayout
+    ? {
+        width: customLayout.width * customScale,
+        height: customLayout.height * customScale,
+      }
+    : MOCK_LABEL_SIZES[labelSize] || MOCK_LABEL_SIZES.standard;
+  const gap = customLayout ? customLayout.horizontalGap * customScale : MOCK_GAP_PX;
+  const verticalGap = customLayout ? customLayout.verticalGap * customScale : gap;
+  const columns = customLayout
+    ? customLayout.columns
+    : getColumns(PAGE_CONTENT_WIDTH, size.width, gap);
+  const rowsPerSheet = customLayout
+    ? customLayout.rows
+    : Math.max(1, Math.floor((PAGE_CONTENT_HEIGHT + verticalGap) / (size.height + verticalGap)));
+  const previewRows = Math.min(
+    rowsPerSheet,
+    Math.max(1, Math.floor((PAGE_CONTENT_HEIGHT + verticalGap) / (size.height + verticalGap))),
+  );
+  const count = columns * rowsPerSheet;
+  const previewCount = columns * previewRows;
 
   return (
     <Box sx={{ width: PREVIEW_PANEL_WIDTH, flexShrink: 0, flexGrow: 0 }}>
@@ -120,12 +141,13 @@ function LabelSheetPreview({ labelSize }) {
           gridAutoRows: `${size.height}px`,
           justifyContent: 'center',
           alignContent: 'center',
-          gap: `${MOCK_GAP_PX}px`,
+          columnGap: `${gap}px`,
+          rowGap: `${verticalGap}px`,
           overflow: 'hidden',
           boxSizing: 'border-box',
         }}
       >
-        {Array.from({ length: count }).map((_, i) => (
+        {Array.from({ length: previewCount }).map((_, i) => (
           <MockLabel key={i} {...size} />
         ))}
       </Box>
@@ -166,8 +188,21 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     if (fromUser !== undefined && fromUser !== null && isValid(String(fromUser))) return String(fromUser);
     return fallback;
   };
-  const isLabelSize = (v) => v === 'standard' || v === 'large';
+  const isLabelSize = (v) => v === 'standard' || v === 'large' || v === 'custom';
   const initialLabelSize = initialChoice('savedLabelSize', 'labelSize', isLabelSize, 'standard');
+  const [customFormat, setCustomFormat] = useState(() => {
+    try {
+      const fromPreview = sessionStorage.getItem('savedCustomFormat');
+      const parsed = fromPreview ? JSON.parse(fromPreview) : userLabelSettings.customFormat;
+      return isValidCustomLabelFormat(parsed)
+        ? { ...DEFAULT_CUSTOM_LABEL_FORMAT, ...parsed }
+        : { ...DEFAULT_CUSTOM_LABEL_FORMAT };
+    } catch {
+      return { ...DEFAULT_CUSTOM_LABEL_FORMAT };
+    }
+  });
+  const customLayout = getCustomLabelLayout(customFormat);
+  const customFormatValid = Boolean(customLayout);
 
   // 2. גודל המדבקה
   const [labelSize, setLabelSize] = useState(initialLabelSize);
@@ -188,7 +223,8 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   // שנכנס בגודל המדבקה שנבחר (ר' getMaxFontScale)
   const [fontScale, setFontScale] = useState(() => clampFontScale(
     initialChoice('savedFontScale', 'fontScale', (v) => v.trim() !== '' && Number.isFinite(Number(v)), String(FONT_SCALE_DEFAULT)),
-    initialLabelSize
+    initialLabelSize,
+    initialLabelSize === 'custom' ? getCustomLabelLayout(customFormat)?.height : undefined
   ));
 
   // 6. עובי כתב לכל המדבקה, כולל השם - "רגיל" או "מודגש"
@@ -232,7 +268,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
   // אפילו עובר למשתמשת אחרת שמתחברת באותה לשונית
   useEffect(() => {
-    ['savedLabelSize', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
+    ['savedLabelSize', 'savedCustomFormat', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
       .forEach((key) => sessionStorage.removeItem(key));
     sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
     ['savedGreetingShow', 'savedGreetingSeparateLine', 'savedGreetingAlign', 'savedFirstBagNumber'].forEach((key) => sessionStorage.removeItem(key));
@@ -241,13 +277,17 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
   // ייפתח אצלה עם הבחירות האלה. לא מחכים לתשובה - ההדפסה לא תלויה בשמירה
   const rememberChoices = () => {
-    saveLabelPrintSettings({ fontType, labelSize, printer, deliveryMethod, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, firstBagNumber });
+    saveLabelPrintSettings({ fontType, labelSize, customFormat, printer, deliveryMethod, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, firstBagNumber });
   };
 
   // מעבר לגודל מדבקה קטן יותר מוריד גודל כתב שכבר לא נכנס בו למקסימום החדש
   const handleLabelSizeChange = (newSize) => {
     setLabelSize(newSize);
-    setFontScale((current) => clampFontScale(current, newSize));
+    setFontScale((current) => clampFontScale(
+      current,
+      newSize,
+      newSize === 'custom' ? customLayout?.height : undefined
+    ));
   };
 
   const [printType, setPrintType] = useState('labels');
@@ -269,11 +309,12 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     saveSelectedRows(rowsToPrint);
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, firstBagNumber, routeAssignments, returnPath, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, firstBagNumber, routeAssignments, returnPath, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
     sessionStorage.removeItem('savedLabelSize');
+    sessionStorage.removeItem('savedCustomFormat');
     sessionStorage.removeItem('savedPrinter');
     sessionStorage.removeItem('savedFontType');
     sessionStorage.removeItem('savedDeliveryMethod');
@@ -295,7 +336,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const handlePreview = () => {
     rememberChoices();
     saveSelectedRows(rowsToPrint);
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, firstBagNumber, routeAssignments, returnPath } });
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, firstBagNumber, routeAssignments, returnPath } });
   };
 
   return (
@@ -307,10 +348,13 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
         {step === 1 && (
           <Box>
             <Typography variant="h6" mb={2}>{MODAL_TEXTS.STEP_1_TITLE}</Typography>
-            <RadioGroup value={printType} onChange={(e) => setPrintType(e.target.value)}>
+            {/* שתי עמודות שוות: "מדבקות לחלוקה" בעמודה השנייה מול "מדבקות", ומעטפות ורשימות
+                מתחת ל"מדבקות". "מדבקות לחלוקה" עוד לא מחוברת להדפסה, כמו מעטפות ורשימות */}
+            <RadioGroup value={printType} onChange={(e) => setPrintType(e.target.value)} sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
               <FormControlLabel value="labels" control={<Radio />} label={MODAL_TEXTS.LABEL_OPTION} />
-              <FormControlLabel value="envelopes" control={<Radio />} label={MODAL_TEXTS.ENVELOPES_OPTION} />
-              <FormControlLabel value="lists" control={<Radio />} label={MODAL_TEXTS.LISTS_OPTION} />
+              <FormControlLabel value="distributionLabels" control={<Radio />} label={MODAL_TEXTS.DISTRIBUTION_LABELS_OPTION} />
+              <FormControlLabel value="envelopes" control={<Radio />} label={MODAL_TEXTS.ENVELOPES_OPTION} sx={{ gridColumn: 1 }} />
+              <FormControlLabel value="lists" control={<Radio />} label={MODAL_TEXTS.LISTS_OPTION} sx={{ gridColumn: 1 }} />
             </RadioGroup>
             
             <Stack direction="row" spacing={2} justifyContent="flex-end" mt={3}>
@@ -355,7 +399,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <IconButton
                     size="small"
-                    onClick={() => setFontScale((s) => clampFontScale(s - FONT_SCALE_STEP, labelSize))}
+                    onClick={() => setFontScale((s) => clampFontScale(s - FONT_SCALE_STEP, labelSize, labelSize === 'custom' ? customLayout?.height : undefined))}
                     disabled={fontScale <= FONT_SCALE_MIN}
                   >
                     <RemoveIcon fontSize="small" />
@@ -365,8 +409,8 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <IconButton
                     size="small"
-                    onClick={() => setFontScale((s) => clampFontScale(s + FONT_SCALE_STEP, labelSize))}
-                    disabled={fontScale >= getMaxFontScale(labelSize)}
+                    onClick={() => setFontScale((s) => clampFontScale(s + FONT_SCALE_STEP, labelSize, labelSize === 'custom' ? customLayout?.height : undefined))}
+                    disabled={fontScale >= getMaxFontScale(labelSize, labelSize === 'custom' ? customLayout?.height : undefined)}
                   >
                     <AddIcon fontSize="small" />
                   </IconButton>
@@ -450,6 +494,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   >
                     <MenuItem value="standard">{MODAL_TEXTS.SIZE_STANDARD}</MenuItem>
                     <MenuItem value="large">{MODAL_TEXTS.SIZE_LARGE}</MenuItem>
+                    <MenuItem value="custom">מידות מותאמות אישית</MenuItem>
                   </Select>
                 </FormControl>
 
@@ -457,6 +502,45 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   <Typography variant="body2" color="error">
                     {MODAL_TEXTS.SIZE_LARGE_UNAVAILABLE}
                   </Typography>
+                )}
+
+                {labelSize === 'custom' && (
+                  <Stack spacing={1}>
+                    <Typography variant="body2" color="text.secondary">מידות במילימטרים</Typography>
+                    {[
+                      ['pageWidthMm', 'רוחב דף'],
+                      ['pageHeightMm', 'גובה דף'],
+                      ['labelWidthMm', 'רוחב מדבקה'],
+                      ['labelHeightMm', 'גובה מדבקה'],
+                      ['topMarginMm', 'שוליים עליונים'],
+                      ['rightMarginMm', 'שוליים ימניים'],
+                      ['bottomMarginMm', 'שוליים תחתונים'],
+                      ['leftMarginMm', 'שוליים שמאליים'],
+                      ['horizontalGapMm', 'רווח אופקי בין מדבקות'],
+                      ['verticalGapMm', 'רווח אנכי בין מדבקות'],
+                    ].map(([field, label]) => (
+                      <TextField
+                        key={field}
+                        size="small"
+                        type="number"
+                        label={label}
+                        inputProps={{ min: 0, step: 0.1 }}
+                        value={customFormat[field]}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setCustomFormat((current) => ({
+                            ...current,
+                            [field]: value === '' ? '' : Number(value),
+                          }));
+                        }}
+                      />
+                    ))}
+                    {!customFormatValid && (
+                      <Typography variant="caption" color="error">
+                        בדקו שהמידות חיוביות ושנכנסת לפחות מדבקה אחת בדף.
+                      </Typography>
+                    )}
+                  </Stack>
                 )}
 
                 <FormControl fullWidth>
@@ -503,15 +587,15 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
               <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
 
-              <LabelSheetPreview labelSize={labelSize} />
+              <LabelSheetPreview labelSize={labelSize} customFormat={customFormat} />
             </Stack>
 
             <Stack direction="row" spacing={1} justifyContent="space-between" mt={4}>
               <Button onClick={() => setStep(1)} color="inherit">{MODAL_TEXTS.BUTTON_BACK}</Button>
               <Stack direction="row" spacing={1}>
                 {onOpenLabelEditor && <Button variant="outlined" onClick={onOpenLabelEditor}>עריכת מדבקות</Button>}
-                <Button variant="outlined" onClick={handlePreview} disabled={labelSize === 'large'}>{MODAL_TEXTS.BUTTON_PREVIEW}</Button>
-                <Button variant="contained" onClick={handlePrint} color="success" disabled={labelSize === 'large'}>{MODAL_TEXTS.BUTTON_PRINT}</Button>
+                <Button variant="outlined" onClick={handlePreview} disabled={labelSize === 'large' || (labelSize === 'custom' && !customFormatValid)}>{MODAL_TEXTS.BUTTON_PREVIEW}</Button>
+                <Button variant="contained" onClick={handlePrint} color="success" disabled={labelSize === 'large' || (labelSize === 'custom' && !customFormatValid)}>{MODAL_TEXTS.BUTTON_PRINT}</Button>
               </Stack>
             </Stack>
           </Box>

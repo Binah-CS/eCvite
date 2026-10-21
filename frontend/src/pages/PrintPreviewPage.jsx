@@ -11,6 +11,7 @@ import {
   clampFontScale,
 } from '../utils/labelSheetLayout';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
+import { getCustomLabelLayout } from '../utils/labelFormats';
 
 function getLoggedUser() {
   const raw = sessionStorage.getItem('user');
@@ -126,7 +127,7 @@ function detectPrintLanguage(row, getPrintFlag) {
 // פריסת רשת אמיתית לדף מדבקות - הגדלים ומספר העמודות מגיעים מאותו מקור אמת
 // שמשמש גם את התצוגה הממוזערת במודאל, כדי ששניהם תמיד יתאימו
 const LABEL_LAYOUT = {
-  // המדבקה גבוהה רק 2.3 ס"מ בפועל - כתב גדול (h5/h6) לא נכנס בכלל, לכן כתב קטן ודחוס
+  // המדבקה גבוהה רק 2.6 ס"מ בפועל - כתב גדול (h5/h6) לא נכנס בכלל, לכן כתב קטן ודחוס
   standard: { ...REAL_LABEL_SIZES.standard, columns: getRealColumns('standard'), nameVariant: 'body2', addrVariant: 'caption' },
   large: { ...REAL_LABEL_SIZES.large, columns: getRealColumns('large'), nameVariant: 'h4', addrVariant: 'h5' },
 };
@@ -157,7 +158,7 @@ export default function PrintPreviewPage() {
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-  const { selectedRows = [], selectedItems = [], labelSize = 'standard', printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', firstBagNumber = '1', routeAssignments = {}, returnPath = '', autoPrint = false } = location.state || {};
+  const { selectedRows = [], selectedItems = [], labelSize = 'standard', customFormat, printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', firstBagNumber = '1', routeAssignments = {}, returnPath = '', autoPrint = false } = location.state || {};
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
   const savedSelectedRows = getSavedSelectedRows();
@@ -168,9 +169,13 @@ export default function PrintPreviewPage() {
       : savedSelectedRows;
   const rowsToDisplay = actualRows;
   const bagStart = Number.parseInt(firstBagNumber, 10) || 1;
-  const layout = LABEL_LAYOUT[labelSize] || LABEL_LAYOUT.standard;
+  const customLayout = labelSize === 'custom' ? getCustomLabelLayout(customFormat) : null;
+  const layout = customLayout
+    ? { ...customLayout, nameVariant: 'body2', addrVariant: 'caption' }
+    : LABEL_LAYOUT[labelSize] || LABEL_LAYOUT.standard;
+  const labelsPerPage = layout.columns * (customLayout ? layout.rows : 10);
   const fontBase = LABEL_FONT_BASE_PX[labelSize] || LABEL_FONT_BASE_PX.standard;
-  const fontFactor = clampFontScale(fontScale, labelSize) / 100;
+  const fontFactor = clampFontScale(fontScale, labelSize, customLayout?.height) / 100;
   const labelFontWeight = fontWeight === 'bold' ? 'bold' : 'normal';
   // מטמון ה-RTL של MUI הופך left/right פיזיים. start/end נשארים לוגיים ביחס
   // לכיוון העברי של המדבקה: start הוא ימין ו-end הוא שמאל.
@@ -234,7 +239,10 @@ export default function PrintPreviewPage() {
 
   return (
     <Container maxWidth="md" sx={{ mt: 4, mb: 4, '@media print': { m: 0, maxWidth: 'none', p: 0 } }}>
-      <style>{`@media print { @page { margin: 10mm 0; } }`}</style>
+      {/* הגדרות הדף נשארות תואמות לגיליון הקיים, או נלקחות מהפורמט המותאם. */}
+      <style>{customLayout
+        ? `@media print { @page { size: ${customLayout.pageWidthMm}mm ${customLayout.pageHeightMm}mm; margin: ${customLayout.topMarginMm}mm ${customLayout.rightMarginMm}mm ${customLayout.bottomMarginMm}mm ${customLayout.leftMarginMm}mm; } }`
+        : '@media print { @page { margin: 1cm 0; } }'}</style>
       <Paper
         sx={{
           p: 4,
@@ -265,6 +273,7 @@ export default function PrintPreviewPage() {
               //  שומרים את כל המצב הנוכחי בזיכרון לפני שחוזרים, כולל אילו שורות היו מסומנות
                sessionStorage.setItem('fromPreview', 'true');
                sessionStorage.setItem('savedLabelSize', labelSize);
+               if (customFormat) sessionStorage.setItem('savedCustomFormat', JSON.stringify(customFormat));
                sessionStorage.setItem('savedPrinter', printer);
                sessionStorage.setItem('savedFontType', fontType);
                sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
@@ -311,23 +320,30 @@ export default function PrintPreviewPage() {
               // רווח אופקי קטן בין העמודות - רק במסך התצוגה, לנוחות הקריאה. בהדפסה
               // בפועל זה חוזר ל-0 (למטה) כי 3 מדבקות של 7 ס"מ תופסות בדיוק את כל רוחב
               // הדף, אין מקום לרווח בלי לקלקל את היישור הפיזי מול הגיליון האמיתי
+              columnGap: 1,
+              rowGap: customLayout ? `${layout.verticalGap}px` : 1,
+              '@media print': {
+                columnGap: customLayout ? `${layout.horizontalGap}px` : 0,
+                rowGap: customLayout ? `${layout.verticalGap}px` : 1,
+                ...(customLayout ? { justifyContent: 'start' } : {}),
+              },
             }}
           >
-            {Array.from({ length: Math.ceil(rowsToDisplay.length / 30) }, (_, pageIndex) => {
-              const pageRows = rowsToDisplay.slice(pageIndex * 30, pageIndex * 30 + 30);
-              const hasNextPage = pageIndex < Math.ceil(rowsToDisplay.length / 30) - 1;
+            {Array.from({ length: Math.ceil(rowsToDisplay.length / labelsPerPage) }, (_, pageIndex) => {
+              const pageRows = rowsToDisplay.slice(pageIndex * labelsPerPage, pageIndex * labelsPerPage + labelsPerPage);
+              const hasNextPage = pageIndex < Math.ceil(rowsToDisplay.length / labelsPerPage) - 1;
               return (
               <Box
                 key={pageIndex}
                 sx={{
                   display: 'grid', gridTemplateColumns: `repeat(${layout.columns}, ${layout.width}px)`, justifyContent: 'center',
-                  columnGap: 1, rowGap: 1, mb: hasNextPage ? 3 : 0,
+                  columnGap: customLayout ? `${layout.horizontalGap}px` : 1, rowGap: customLayout ? `${layout.verticalGap}px` : 1, mb: hasNextPage ? 3 : 0,
                   breakAfter: hasNextPage ? 'page' : 'auto', pageBreakAfter: hasNextPage ? 'always' : 'auto',
-                  '@media print': { columnGap: 0, mb: 0 },
+                  '@media print': { columnGap: customLayout ? `${layout.horizontalGap}px` : 0, rowGap: customLayout ? `${layout.verticalGap}px` : 1, mb: 0, ...(customLayout ? { justifyContent: 'start' } : {}) },
                 }}
               >
             {pageRows.map((row, index) => {
-              const absoluteIndex = pageIndex * 30 + index;
+              const absoluteIndex = pageIndex * labelsPerPage + index;
               const labelPrintFlag = (field) => row.routeAssignment && ['street', 'houseNo', 'city'].includes(field)
                 ? true
                 : getPrintFlag(field);
