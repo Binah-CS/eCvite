@@ -283,6 +283,20 @@ export default function ExcelImport({ onImport }) {
 
       Object.assign(matched, matchedByValues);
 
+      // בדיקת ייבוא זמנית: מאפשרת לראות ב-Console בדיוק איזו עמודה בקובץ הותאמה
+      // לכל שדה, ובפרט אם עמודת מספר סידורי הותאמה בטעות ל"שייך ל".
+      console.table(
+        Object.entries(matched).map(([excelHeader, technicalName]) => ({
+          excelHeader,
+          technicalName,
+          sampleValues: json
+            .map((row) => row[excelHeader])
+            .filter((value) => value !== undefined && value !== '')
+            .slice(0, 5)
+            .join(' | '),
+        }))
+      );
+
       // עמודת מספר סידורי עלולה להישמר בטעות ככינוי של "שייך ל" ולהכניס לכל נמען
       // מספר עולה לפני שם הקבוצה. לא מייבאים עמודה מספרית טהורה לשדה הזה, אלא
       // מחזירים אותה למסך ההתאמה הידנית שבו גם אי אפשר לבחור עבורה "שייך ל".
