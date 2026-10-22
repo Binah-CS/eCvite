@@ -13,8 +13,10 @@ import { buildSavedSnapshot, selectRowsToSave, buildOrderToSave } from '../utils
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
-const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
-const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+// v2 - בגרסה הקודמת ההדפסה שמרה כאן גם את השורות שהודפסו (לא רק את מה שסומן), ושאריות
+// כאלה בלשונית פתוחה היו מסמנות אותן שוב אחרי חזרה מהתצוגה המקדימה (#118). שם חדש = לא נקראות
+const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds.v2';
+const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows.v2';
 
 function getSavedSelectedIds() {
   try {
@@ -549,6 +551,10 @@ export default function DashboardPage() {
 
   const handleLogout = () => {
     sessionStorage.removeItem('user');
+    // השורות שסומנו (ושל התצוגה המקדימה) שייכות למשתמשת הזו - לא עוברות לבאה באותה לשונית
+    sessionStorage.removeItem(SELECTED_ROW_IDS_STORAGE_KEY);
+    sessionStorage.removeItem(SELECTED_ROWS_STORAGE_KEY);
+    sessionStorage.removeItem('printPreviewRows');
     window.location.href = '/login';
   };
   const getGreeting = () => {
