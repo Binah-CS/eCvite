@@ -82,11 +82,47 @@ function isBlankRow(row) {
   return Object.values(row).every((value) => String(value ?? '').trim() === '');
 }
 
+function isNumericOnlyColumn(rows, header) {
+  const values = rows
+    .map((row) => String(row[header] ?? '').trim())
+    .filter(Boolean);
+  return values.length > 0 && values.every((value) => /^\d+$/.test(value));
+}
+
+function moveDuplicateMappingsToManualMatch(matched, headers) {
+  const usedTechnicalNames = new Set();
+  const duplicateHeaders = [];
+
+  headers.forEach((header) => {
+    const technicalName = matched[header];
+    if (!technicalName) return;
+    if (usedTechnicalNames.has(technicalName)) {
+      delete matched[header];
+      duplicateHeaders.push(header);
+      return;
+    }
+    usedTechnicalNames.add(technicalName);
+  });
+
+  return duplicateHeaders;
+}
+
 // שורה שאין בה כלום בעמודת מדינה - כנראה כי לא כתבו שם משהו במיוחד - מקבלת כברירת מחדל "ישראל"
 function applyDefaultCountry(rows) {
   return rows.map((row) =>
     String(row.country ?? '').trim() ? row : { ...row, country: 'ישראל' }
   );
+}
+
+// Excel stores boolean values as free text in many files. Convert those values
+// before sending the imported rows to the backend, which expects true or false.
+function normalizePrintField(rows) {
+  const truthyValues = new Set(['true', 'כן', 'y', 'yes', '1']);
+  return rows.map((row) => {
+    if (row.print === undefined) return row;
+    const normalized = String(row.print ?? '').trim().toLowerCase();
+    return { ...row, print: truthyValues.has(normalized) };
+  });
 }
 
 // ממלאת "שייך ל" = שם הגליון עבור שורות שמגיעות מגליונות שהמשתמשת אישרה, ורק כשהשדה
@@ -120,6 +156,31 @@ function mergeDuplicateIdentities(rows) {
     }
   });
   return order.map((mapKey) => map.get(mapKey));
+}
+
+// מספרי סידור אינם חלק משם הקבוצה. מסירים ספרות עבריות, ערביות ואנגליות
+// מכל ערך שמגיע ל"שייך ל", גם אם הן נכתבו באותה עמודה לצד השם.
+function removeNumbersFromBelongsTo(rows) {
+  return rows.map((row) => {
+    if (row.belongsTo === undefined) return row;
+    const belongsTo = String(row.belongsTo ?? '')
+      .replace(/[0-9\u0660-\u0669\u06F0-\u06F9]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return { ...row, belongsTo };
+  });
+}
+
+// מנקים קודם מספרים שהגיעו מהקובץ, ורק אחר כך מחליטים אם השדה ריק ויש למלא אותו
+// בשם הגיליון. ניקוי נוסף בסוף מטפל גם במקרה שבו בשם הגיליון עצמו יש ספרות.
+function prepareBelongsToForImport(rows, rowSheetNames, confirmedSheets) {
+  return removeNumbersFromBelongsTo(
+    applyBelongsToFromSheet(
+      removeNumbersFromBelongsTo(rows),
+      rowSheetNames,
+      confirmedSheets
+    )
+  );
 }
 
 export default function ExcelImport({ onImport }) {
@@ -179,7 +240,9 @@ export default function ExcelImport({ onImport }) {
   // confirmedSheets === null אומר "עוד לא שאלנו" - אחרי שהמשתמשת עונה זה הופך ל-Set אמיתי
   const runColumnMatching = async (json, rowSheetNames, headerLabels, confirmedSheets, fileName) => {
     const finish = (rows) =>
-      onImport(mergeDuplicateIdentities(applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets ?? new Set())));
+      onImport(mergeDuplicateIdentities(
+        prepareBelongsToForImport(rows, rowSheetNames, confirmedSheets ?? new Set())
+      ));
 
     try {
       const loadedColumns = await getExcelColumns();
@@ -220,8 +283,38 @@ export default function ExcelImport({ onImport }) {
 
       Object.assign(matched, matchedByValues);
 
+      // בדיקת ייבוא זמנית: מאפשרת לראות ב-Console בדיוק איזו עמודה בקובץ הותאמה
+      // לכל שדה, ובפרט אם עמודת מספר סידורי הותאמה בטעות ל"שייך ל".
+      console.table(
+        Object.entries(matched).map(([excelHeader, technicalName]) => ({
+          excelHeader,
+          technicalName,
+          sampleValues: json
+            .map((row) => row[excelHeader])
+            .filter((value) => value !== undefined && value !== '')
+            .slice(0, 5)
+            .join(' | '),
+        }))
+      );
+
+      // עמודת מספר סידורי עלולה להישמר בטעות ככינוי של "שייך ל" ולהכניס לכל נמען
+      // מספר עולה לפני שם הקבוצה. לא מייבאים עמודה מספרית טהורה לשדה הזה, אלא
+      // מחזירים אותה למסך ההתאמה הידנית שבו גם אי אפשר לבחור עבורה "שייך ל".
+      const blockedBelongsToHeaders = Object.entries(matched)
+        .filter(([header, technicalName]) => technicalName === 'belongsTo' && isNumericOnlyColumn(json, header))
+        .map(([header]) => header);
+      blockedBelongsToHeaders.forEach((header) => delete matched[header]);
+
+      // גם אם כותרות שונות זוהו כאותו שדה, לא מחברים את הערכים שלהן יחד. העמודה
+      // השנייה חוזרת למסך ההתאמה הידנית, כדי שלא ייווצר ערך כמו "165 חברות".
+      const duplicateMappedHeaders = moveDuplicateMappingsToManualMatch(matched, headers);
+
       // עמודות שאין בהן שום נתון בקובץ בכלל - אין טעם לשאול עליהן, פשוט מדלגים
-      const unmatchedWithData = stillUnmatched.filter((header) =>
+      const unmatchedWithData = [...new Set([
+        ...stillUnmatched,
+        ...blockedBelongsToHeaders,
+        ...duplicateMappedHeaders,
+      ])].filter((header) =>
         json.some((row) => String(row[header] ?? '').trim() !== '')
       );
 
@@ -231,6 +324,7 @@ export default function ExcelImport({ onImport }) {
           matched,
           unmatchedHeaders: unmatchedWithData,
           columns: loadedColumns,
+          alreadyMappedTechnicalNames: Object.values(matched),
           headerLabels,
           rowSheetNames,
           confirmedSheets,
@@ -243,8 +337,9 @@ export default function ExcelImport({ onImport }) {
       finish(mappedRows);
     } catch (err) {
       console.error('לא ניתן היה לטעון את הגדרות השדות מהשרת:', err);
-      setMatchError('לא ניתן היה להתאים עמודות אוטומטית (השרת לא זמין) - הקובץ יובא כמו שהוא.');
-      finish(json);
+      setMatchError('לא ניתן היה להתאים עמודות אוטומטית (השרת לא זמין). הייבוא נעצר כדי למנוע שמירת נתונים בשדות שגויים.');
+      // בלי הגדרות העמודות אין דרך בטוחה לדעת לאיזה שדה שייך כל ערך. עוצרים כאן
+      // במקום להכניס רשומות עם כותרות מקוריות או שדות שגויים.
     }
   };
 
@@ -344,8 +439,10 @@ export default function ExcelImport({ onImport }) {
       invalidateExcelColumnsCache();
     }
 
-    const mappedRows = applyDefaultCountry(remapRows(json, finalMatched));
-    onImport(mergeDuplicateIdentities(applyBelongsToFromSheet(mappedRows, rowSheetNames, confirmedSheets)));
+    const mappedRows = normalizePrintField(applyDefaultCountry(remapRows(json, finalMatched)));
+    onImport(mergeDuplicateIdentities(
+      prepareBelongsToForImport(mappedRows, rowSheetNames, confirmedSheets)
+    ));
   };
 
   // ביטול אמיתי - בניגוד למה שהיה קודם, שום שורה לא נכנסת לטבלה (לא רק מדלגים על
