@@ -18,4 +18,9 @@ public class SaveRecipientsRequest {
     // מאפשר לשלוח מחיקה+שמירה כבקשת HTTP אחת (למשל אחרי פתרון שורות כפולות)
     // במקום שתי בקשות רשת נפרדות לגמרי - ר' RecipientController.saveRecipients
     private List<String> hashCodesToDelete;
+
+    // אופציונלי - הסדר המלא של הטבלה אצל המשתמשת, מהשורה הראשונה לאחרונה. לנמען קיים -
+    // ה-hashCode שלו; לשורה חדשה שעוד אין לה hash - "#" ואחריו המקום שלה ב-recipients
+    // של הבקשה הזו (למשל "#0"). נשלח רק כשהסדר השתנה או כשיש שורות חדשות
+    private List<String> order;
 }

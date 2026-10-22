@@ -34,3 +34,20 @@ export function selectRowsToSave(rows, snapshot) {
     return saved === undefined || saved !== rowSignature(row);
   });
 }
+
+// הסדר המלא של הטבלה לשליחה בשמירה, או null כשאין צורך - כדי ששורה שנוספה באמצע
+// לא תעבור לסוף בטעינה הבאה מהשרת. נמען קיים - ה-hashCode שלו; שורה חדשה - "#" ואחריו
+// המקום שלה ב-rowsToSave (הרשימה שנשלחת בפועל). נשלח רק כשיש שורות חדשות, או כשסדר
+// השורות השמורות שונה מהסדר שבו נטענו/נשמרו בפעם האחרונה (ה-snapshot שומר על הסדר)
+export function buildOrderToSave(rows, rowsToSave, snapshot) {
+  const hasNewRows = rows.some((row) => !row.hashCode);
+  const savedNow = rows.map((row) => row.hashCode).filter(Boolean);
+  const stillInTable = new Set(savedNow);
+  const savedBefore = [...snapshot.keys()].filter((hashCode) => stillInTable.has(hashCode));
+  const sameOrder = savedBefore.length === savedNow.length
+    && savedBefore.every((hashCode, i) => hashCode === savedNow[i]);
+  if (!hasNewRows && sameOrder) return null;
+
+  const indexInRequest = new Map(rowsToSave.map((row, i) => [row, i]));
+  return rows.map((row) => (row.hashCode ? row.hashCode : `#${indexInRequest.get(row)}`));
+}

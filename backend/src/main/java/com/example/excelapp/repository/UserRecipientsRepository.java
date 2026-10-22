@@ -15,8 +15,10 @@ public interface UserRecipientsRepository
     boolean existsByUserAndRecipient(User user, Recipients recipient);
 
     // JOIN FETCH טוען את ה-recipient המקושר באותה שאילתה - בלי זה, כל recipient
-    // נטען ב-SELECT נפרד משלו (N+1), מה שהפך טעינת נמענים למשתמש עם הרבה רשומות לאיטית מאוד
-    @Query("SELECT ur FROM UserRecipients ur JOIN FETCH ur.recipient WHERE ur.user = :user")
+    // נטען ב-SELECT נפרד משלו (N+1), מה שהפך טעינת נמענים למשתמש עם הרבה רשומות לאיטית מאוד.
+    // בסדר של הטבלה אצל המשתמשת (sortOrder), ומה שעוד אין לו מקום - בסוף, לפי סדר ההוספה
+    @Query("SELECT ur FROM UserRecipients ur JOIN FETCH ur.recipient WHERE ur.user = :user "
+            + "ORDER BY ur.sortOrder ASC NULLS LAST, ur.id ASC")
     List<UserRecipients> findByUser(@Param("user") User user);
 
     // מחזירה רק את מחרוזות ה-hash (לא את הישויות המלאות) - נמנעת מ-N+1 שאילתות
