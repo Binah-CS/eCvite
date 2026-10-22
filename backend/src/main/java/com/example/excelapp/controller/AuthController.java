@@ -84,4 +84,25 @@ private final UserRepository userRepository;
         return ResponseEntity.ok(user);
     }
 
+    // שומרת את העדפות התצוגה של הטבלה ("שורות בעמוד") - ר' User.tablePreferences (#90)
+    @PutMapping("/table-preferences")
+    public ResponseEntity<User> updateTablePreferences(@RequestBody Map<String, String> request) {
+        String phone = request.get("phone");
+        String tablePreferences = request.get("tablePreferences");
+
+        // כמו labelPrintSettings - העמודה מוגבלת ל-1,000 תווים, ערך ארוך יותר נדחה מראש
+        if (tablePreferences != null && tablePreferences.length() > 1000) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        User user = userRepository.findByPhone(phone);
+        if (user == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        user.setTablePreferences(tablePreferences);
+        userRepository.save(user);
+        return ResponseEntity.ok(user);
+    }
+
 }

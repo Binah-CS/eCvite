@@ -109,6 +109,10 @@ const api = {
   updateLabelPrintSettings: (phone, labelPrintSettings) =>
       apiClient.put('/auth/label-print-settings', { phone, labelPrintSettings }),
 
+  // העדפות התצוגה של הטבלה של המשתמשת ("שורות בעמוד") (#90)
+  updateTablePreferences: (phone, tablePreferences) =>
+      apiClient.put('/auth/table-preferences', { phone, tablePreferences }),
+
   getRecipientHistory: (hashCode, phone) =>
       apiClient.get(`/recipients/${encodeURIComponent(hashCode)}/history`, { params: { phone } }),
 };
