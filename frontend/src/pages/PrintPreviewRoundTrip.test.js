@@ -10,6 +10,8 @@ import PrintPreviewPage from './PrintPreviewPage';
 global.IS_REACT_ACT_ENVIRONMENT = true;
 HTMLCanvasElement.prototype.getContext = () => ({ font: '', measureText: (t) => ({ width: String(t).length * 7 }) });
 window.print = () => {};
+// כל בדיקה כאן עוברת תהליך שלם (טבלה, הדפסה, תצוגה מקדימה וחזרה) - יותר מ-5 השניות של ברירת המחדל
+jest.setTimeout(30000);
 
 const mockRecipients = [
   { hashCode: 'a', id: 'a', man: 'משה', lastName: 'כהן', city: 'אלעד', street: 'הרצל', houseNo: '1' },
@@ -30,19 +32,32 @@ jest.mock('../services/api', () => ({
 
 const wait = (ms = 100) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
 
+// מחכה עד שהתנאי מתקיים (עד 5 שניות) - כשכל הבדיקות רצות יחד המחשב עמוס והדף נטען לאט
+// יותר, אז המתנה קבועה לא מספיקה תמיד
+const waitFor = async (condition, what) => {
+  for (let i = 0; i < 100; i += 1) {
+    const result = condition();
+    if (result) return result;
+    await wait(50);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+};
+
+const findButton = (text) => [...document.body.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
+
 const clickButton = async (text) => {
-  const button = [...document.body.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
-  if (!button) throw new Error(`no button "${text}"`);
+  const button = await waitFor(() => findButton(text), `button "${text}"`);
   await act(async () => { button.click(); });
   await wait();
 };
 
+const waitForTable = () => waitFor(() => document.body.querySelector('.MuiDataGrid-row'), 'table rows');
+
 // הקלדה בשורת החיפוש של הטבלה (React דורש לעבור דרך ה-setter הטבעי כדי שה-onChange ירוץ)
 const search = async (text) => {
-  const input = [...document.body.querySelectorAll('.MuiTextField-root')]
+  const input = await waitFor(() => [...document.body.querySelectorAll('.MuiTextField-root')]
     .find((field) => field.textContent.includes('חיפוש בכל העמודות'))
-    ?.querySelector('input');
-  if (!input) throw new Error('no search input');
+    ?.querySelector('input'), 'search input');
   const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
   await act(async () => {
     setValue.call(input, text);
@@ -54,9 +69,9 @@ const search = async (text) => {
 // מהטבלה: "הדפסה", מדבקות, "המשך", "תצוגה מקדימה" - ומחזיר את השמות שמופיעים בתצוגה המקדימה
 const printPreviewNames = async () => {
   await clickButton('הדפסה');
-  await wait(200);
   await clickButton('המשך');
   await clickButton('תצוגה מקדימה');
+  await waitFor(() => findButton('ביטול וחזרה'), 'print preview page');
   const text = document.body.textContent;
   return mockRecipients.map((r) => r.man).filter((name) => text.includes(name));
 };
@@ -67,7 +82,8 @@ const renderApp = async () => {
   // זה ה-render של React (createRoot), לא של Testing Library - ו-React דורש act סביבו
   // eslint-disable-next-line testing-library/no-unnecessary-act
   await act(async () => {
-    createRoot(container).render(
+    root = createRoot(container);
+    root.render(
       <MemoryRouter initialEntries={['/dashboard']}>
         <Routes>
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -76,8 +92,17 @@ const renderApp = async () => {
       </MemoryRouter>
     );
   });
-  await wait(300);
+  await waitForTable();
 };
+
+// הדף של הבדיקה הקודמת נסגר כמו שצריך (unmount) לפני שמנקים - אחרת React מנסה להסיר צמתים שכבר נמחקו
+let root = null;
+afterEach(async () => {
+  if (root) {
+    await act(async () => { root.unmount(); });
+    root = null;
+  }
+});
 
 beforeEach(() => {
   sessionStorage.clear();
@@ -93,19 +118,21 @@ test('after "ביטול וחזרה", printing again uses the new filter, not the
   expect(await printPreviewNames()).toEqual(['משה', 'אהרן']);
 
   await clickButton('ביטול וחזרה');
-  await wait(300);
+  await waitForTable();
   await search('חיפה');
   expect(await printPreviewNames()).toEqual(['דוד']);
 });
 
-test('after "ביטול וחזרה" with no filter, printing again prints the whole table', async () => {
+// מאז #142 הסינון נשמר בחזרה לטבלה - כאן המשתמשת מבטלת אותו בעצמה, ואז מודפסת כל הטבלה
+test('after "ביטול וחזרה" and clearing the filter, printing again prints the whole table', async () => {
   await renderApp();
 
   await search('אלעד');
   expect(await printPreviewNames()).toEqual(['משה', 'אהרן']);
 
   await clickButton('ביטול וחזרה');
-  await wait(300);
+  await waitForTable();
+  await search('');
   expect(await printPreviewNames()).toEqual(['משה', 'אהרן', 'דוד']);
 });
 
@@ -129,6 +156,6 @@ test('rows that were really selected stay selected after "ביטול וחזרה"
   expect(await printPreviewNames()).toEqual(['דוד']);
 
   await clickButton('ביטול וחזרה');
-  await wait(300);
+  await waitForTable();
   expect(await printPreviewNames()).toEqual(['דוד']);
 });

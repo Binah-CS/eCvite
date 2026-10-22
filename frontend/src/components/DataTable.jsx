@@ -87,6 +87,22 @@ function savePageSize(pageSize) {
   }
 }
 
+// החיפוש, צ'יפי הסינון, חלון "סינון" והמיון - נשמרים ללשונית (sessionStorage) לפי המשתמשת,
+// כדי שחזרה לטבלה (מהתצוגה המקדימה / מההגדרות) תחזיר אותה בדיוק כמו שעזבו אותה (#142).
+// לאורך השימוש המקומי בלבד, כמו באקסל - נמחק ביציאה מהמשתמש (ר' handleLogout)
+export function tableViewStorageKey(phone) {
+  return `tableView-${phone}`;
+}
+
+function readSavedTableView(phone) {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(tableViewStorageKey(phone)));
+    return saved && typeof saved === 'object' ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
 // תרגום סוג הפעולה מטבלת recipients_history (נקבע ע"י ה-trigger בבסיס הנתונים,
 // TG_OP הסטנדרטי של פוסטגרס) לתצוגה בעברית בחלונית ההסטוריה
 const HISTORY_OPERATION_LABELS = { INSERT: 'יצירה', UPDATE: 'עדכון', DELETE: 'מחיקה' };
@@ -215,13 +231,14 @@ function ColumnHeader({
   );
 }
 
-export default function DataTable({ records, loading, onSave, onAutoSave, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
+export default function DataTable({ records, loading, onSave, onAutoSave, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone, saveRef }) {
   const [rows, setRows] = useState(records);
   const [selectionModel, setSelectionModel] = useState(initialSelectedIds || []);
   const [activeRowId, setActiveRowId] = useState(null);
-  const [sortModel, setSortModel] = useState([]);
-  const [activeFilters, setActiveFilters] = useState([]);
-  const [inputValue, setInputValue] = useState('');
+  const [savedTableView] = useState(() => readSavedTableView(phone));
+  const [sortModel, setSortModel] = useState(Array.isArray(savedTableView.sortModel) ? savedTableView.sortModel : []);
+  const [activeFilters, setActiveFilters] = useState(Array.isArray(savedTableView.activeFilters) ? savedTableView.activeFilters : []);
+  const [inputValue, setInputValue] = useState(typeof savedTableView.inputValue === 'string' ? savedTableView.inputValue : '');
   const [fieldDefs, setFieldDefs] = useState([]);
 
   const [problemQueue, setProblemQueue] = useState([]); // תור התאים שקופצים ביניהם לתיקון (כפתור "תיקון שדות") - {id, field}
@@ -457,19 +474,22 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // "תיקון שדות" הנפרד בסרגל הכלים, ושמירה תמיד נשמרת מיד כמו שהטבלה נמצאת
   const proceedAfterDuplicates = (rowsToSave, extraDeleteIds = []) => {
     if (extraDeleteIds.length) pendingExtraDeleteIdsRef.current = extraDeleteIds;
-    onSave(rowsToSave, pendingExtraDeleteIdsRef.current);
+    const result = onSave(rowsToSave, pendingExtraDeleteIdsRef.current);
     pendingExtraDeleteIdsRef.current = [];
+    return result;
   };
 
+  // מחזירה את תוצאת השמירה (Promise של true/false מ-handleSave), או false כשנפתחה חלונית
+  // השורות הזהות - אז השמירה תקרה רק אחרי שהמשתמשת תבחר בה (ר' "שמור והדפס", #142)
   const handleSaveClick = () => {
     const groups = findDuplicateGroups(rows);
     if (groups.length > 0) {
       setDuplicateGroups(groups);
       setDuplicateChoices({});
       setDuplicateDialogOpen(true);
-      return;
+      return false;
     }
-    proceedAfterDuplicates(rows);
+    return proceedAfterDuplicates(rows);
   };
 
   // Ctrl+S (או Cmd+S במק) = לחיצה על "שמור", כולל בדיקת הכפילויות. ref כדי שהמאזין
@@ -479,6 +499,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // הדפדפן פותח את חלון "שמירת הדף" שלו
   const saveShortcutRef = useRef(handleSaveClick);
   saveShortcutRef.current = handleSaveClick;
+  // אותה שמירה בדיוק, גם לדשבורד - בשביל "שמור והדפס" (#142)
+  if (saveRef) saveRef.current = handleSaveClick;
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (!(event.ctrlKey || event.metaKey) || event.code !== 'KeyS') return;
@@ -1118,8 +1140,23 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
 
   // התנאים של חלון "סינון" (ר' FilterBuilder.jsx): [{ id, field, mode, values }].
   // filterBuilderAnchor - הכפתור שהחלון פתוח ממנו, או null כשהוא סגור
-  const [filterConditions, setFilterConditions] = useState([]);
+  const [filterConditions, setFilterConditions] = useState(
+    Array.isArray(savedTableView.filterConditions) ? savedTableView.filterConditions : []
+  );
   const [filterBuilderAnchor, setFilterBuilderAnchor] = useState(null);
+
+  // שומרים את מצב הטבלה בכל שינוי - ר' tableViewStorageKey למעלה
+  useEffect(() => {
+    if (!phone) return;
+    try {
+      sessionStorage.setItem(
+        tableViewStorageKey(phone),
+        JSON.stringify({ inputValue, activeFilters, filterConditions, sortModel })
+      );
+    } catch {
+      // לא קריטי - בחזרה לטבלה הסינון פשוט לא יישמר
+    }
+  }, [phone, inputValue, activeFilters, filterConditions, sortModel]);
 
   const handleFullReset = () => {
     setActiveFilters([]);
