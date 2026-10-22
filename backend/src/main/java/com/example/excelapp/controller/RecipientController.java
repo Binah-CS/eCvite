@@ -232,7 +232,6 @@ public class RecipientController {
         return String.join(", ", values);
     }
 
-
     @GetMapping
     public ResponseEntity<?> getRecipients(@RequestParam String phone) {
 
