@@ -114,6 +114,17 @@ function applyDefaultCountry(rows) {
   );
 }
 
+// Excel stores boolean values as free text in many files. Convert those values
+// before sending the imported rows to the backend, which expects true or false.
+function normalizePrintField(rows) {
+  const truthyValues = new Set(['true', 'כן', 'y', 'yes', '1']);
+  return rows.map((row) => {
+    if (row.print === undefined) return row;
+    const normalized = String(row.print ?? '').trim().toLowerCase();
+    return { ...row, print: truthyValues.has(normalized) };
+  });
+}
+
 // ממלאת "שייך ל" = שם הגליון עבור שורות שמגיעות מגליונות שהמשתמשת אישרה, ורק כשהשדה
 // עדיין ריק (לא דורסת ערך אמיתי שכבר קיים בשורה עצמה מהקובץ)
 function applyBelongsToFromSheet(rows, rowSheetNames, confirmedSheets) {
