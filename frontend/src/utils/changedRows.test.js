@@ -1,4 +1,4 @@
-import { buildSavedSnapshot, rowSignature, selectRowsToSave } from './changedRows';
+import { buildSavedSnapshot, rowSignature, selectRowsToSave, buildOrderToSave } from './changedRows';
 
 const savedRow = {
   hashCode: 'h1', man: 'יוסי', lastName: 'כהן', city: 'ירושלים', phone: null, print: false,
@@ -35,6 +35,34 @@ describe('selectRowsToSave', () => {
 
     const toSave = selectRowsToSave(table, snapshot);
     expect(toSave.map((r) => r.man)).toEqual(['שורה חדשה', 'נמען10']);
+  });
+});
+
+describe('buildOrderToSave', () => {
+  const a = { hashCode: 'a', man: 'א' };
+  const b = { hashCode: 'b', man: 'ב' };
+  const c = { hashCode: 'c', man: 'ג' };
+  const snapshot = buildSavedSnapshot([a, b, c]);
+
+  test('same order and no new rows - order is not sent', () => {
+    const table = [a, b, { ...c, city: 'חיפה' }];
+    expect(buildOrderToSave(table, selectRowsToSave(table, snapshot), snapshot)).toBeNull();
+  });
+
+  test('a deleted row does not count as a change of order', () => {
+    expect(buildOrderToSave([a, c], [], snapshot)).toBeNull();
+  });
+
+  test('a new row in the middle - full order with its place in the request', () => {
+    const newRow = { id: 9, man: 'חדש' };
+    const edited = { ...c, city: 'חיפה' };
+    const table = [a, newRow, b, edited];
+    const rowsToSave = selectRowsToSave(table, snapshot); // [newRow, edited]
+    expect(buildOrderToSave(table, rowsToSave, snapshot)).toEqual(['a', '#0', 'b', 'c']);
+  });
+
+  test('saved rows in a different order - order is sent', () => {
+    expect(buildOrderToSave([b, a, c], [], snapshot)).toEqual(['b', 'a', 'c']);
   });
 });
 

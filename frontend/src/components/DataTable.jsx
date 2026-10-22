@@ -87,6 +87,22 @@ function savePageSize(pageSize) {
   }
 }
 
+// החיפוש, צ'יפי הסינון, חלון "סינון" והמיון - נשמרים ללשונית (sessionStorage) לפי המשתמשת,
+// כדי שחזרה לטבלה (מהתצוגה המקדימה / מההגדרות) תחזיר אותה בדיוק כמו שעזבו אותה (#142).
+// לאורך השימוש המקומי בלבד, כמו באקסל - נמחק ביציאה מהמשתמש (ר' handleLogout)
+export function tableViewStorageKey(phone) {
+  return `tableView-${phone}`;
+}
+
+function readSavedTableView(phone) {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(tableViewStorageKey(phone)));
+    return saved && typeof saved === 'object' ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
 // תרגום סוג הפעולה מטבלת recipients_history (נקבע ע"י ה-trigger בבסיס הנתונים,
 // TG_OP הסטנדרטי של פוסטגרס) לתצוגה בעברית בחלונית ההסטוריה
 const HISTORY_OPERATION_LABELS = { INSERT: 'יצירה', UPDATE: 'עדכון', DELETE: 'מחיקה' };
@@ -215,13 +231,14 @@ function ColumnHeader({
   );
 }
 
-export default function DataTable({ records, loading, onSave, onAutoSave, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
+export default function DataTable({ records, loading, onSave, onAutoSave, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone, saveRef }) {
   const [rows, setRows] = useState(records);
   const [selectionModel, setSelectionModel] = useState(initialSelectedIds || []);
   const [activeRowId, setActiveRowId] = useState(null);
-  const [sortModel, setSortModel] = useState([]);
-  const [activeFilters, setActiveFilters] = useState([]);
-  const [inputValue, setInputValue] = useState('');
+  const [savedTableView] = useState(() => readSavedTableView(phone));
+  const [sortModel, setSortModel] = useState(Array.isArray(savedTableView.sortModel) ? savedTableView.sortModel : []);
+  const [activeFilters, setActiveFilters] = useState(Array.isArray(savedTableView.activeFilters) ? savedTableView.activeFilters : []);
+  const [inputValue, setInputValue] = useState(typeof savedTableView.inputValue === 'string' ? savedTableView.inputValue : '');
   const [fieldDefs, setFieldDefs] = useState([]);
 
   const [problemQueue, setProblemQueue] = useState([]); // תור התאים שקופצים ביניהם לתיקון (כפתור "תיקון שדות") - {id, field}
@@ -230,7 +247,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const duplicateDialogOpenRef = useRef(duplicateDialogOpen); // ל-Ctrl+S - לא לפתוח שוב את חלונית הכפילויות כשהיא כבר פתוחה
   duplicateDialogOpenRef.current = duplicateDialogOpen;
-  const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא כתובת
+  const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא בשורה
   const [exportMenuAnchor, setExportMenuAnchor] = useState(null); // כפתור "יצוא" - תפריט הדפסת מדבקות / הורדת קובץ
   const [secondarySortFields, setSecondarySortFields] = useState([]); // תת-מיון: שרשרת עמודות לשבירת שוויון, לפי בחירת המשתמשת
   const [columnOrder, setColumnOrder] = useState(null); // null = סדר ברירת המחדל (defaultOrder) - אחרת מערך שמות שדות בסדר שהמשתמשת גררה
@@ -273,10 +290,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     const handleNativeContextMenu = (event) => {
       const cellEl = event.target.closest('.MuiDataGrid-cell');
       if (!cellEl) return;
+      // קליק ימני על כל תא בשורה פותח את תפריט השורה (מחיקה, הוספה מעל/מתחת, היסטוריה - #95).
+      // בעמודות כתובת יש בו גם "העבר להערת כתובת", ובעמודת הערת הכתובת - "החזר ל..."
       const field = cellEl.getAttribute('data-field');
-      // עמודות כתובת - קליק ימני מעביר ערך להערת כתובת. עמודת הערת הכתובת עצמה -
-      // קליק ימני מציע להחזיר ערכים שכבר הועברו אליה בעבר בחזרה לשדה המקורי שלהם
-      if (!ADDRESS_FIELDS.includes(field) && field !== 'addressNote') return;
       const rowEl = event.target.closest('.MuiDataGrid-row');
       const id = rowEl ? rowEl.getAttribute('data-id') : null;
       if (!id) return;
@@ -458,19 +474,22 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // "תיקון שדות" הנפרד בסרגל הכלים, ושמירה תמיד נשמרת מיד כמו שהטבלה נמצאת
   const proceedAfterDuplicates = (rowsToSave, extraDeleteIds = []) => {
     if (extraDeleteIds.length) pendingExtraDeleteIdsRef.current = extraDeleteIds;
-    onSave(rowsToSave, pendingExtraDeleteIdsRef.current);
+    const result = onSave(rowsToSave, pendingExtraDeleteIdsRef.current);
     pendingExtraDeleteIdsRef.current = [];
+    return result;
   };
 
+  // מחזירה את תוצאת השמירה (Promise של true/false מ-handleSave), או false כשנפתחה חלונית
+  // השורות הזהות - אז השמירה תקרה רק אחרי שהמשתמשת תבחר בה (ר' "שמור והדפס", #142)
   const handleSaveClick = () => {
     const groups = findDuplicateGroups(rows);
     if (groups.length > 0) {
       setDuplicateGroups(groups);
       setDuplicateChoices({});
       setDuplicateDialogOpen(true);
-      return;
+      return false;
     }
-    proceedAfterDuplicates(rows);
+    return proceedAfterDuplicates(rows);
   };
 
   // Ctrl+S (או Cmd+S במק) = לחיצה על "שמור", כולל בדיקת הכפילויות. ref כדי שהמאזין
@@ -480,6 +499,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // הדפדפן פותח את חלון "שמירת הדף" שלו
   const saveShortcutRef = useRef(handleSaveClick);
   saveShortcutRef.current = handleSaveClick;
+  // אותה שמירה בדיוק, גם לדשבורד - בשביל "שמור והדפס" (#142)
+  if (saveRef) saveRef.current = handleSaveClick;
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (!(event.ctrlKey || event.metaKey) || event.code !== 'KeyS') return;
@@ -1119,8 +1140,23 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
 
   // התנאים של חלון "סינון" (ר' FilterBuilder.jsx): [{ id, field, mode, values }].
   // filterBuilderAnchor - הכפתור שהחלון פתוח ממנו, או null כשהוא סגור
-  const [filterConditions, setFilterConditions] = useState([]);
+  const [filterConditions, setFilterConditions] = useState(
+    Array.isArray(savedTableView.filterConditions) ? savedTableView.filterConditions : []
+  );
   const [filterBuilderAnchor, setFilterBuilderAnchor] = useState(null);
+
+  // שומרים את מצב הטבלה בכל שינוי - ר' tableViewStorageKey למעלה
+  useEffect(() => {
+    if (!phone) return;
+    try {
+      sessionStorage.setItem(
+        tableViewStorageKey(phone),
+        JSON.stringify({ inputValue, activeFilters, filterConditions, sortModel })
+      );
+    } catch {
+      // לא קריטי - בחזרה לטבלה הסינון פשוט לא יישמר
+    }
+  }, [phone, inputValue, activeFilters, filterConditions, sortModel]);
 
   const handleFullReset = () => {
     setActiveFilters([]);
@@ -1976,6 +2012,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           const classes = [];
           if (String(params.id) === String(activeRowId)) classes.push('app-active-row');
           if (hoveredRow?.inGutter && String(params.id) === String(hoveredRow.id)) classes.push('app-row-hovered');
+          // השורה שעליה נלחץ קליק ימני - מודגשת כל עוד התפריט שלה פתוח (#95)
+          if (contextMenu && String(params.id) === String(contextMenu.id)) classes.push('context-menu-target-row');
           return classes.join(' ');
         }}
         onCellClick={(params) => setActiveRowId(params.id)}
@@ -2090,8 +2128,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             outlineOffset: '-1.5px',
             borderRadius: '6px',
           },
+          '& .MuiDataGrid-row.context-menu-target-row': {
+            backgroundColor: '#dbeafe !important',
+          },
           '& .context-menu-target-cell': {
-            backgroundColor: '#eff6ff !important',
+            backgroundColor: '#bfdbfe !important',
           },
           '& .current-problem-cell': {
             backgroundColor: '#ffe4e8 !important',
@@ -2336,7 +2377,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         }}
         MenuListProps={{ sx: { py: 0 } }}
       >
-        {contextMenu?.field === 'addressNote' ? (
+        {contextMenu?.field === 'addressNote' && (
           (() => {
             const row = rows.find((r) => String(r.id) === String(contextMenu.id));
             const tags = parseAddressNoteTags(row?.addressNoteSources, fieldDefs);
@@ -2357,7 +2398,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
               </MenuItem>
             ));
           })()
-        ) : (
+        )}
+        {ADDRESS_FIELDS.includes(contextMenu?.field) && (
           <MenuItem
             onClick={handleMoveToAddressNote}
             sx={{ py: 0.5, px: 1, fontSize: '0.78rem', minHeight: 'unset' }}
@@ -2365,6 +2407,56 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             העבר להערת כתובת
           </MenuItem>
         )}
+        {/* פעולות השורה (#95) - אותן פונקציות כמו האייקונים שמופיעים בריחוף על השורה.
+            בעמודות כתובת הן מופיעות אחרי אפשרויות הכתובת */}
+        {contextMenu && (() => {
+          const { id } = contextMenu;
+          const row = rowsRef.current.find((r) => String(r.id) === String(id));
+          const itemSx = { gap: 0.75, py: 0.5, px: 1, fontSize: '0.78rem', minHeight: 'unset' };
+          const iconSx = { color: '#475569', fontSize: '1rem' };
+          return [
+            <MenuItem
+              key="delete"
+              onClick={() => { handleDeleteSingleRow(id); handleCloseContextMenu(); }}
+              sx={{ ...itemSx, color: '#b91c1c' }}
+            >
+              <DeleteOutlineIcon sx={{ ...iconSx, color: '#b91c1c' }} />
+              מחק שורה
+            </MenuItem>,
+            <MenuItem
+              key="insert-above"
+              onClick={() => { handleInsertRowAt(id, 'before'); handleCloseContextMenu(); }}
+              sx={itemSx}
+            >
+              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                <AddIcon sx={iconSx} />
+                <ArrowUpwardIcon sx={{ ...iconSx, fontSize: '0.8rem' }} />
+              </Box>
+              הוסף שורה מעל
+            </MenuItem>,
+            <MenuItem
+              key="insert-below"
+              onClick={() => { handleInsertRowAt(id, 'after'); handleCloseContextMenu(); }}
+              sx={itemSx}
+            >
+              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                <AddIcon sx={iconSx} />
+                <ArrowDownwardIcon sx={{ ...iconSx, fontSize: '0.8rem' }} />
+              </Box>
+              הוסף שורה מתחת
+            </MenuItem>,
+            // שורה חדשה שעוד לא נשמרה (בלי hashCode) - אין לה היסטוריה בשרת
+            <MenuItem
+              key="history"
+              disabled={!row?.hashCode}
+              onClick={() => { if (row) handleOpenHistory(row); handleCloseContextMenu(); }}
+              sx={itemSx}
+            >
+              <HistoryOutlinedIcon sx={iconSx} />
+              היסטוריה של השורה
+            </MenuItem>,
+          ];
+        })()}
       </Menu>
       {/* חלונית שורות זהות - נבדק בכל לחיצה על "שמור את כל המוזמנים" (handleSaveClick),
           לפני בדיקת השדות החסרים/שגויים. אם כמה שורות בטבלה חלקות אותה זהות (בעל/אישה/

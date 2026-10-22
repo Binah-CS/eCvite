@@ -3,18 +3,24 @@ import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Avatar, IconButton, Menu, MenuItem, Snackbar, Alert } from '@mui/material';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
-import DataTable from '../components/DataTable';
+import DataTable, { tableViewStorageKey } from '../components/DataTable';
 import api from '../services/api';
 import { VisibleRowsContext } from '../utils/visibleRowsContext';
 import PrintModal from '../components/PrintModal'; 
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
-import { buildSavedSnapshot, selectRowsToSave } from '../utils/changedRows';
+import { buildSavedSnapshot, selectRowsToSave, buildOrderToSave } from '../utils/changedRows';
+// חלונית "יש שינויים שלא נשמרו" בהדפסה (#142). בשורה נפרדת, ו-Button בשם אחר - PR פתוח
+// אחר (#136) מוסיף Button לשורת ה-import של @mui/material למעלה
+import { Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Button as DialogButton } from '@mui/material';
+import { useLayoutEffect } from 'react';
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
-const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
-const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+// v2 - בגרסה הקודמת ההדפסה שמרה כאן גם את השורות שהודפסו (לא רק את מה שסומן), ושאריות
+// כאלה בלשונית פתוחה היו מסמנות אותן שוב אחרי חזרה מהתצוגה המקדימה (#118). שם חדש = לא נקראות
+const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds.v2';
+const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows.v2';
 
 function getSavedSelectedIds() {
   try {
@@ -49,8 +55,11 @@ function getLocalRecords(phone) {
   try {
     const saved = localStorage.getItem(`records-${phone}`);
     if (!saved) return [];
-    // מתעלמים משורות בלי id (למשל שיור ישן מגרסה קודמת) - הן היו מקריסות את DataGrid
-    return JSON.parse(saved).filter((row) => row.id !== undefined && row.id !== null);
+    // רשומות מה-DB נשמרות בלי id (למשל ב"הדפסה") - המזהה שלהן הוא ה-hashCode, כמו בכל הטבלה.
+    // מתעלמים רק משורות בלי שניהם (למשל שיור ישן מגרסה קודמת) - הן היו מקריסות את DataGrid
+    return JSON.parse(saved)
+      .map((row) => ({ ...row, id: row.id ?? row.hashCode }))
+      .filter((row) => row.id !== undefined && row.id !== null);
   } catch {
     return [];
   }
@@ -80,6 +89,28 @@ function getSyncFlag(phone) {
 
 function isLocalInSync(phone) {
   return getSyncFlag(phone) === 'true';
+}
+
+// הטבלה כבר נטענה פעם אחת בכניסה הנוכחית (sessionStorage = הלשונית, נמחק ביציאה). אחרי
+// כניסה טוענים מה-DB כרגיל; חזרה לטבלה מתוך האתר (הגדרות, תצוגה מקדימה) - מהעותק המקומי
+function loadedThisSessionKey(phone) {
+  return `records-loaded-in-session-${phone}`;
+}
+
+function wasLoadedThisSession(phone) {
+  try {
+    return sessionStorage.getItem(loadedThisSessionKey(phone)) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function markLoadedThisSession(phone) {
+  try {
+    sessionStorage.setItem(loadedThisSessionKey(phone), 'true');
+  } catch {
+    // לא קריטי - החזרה הבאה פשוט תטען מה-DB כמו קודם
+  }
 }
 
 function setLocalInSync(phone, inSync) {
@@ -147,7 +178,31 @@ export default function DashboardPage() {
       savedSnapshotRef.current = buildSavedSnapshot(local);
       setRecords(local);
       setLoading(false);
+      markLoadedThisSession(user.phone);
       console.log(`⏱ טעינה: מהעותק המקומי, בלי פנייה ל-DB (${local.length} שורות)`);
+      return;
+    }
+
+    // חזרה לטבלה באותה כניסה (למשל מההגדרות) כשיש בעותק המקומי שינויים שלא נשמרו - מציגים
+    // אותו כמו שהוא, עם השינויים, ונשארים "לא שמור" (התראה בהדפסה ובסגירת הדף) (#142).
+    // ה-DB נקרא רק כדי ש"שמור" יידע מה השתנה, ולשחזר מחיקות שלא נשמרו (נמען שקיים ב-DB
+    // וחסר בעותק) - כדי ש"שמור" ימחק אותן באמת. התצוגה לא מתחלפת בנתוני ה-DB
+    if (getSyncFlag(user.phone) === 'false' && local.length > 0 && wasLoadedThisSession(user.phone)) {
+      setRecords(local);
+      setIsTableDirty(true);
+      setLoading(false);
+      console.log(`⏱ טעינה: מהעותק המקומי עם שינויים שלא נשמרו (${local.length} שורות)`);
+      try {
+        const response = await api.getRecipients(user.phone);
+        const serverRecords = (Array.isArray(response.data) ? response.data : []).map((row) => ({ ...row, id: row.hashCode }));
+        savedSnapshotRef.current = buildSavedSnapshot(serverRecords);
+        const hashCodesInLocal = new Set(local.map((row) => row.hashCode).filter(Boolean));
+        setPendingDeleteHashCodes(
+          serverRecords.map((row) => row.hashCode).filter((hashCode) => hashCode && !hashCodesInLocal.has(hashCode))
+        );
+      } catch (err) {
+        console.error('לא ניתן לטעון מה-DB את המצב השמור להשוואה בשמירה:', err);
+      }
       return;
     }
 
@@ -172,6 +227,7 @@ export default function DashboardPage() {
         setRecords(local);
       }
 
+      markLoadedThisSession(user.phone);
       setError('');
     } catch (err) {
       setError('לא ניתן לטעון רשומות מהמנוע האחורי. עובד במצב לא מקוון.');
@@ -181,7 +237,9 @@ export default function DashboardPage() {
     }
   }, [user?.phone]);
 
-  useEffect(() => {
+  // useLayoutEffect - הטעינה מהעותק המקומי (בלי await) מסתיימת לפני שהמסך מצויר, כך שבחזרה
+  // לטבלה (מההדפסה/מההגדרות) לא מופיעים לרגע עיגול טעינה וטבלה ריקה (#142)
+  useLayoutEffect(() => {
     loadRecords();
   }, [loadRecords]);
 
@@ -377,13 +435,14 @@ export default function DashboardPage() {
   // ב-DataTable, אחרי שהמשתמשת פתרה שורות כפולות) ולא דרך pendingDeleteHashCodes (state) -
   // כי כשקוראים למחיקה ולשמירה ברצף באותה קריאה סינכרונית, ה-state ההוא עוד לא מספיק
   // להתעדכן לפני שה-handleSave הזה כבר רץ (stale closure), וההעברה במפורש פותרת את זה
+  // מחזירה true אם השמירה הצליחה (או שלא היה מה לשמור), false אחרת - ר' handleSaveAndPrint
   const handleSave = async (updatedRows, extraDeleteHashCodes = []) => {
     console.log("1. כפתור שמור נלחץ בדאשבורד!");
     const saveStartedAt = performance.now(); // לשורת "⏱ שמירה" בלוג - כמה זמן לקחה כל שמירה
 
     if (!user?.phone) {
       console.log("❌ השליחה נעצרת כי אין טלפון למשתמש:", user);
-      return;
+      return false;
     }
 
     try {
@@ -404,16 +463,19 @@ export default function DashboardPage() {
       // changedRows.js) - לא את כל הטבלה בכל שמירה. ההשוואה רצה בזיכרון (אלפיות
       // שנייה גם ל-500 שורות), וחוסכת לשלוח, לבדוק ולהחזיר שורות שלא נגעו בהן
       const rowsToSave = selectRowsToSave(updatedRows, savedSnapshotRef.current);
+      // סדר הטבלה - רק כשיש שורה חדשה או שהסדר השתנה (null אחרת), כדי ששורה שנוספה
+      // באמצע תישאר שם גם כשהרשימה נטענת מחדש מהשרת (#115)
+      const order = buildOrderToSave(updatedRows, rowsToSave, savedSnapshotRef.current);
 
       console.log("2. שולח לבקאנד:", rowsToSave);
 
-      if (rowsToSave.length === 0 && hashCodesToDelete.length === 0) {
+      if (rowsToSave.length === 0 && hashCodesToDelete.length === 0 && !order) {
         console.log('⏱ שמירה: אין שינויים מול ה-DB - לא נשלח לשרת');
         // מסמנים "מסונכרן" רק אחרי שהעותק המקומי באמת שווה למה שמוצג עכשיו
         if (saveLocalRecords(user.phone, updatedRows)) setLocalInSync(user.phone, true);
         setIsTableDirty(false);
         setSaveSuccessOpen(true);
-        return;
+        return true;
       }
 
       // hashCode כן נשלח (רק id המקומי-לתצוגה מוסר) - שורה עם hashCode היא נמען שכבר
@@ -432,10 +494,11 @@ export default function DashboardPage() {
         hashCodesToDelete
       });
 
-      const response = await api.saveRecords(
+      const response = await api.saveRecordsInOrder(
           user.phone,
           cleanRows,
-          hashCodesToDelete
+          hashCodesToDelete,
+          order
       );
 
       if (hashCodesToDelete.length > 0) {
@@ -450,7 +513,7 @@ export default function DashboardPage() {
       console.log("3. נשמר בהצלחה!", response.data);
       console.log(
         `⏱ שמירה: ${Math.round(performance.now() - saveStartedAt)} ms ` +
-        `(נשלחו ${cleanRows.length} שורות, ${hashCodesToDelete.length} מחיקות)`
+        `(נשלחו ${cleanRows.length} שורות, ${hashCodesToDelete.length} מחיקות${order ? ', כולל סדר הטבלה' : ''})`
       );
 
       // משתמשים ישירות בנתונים שחזרו מהשמירה (hashCode טרי לנמענים חדשים, "שייך ל"
@@ -482,7 +545,7 @@ export default function DashboardPage() {
       if (saveLocalRecords(user.phone, finalRecords)) setLocalInSync(user.phone, true);
       setIsTableDirty(false);
       setSaveSuccessOpen(true);
-
+      return true;
 
     } catch (err) {
 
@@ -494,7 +557,29 @@ export default function DashboardPage() {
 
       saveLocalRecords(user.phone, updatedRows);
       setLocalInSync(user.phone, false);
+      return false;
     }
+  };
+
+  // "הדפסה" כשיש בטבלה שינויים שלא נשמרו (שורה חדשה שמולאה, עריכה, מחיקה) - שואלים קודם
+  // ושומרים, כדי ששום שינוי לא ילך לאיבוד וההדפסה תהיה מהנתונים השמורים (#142)
+  const [unsavedPrintDialogOpen, setUnsavedPrintDialogOpen] = useState(false);
+  const tableSaveRef = useRef(null); // "שמור" של הטבלה (ר' DataTable, saveRef)
+
+  const handlePrintClick = useCallback(() => {
+    if (isTableDirty) {
+      setUnsavedPrintDialogOpen(true);
+      return;
+    }
+    handleOpenPrint();
+  }, [isTableDirty, handleOpenPrint]);
+
+  // אותה שמירה כמו "שמור" (כולל בדיקת השורות הזהות). אם נפתחה חלונית השורות הזהות -
+  // לא פותחים הדפסה אוטומטית אחריה; המשתמשת שומרת שם ולוחצת "הדפסה" שוב
+  const handleSaveAndPrint = async () => {
+    setUnsavedPrintDialogOpen(false);
+    const saved = await tableSaveRef.current?.();
+    if (saved === true) handleOpenPrint();
   };
 
   // ייבוא אקסל לא שומר לשרת מיד - רק מציג את השורות בטבלה מקומית, בדיוק כמו כל עריכה
@@ -545,6 +630,15 @@ export default function DashboardPage() {
 
   const handleLogout = () => {
     sessionStorage.removeItem('user');
+    // השורות שסומנו (ושל התצוגה המקדימה) שייכות למשתמשת הזו - לא עוברות לבאה באותה לשונית
+    sessionStorage.removeItem(SELECTED_ROW_IDS_STORAGE_KEY);
+    sessionStorage.removeItem(SELECTED_ROWS_STORAGE_KEY);
+    sessionStorage.removeItem('printPreviewRows');
+    // הסינון/מיון של הטבלה, ו"כבר נטען בכניסה הזו" - הכניסה הבאה מתחילה נקייה ונטענת מה-DB (#142)
+    if (user?.phone) {
+      sessionStorage.removeItem(tableViewStorageKey(user.phone));
+      sessionStorage.removeItem(loadedThisSessionKey(user.phone));
+    }
     window.location.href = '/login';
   };
   const getGreeting = () => {
@@ -649,7 +743,8 @@ export default function DashboardPage() {
               onDeleteRows={handleDeleteRows}
               initialSelectedIds={initialSelectedIds}
               onImport={handleImport}
-              onOpenPrint={handleOpenPrint}
+              onOpenPrint={handlePrintClick}
+              saveRef={tableSaveRef}
               columnPreferences={parseColumnPreferences(user?.columnPreferences)}
               profileMenu={profileMenu}
               onColumnOrderChange={handleColumnOrderChange}
@@ -666,6 +761,19 @@ export default function DashboardPage() {
             selectedRows={selectedRows}
             records={records}
         />
+
+        <Dialog open={unsavedPrintDialogOpen} onClose={() => setUnsavedPrintDialogOpen(false)}>
+          <DialogTitle sx={{ fontWeight: 700 }}>יש שינויים שלא נשמרו</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              כדי שההדפסה תהיה מהנתונים השמורים ושום שינוי לא ילך לאיבוד, צריך לשמור לפני ההדפסה.
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <DialogButton onClick={() => setUnsavedPrintDialogOpen(false)} color="inherit">ביטול</DialogButton>
+            <DialogButton onClick={handleSaveAndPrint} variant="contained">שמור והדפס</DialogButton>
+          </DialogActions>
+        </Dialog>
 
         <Snackbar
             open={saveSuccessOpen}

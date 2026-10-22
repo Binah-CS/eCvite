@@ -502,6 +502,98 @@ class RecipientControllerTest {
         assertThat(otherLinks).isEqualTo(1);
     }
 
+    // ---------- סדר הטבלה (#115) ----------
+
+    private List<String> namesInLoadOrder(String phone) throws Exception {
+        entityManager.flush();
+        entityManager.clear();
+        String body = mockMvc.perform(get("/api/recipients").param("phone", phone))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        List<String> names = new java.util.ArrayList<>();
+        objectMapper.readTree(body).forEach(node -> names.add(node.get("man").asText()));
+        return names;
+    }
+
+    @Test
+    void save_newRowAddedInTheMiddle_staysThereAfterReload() throws Exception {
+        // הבאג: שורה שנוספה באמצע הטבלה הופיעה בסוף אחרי יציאה וכניסה (טעינה מהשרת)
+        User user = seedUser("0537171717", "מסדרת");
+        SaveRecipientsRequest first = new SaveRecipientsRequest();
+        first.setPhone(user.getPhone());
+        first.setRecipients(List.of(newUnsavedRecipient("ראשון", "0537272727"), newUnsavedRecipient("אחרון", "0537373737")));
+        JsonNode saved = objectMapper.readTree(postSave(first));
+        String firstHash = saved.get(0).get("hashCode").asText();
+        String lastHash = saved.get(1).get("hashCode").asText();
+
+        SaveRecipientsRequest insert = new SaveRecipientsRequest();
+        insert.setPhone(user.getPhone());
+        insert.setRecipients(List.of(newUnsavedRecipient("באמצע", "0537474747")));
+        insert.setOrder(List.of(firstHash, "#0", lastHash));
+        postSave(insert);
+
+        assertThat(namesInLoadOrder(user.getPhone())).containsExactly("ראשון", "באמצע", "אחרון");
+    }
+
+    @Test
+    void getRecipients_linksWithoutOrder_keepInsertionOrder() throws Exception {
+        // רשימות שנשמרו לפני התיקון (sort_order ריק) - לא משנות את הסדר שלהן
+        User user = seedUser("0537575757", "ותיקה");
+        seedRecipientLinkedTo(user, "א1", "0537676767");
+        seedRecipientLinkedTo(user, "א2", "0537777777");
+        seedRecipientLinkedTo(user, "א3", "0537878787");
+
+        assertThat(namesInLoadOrder(user.getPhone())).containsExactly("א1", "א2", "א3");
+    }
+
+    @Test
+    void save_order_isPerUser() throws Exception {
+        // שתי משתמשות שחולקות את אותם נמענים - כל אחת עם הסדר שלה
+        User userA = seedUser("0537979797", "אחת");
+        User userB = seedUser("0538080808", "שתיים");
+        Recipients x = seedRecipientLinkedTo(userA, "איקס", "0538181818");
+        Recipients y = seedRecipientLinkedTo(userA, "וואי", "0538282828");
+        for (Recipients r : List.of(x, y)) {
+            UserRecipients link = new UserRecipients();
+            link.setUser(userB);
+            link.setRecipient(r);
+            userRecipientsRepository.save(link);
+        }
+
+        SaveRecipientsRequest reorderB = new SaveRecipientsRequest();
+        reorderB.setPhone(userB.getPhone());
+        reorderB.setRecipients(List.of());
+        reorderB.setOrder(List.of(y.getHashCode(), x.getHashCode()));
+        postSave(reorderB);
+
+        assertThat(namesInLoadOrder(userB.getPhone())).containsExactly("וואי", "איקס");
+        assertThat(namesInLoadOrder(userA.getPhone())).containsExactly("איקס", "וואי");
+    }
+
+    @Test
+    void save_orderOf500Rows_usesOneStatementNotOnePerRow() throws Exception {
+        User user = seedUser("0538383838", "גדולה מסודרת");
+        List<Recipients> rows = new java.util.ArrayList<>();
+        List<String> order = new java.util.ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            rows.add(newUnsavedRecipient("ס" + i, "05" + String.format("%08d", 70000 + i)));
+            order.add("#" + (499 - i)); // בסדר הפוך מהבקשה
+        }
+        SaveRecipientsRequest req = new SaveRecipientsRequest();
+        req.setPhone(user.getPhone());
+        req.setRecipients(rows);
+        req.setOrder(order);
+
+        Mockito.clearInvocations(jdbcTemplate);
+        postSave(req);
+        assertThat(jdbcUpdatesStartingWith("UPDATE user_recipients SET sort_order")).isEqualTo(1);
+
+        List<String> names = namesInLoadOrder(user.getPhone());
+        assertThat(names).hasSize(500);
+        assertThat(names.get(0)).isEqualTo("ס499");
+        assertThat(names.get(499)).isEqualTo("ס0");
+    }
+
     // ---------- GET /api/recipients ----------
 
     @Test
