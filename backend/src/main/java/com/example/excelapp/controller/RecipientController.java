@@ -28,7 +28,6 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
@@ -232,30 +231,6 @@ public class RecipientController {
         }
         return String.join(", ", values);
     }
-
-    private boolean recipientDataChanged(Recipients persisted, Recipients incoming) {
-        return !Objects.equals(persisted.getMan(), incoming.getMan())
-                || !Objects.equals(persisted.getWoman(), incoming.getWoman())
-                || !Objects.equals(persisted.getLastName(), incoming.getLastName())
-                || !Objects.equals(persisted.getPhone(), incoming.getPhone())
-                || !Objects.equals(persisted.getMail(), incoming.getMail())
-                || !Objects.equals(persisted.getFatherName(), incoming.getFatherName())
-                || !Objects.equals(persisted.getMotherName(), incoming.getMotherName())
-                || !Objects.equals(persisted.getCountry(), incoming.getCountry())
-                || !Objects.equals(persisted.getCity(), incoming.getCity())
-                || !Objects.equals(persisted.getStreet(), incoming.getStreet())
-                || !Objects.equals(persisted.getHouseNo(), incoming.getHouseNo())
-                || !Objects.equals(persisted.getBelongsTo(), incoming.getBelongsTo())
-                || !Objects.equals(persisted.getPrefix(), incoming.getPrefix())
-                || !Objects.equals(persisted.getSuffix(), incoming.getSuffix())
-                || persisted.isChanged() != incoming.isChanged()
-                || !Objects.equals(persisted.getChangeDate(), incoming.getChangeDate())
-                || !Objects.equals(persisted.getChangeBy(), incoming.getChangeBy())
-                || !Objects.equals(persisted.getCreatedBy(), incoming.getCreatedBy())
-                || !Objects.equals(persisted.getAddressNote(), incoming.getAddressNote())
-                || !Objects.equals(persisted.getAddressNoteSources(), incoming.getAddressNoteSources());
-    }
-
 
     @GetMapping
     public ResponseEntity<?> getRecipients(@RequestParam String phone) {

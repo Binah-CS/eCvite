@@ -216,7 +216,7 @@ function ColumnHeader({
   );
 }
 
-export default function DataTable({ records, loading, onSave, onAutoSave, onPersistRow, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
+export default function DataTable({ records, loading, onSave, onAutoSave, onSelectionChange, onDeleteRows, initialSelectedIds, onImport, onOpenPrint, columnPreferences, profileMenu, onColumnOrderChange, phone }) {
   const [rows, setRows] = useState(records);
   const [selectionModel, setSelectionModel] = useState(initialSelectedIds || []);
   const [activeRowId, setActiveRowId] = useState(null);
@@ -252,7 +252,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   const rowsRef = useRef(rows);
   const fieldDefsRef = useRef(fieldDefs);
   const filteredRowsRef = useRef([]);
-  const undoStackRef = useRef([]);
   const copyRangeRef = useRef(copyRange);
 
   useEffect(() => {
@@ -746,23 +745,15 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
   // "מצב עריכה" של ה-DataGrid (דאבל-קליק להיכנס לעריכה) - זה עוקף לגמרי בעיה שנתקלנו
   // בה שבה כניסה למצב עריכה לא תמיד עבדה בצורה עקבית. כל תא הוא קלט חי תמיד, שמעדכן
   // את השורה מיד עם כל הקשה
-  const pushUndoChanges = useCallback((changes) => {
-    if (changes.length === 0) return;
-    undoStackRef.current.push(changes);
-    if (undoStackRef.current.length > 100) undoStackRef.current.shift();
-  }, []);
-
   const updateCellValue = useCallback((id, field, value) => {
     const currentRow = rowsRef.current.find((row) => String(row.id) === String(id));
     if (!currentRow || currentRow[field] === value) return;
-    pushUndoChanges([{ id, field, value: currentRow[field] }]);
     const updatedRows = rowsRef.current.map((row) =>
       String(row.id) === String(id) ? { ...row, [field]: value } : row
     );
     rowsRef.current = updatedRows;
     setRows(updatedRows);
     onAutoSave(updatedRows);
-    onPersistRow?.(updatedRows.find((row) => String(row.id) === String(id)));
 
     // עדכון הצביעה האדומה על "בעל"/"אישה" תלוי בערך של השדה השני באותה שורה
     // (חובה זוגית - ראו isRequiredEmpty), אז כשמקלידים באחד מהם צריך שגם התא השני
@@ -777,47 +768,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         apiRef.current.updateRows([updatedRow]);
       }
     }
-  }, [onAutoSave, onPersistRow, apiRef, pushUndoChanges]);
-
-  const undoLastChange = useCallback(() => {
-    const changes = undoStackRef.current.pop();
-    if (!changes) return;
-
-    const changesById = new Map();
-    changes.forEach(({ id, field, value }) => {
-      const rowChanges = changesById.get(String(id)) ?? {};
-      rowChanges[field] = value;
-      changesById.set(String(id), rowChanges);
-    });
-
-    const restoredRows = [];
-    const updatedRows = rowsRef.current.map((row) => {
-      const rowChanges = changesById.get(String(row.id));
-      if (!rowChanges) return row;
-      const restored = { ...row, ...rowChanges };
-      restoredRows.push(restored);
-      return restored;
-    });
-    rowsRef.current = updatedRows;
-    setRows(updatedRows);
-    onAutoSave(updatedRows);
-    restoredRows.forEach((row) => onPersistRow?.(row));
-  }, [onAutoSave, onPersistRow]);
-
-  // אחרי הדבקה ה-DataGrid יכול להעביר את הפוקוס מה-input אל התא עצמו. מאזינים גם
-  // ברמת החלון כדי ש-Ctrl+Z יבטל את הפעולה האחרונה כל עוד הפוקוס נמצא בטבלה.
-  useEffect(() => {
-    const handleUndoShortcut = (event) => {
-      const isUndo = (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z';
-      if (!isUndo || !gridContainerRef.current?.contains(document.activeElement)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      undoLastChange();
-    };
-
-    window.addEventListener('keydown', handleUndoShortcut, true);
-    return () => window.removeEventListener('keydown', handleUndoShortcut, true);
-  }, [undoLastChange]);
+  }, [onAutoSave, apiRef]);
 
   const focusAdjacentRowInput = useCallback((id, field, direction) => {
     const sortedIds = apiRef.current?.getSortedRowIds?.() ?? filteredRowsRef.current.map((row) => row.hashCode ?? row.id);
@@ -910,8 +861,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
     });
     if (changesById.size === 0) return false;
 
-    const changedRecipients = [];
-    const undoChanges = [];
+    let hasChanges = false;
     const updatedRows = rowsRef.current.map((row) => {
       const changes = changesById.get(String(row.id));
       if (!changes) return row;
@@ -919,21 +869,15 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         Object.entries(changes).filter(([field, value]) => row[field] !== value)
       );
       if (Object.keys(actualChanges).length === 0) return row;
-      Object.entries(actualChanges).forEach(([field]) => {
-        undoChanges.push({ id: row.id, field, value: row[field] });
-      });
-      const updated = { ...row, ...actualChanges };
-      changedRecipients.push(updated);
-      return updated;
+      hasChanges = true;
+      return { ...row, ...actualChanges };
     });
-    if (undoChanges.length === 0) return false;
-    pushUndoChanges(undoChanges);
+    if (!hasChanges) return false;
     rowsRef.current = updatedRows;
     setRows(updatedRows);
     onAutoSave(updatedRows);
-    changedRecipients.forEach((row) => onPersistRow?.(row));
     return true;
-  }, [apiRef, getVisibleRecipientFields, onAutoSave, onPersistRow, pushUndoChanges]);
+  }, [apiRef, getVisibleRecipientFields, onAutoSave]);
 
   // handlers משותפים ל-input בתוך תא טבלה (renderAddressCell/renderTextCell) - בלי
   // stopPropagation ב-onKeyDown ה-DataGrid תופס את מקש הרווח כקיצור מקלדת שלו (למשל
@@ -954,12 +898,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
       }
     },
     onKeyDown: (event) => {
-      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
-        event.preventDefault();
-        event.stopPropagation();
-        undoLastChange();
-        return;
-      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
         if (copySelectedRange(id)) {
           event.preventDefault();
@@ -990,7 +928,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onPers
         focusAdjacentRowInput(id, field, event.key === 'ArrowDown' ? 1 : -1);
       }
     },
-  }), [updateCellValue, focusAdjacentRowInput, pasteTableValues, undoLastChange, handleCellSelection, copySelectedRange]);
+  }), [updateCellValue, focusAdjacentRowInput, pasteTableValues, handleCellSelection, copySelectedRange]);
 
   // מעבירה את הערך מתא בעמודת כתובת (כשהוא לא מתאים) לעמודת "הערת כתובת" -
   // ומרוקנת את התא המקורי. אם כבר יש תוכן בהערת הכתובת, משרשרת אליו (מופרד ב-";")

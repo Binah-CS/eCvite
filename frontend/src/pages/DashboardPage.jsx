@@ -105,8 +105,6 @@ export default function DashboardPage() {
   const [saveSuccessOpen, setSaveSuccessOpen] = useState(false); // הודעת "השמירה נעשתה בהצלחה" שיורדת מלמעלה
   const lastDashboardActivityAt = useRef(Date.now());
   const lastDatabaseKeepAliveAt = useRef(Date.now());
-  const pendingRecipientSavesRef = useRef(new Map());
-  const recipientSaveQueueRef = useRef(Promise.resolve());
 
   // זהות השורות שהיו מסומנות לפני שיצאנו לתצוגה המקדימה - נקרא פעם אחת, בטרם עולה הטבלה
   const [initialSelectedIds] = useState(() => {
@@ -285,79 +283,9 @@ export default function DashboardPage() {
     setIsTableDirty(true); //  בום! ברגע שיש שינוי בטבלה, האבא ננעל רשמית!
   }, [user?.phone]);
 
-  // שומרת שינויי תא לשרת אחרי שההקלדה נעצרת לרגע. לכל שורה יש השהיה נפרדת,
-  // והבקשות נשלחות בתור כדי שערך ישן לא ידרוס ערך חדש אם הרשת איטית.
-  const persistRecipientChange = useCallback((row) => {
-    if (!user?.phone || !row) return;
-
-    const key = String(row.hashCode ?? row.id);
-    const previous = pendingRecipientSavesRef.current.get(key);
-    if (previous) window.clearTimeout(previous.timer);
-
-    let queued = false;
-    const queueSave = () => {
-      if (queued) return;
-      queued = true;
-      pendingRecipientSavesRef.current.delete(key);
-      const { id, ...recipient } = row;
-      recipientSaveQueueRef.current = recipientSaveQueueRef.current
-        .catch(() => {})
-        .then(() => api.saveRecords(user.phone, [recipient], []))
-        .catch((err) => {
-          console.error('לא ניתן לשמור את השינוי בשרת:', err);
-        });
-    };
-
-    const timer = window.setTimeout(queueSave, 350);
-    pendingRecipientSavesRef.current.set(key, { timer, queueSave });
-  }, [user?.phone]);
-
-  const flushPendingRecipientSaves = useCallback(() => {
-    for (const { timer, queueSave } of pendingRecipientSavesRef.current.values()) {
-      window.clearTimeout(timer);
-      queueSave();
-    }
-    return recipientSaveQueueRef.current;
-  }, []);
-
-  const handleOpenPrint = useCallback(async () => {
-    await flushPendingRecipientSaves();
-
-    if (!user?.phone) return;
-
-    // ההדפסה נשענת על הנתונים השמורים ב-DB (אחרי ששמירות התאים שבדרך הגיעו לשרת,
-    // למעלה), ולא על עותק ישן של השורות שנבחרו - גם אם הבחירה נעשתה לפני שינוי.
-    try {
-      const response = await api.getRecipients(user.phone);
-      const currentRecords = Array.isArray(response.data) ? response.data : [];
-      const recordsByHashCode = new Map(
-        currentRecords.map((row) => [String(row.hashCode), { ...row, id: row.id ?? row.hashCode }])
-      );
-
-      setRecords(currentRecords);
-      saveLocalRecords(user.phone, currentRecords);
-      setSelectedRows((previousSelection) => {
-        const refreshedSelection = previousSelection
-          .map((row) => recordsByHashCode.get(String(row.hashCode ?? row.id)))
-          .filter(Boolean);
-        sessionStorage.setItem(
-          SELECTED_ROW_IDS_STORAGE_KEY,
-          JSON.stringify(refreshedSelection.map((row) => row.id)),
-        );
-        sessionStorage.setItem(
-          SELECTED_ROWS_STORAGE_KEY,
-          JSON.stringify(refreshedSelection),
-        );
-        return refreshedSelection;
-      });
-      setError('');
-    } catch (err) {
-      setError('לא ניתן לטעון את רשימת הנמענים מהשרת לפני ההדפסה. נסי שוב.');
-      return;
-    }
-
+  const handleOpenPrint = useCallback(() => {
     setIsPrintModalOpen(true);
-  }, [flushPendingRecipientSaves, user?.phone]);
+  }, []);
 
   // מחיקה לא נשלחת לשרת מיד - רק נשמרת בתור "ממתינה" ונשלחת בפועל רק כשלוחצים "שמור
   // את כל המוזמנים" (handleSave), יחד עם שאר השינויים. המזהה האמיתי של שורה שמורה
@@ -596,9 +524,8 @@ export default function DashboardPage() {
 
         <Box sx={{ bgcolor: '#f8fafc', borderRadius: 3, p: 0.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
           <MenuItem
-            onClick={async () => {
+            onClick={() => {
               setProfileMenuAnchor(null);
-              await flushPendingRecipientSaves();
               navigate('/settings');
             }}
             sx={{ borderRadius: 2.5, py: 1.25, px: 2, gap: 1.5, '&:hover': { bgcolor: '#eef2f7' } }}
@@ -644,7 +571,6 @@ export default function DashboardPage() {
               loading={loading}
               onSave={handleSave}
               onAutoSave={handleAutoSaveLocal}
-              onPersistRow={persistRecipientChange}
               onSelectionChange={handleSelectionChange}
               onDeleteRows={handleDeleteRows}
               initialSelectedIds={initialSelectedIds}
