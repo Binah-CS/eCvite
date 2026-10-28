@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,Tooltip,} from '@mui/material';
+import { Box,Button,Paper,Stack,Typography,TextField,Chip,Menu,MenuItem,IconButton,Popper,Dialog,DialogTitle,DialogContent,DialogContentText,DialogActions,Table,TableHead,TableBody,TableRow,TableCell,TableContainer,CircularProgress,Tooltip,Autocomplete,} from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import PrintOutlinedIcon from '@mui/icons-material/PrintOutlined';
 import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
@@ -14,6 +16,7 @@ import { getExcelColumns } from '../services/excelColumnsCache';
 import ExcelImport from './ExcelImport';
 import api from '../services/api';
 import { buildIdentityKey } from '../utils/recipientIdentity';
+import { applyBulkRecipientEdit } from '../utils/bulkRecipientEdit';
 import { useContext } from 'react';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import FilterBuilder, { valueLabel, newCondition } from './FilterBuilder';
@@ -69,6 +72,14 @@ const TOOLBAR_BUTTON_SX = {
 // יכול לזרוק (חלון גלישה פרטית, חסימת אחסון), ואז פשוט נשארים עם ברירת המחדל
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const PAGE_SIZE_STORAGE_KEY = 'recipientsTable.pageSize';
+
+// השדות השכיחים לעריכה מרוכזת מתוך סרגל הפעולות של שורות מסומנות.
+const BULK_EDIT_FIELD_NAMES = ['suffix', 'city', 'belongsTo'];
+const BULK_EDIT_FIELD_LABELS = {
+  suffix: 'סיום',
+  city: 'עיר',
+  belongsTo: 'שייך ל',
+};
 
 function readSavedPageSize() {
   try {
@@ -228,6 +239,10 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const [duplicateGroups, setDuplicateGroups] = useState([]); // [[row, row, ...], ...] - קבוצות שורות עם אותה זהות (בעל/אישה/שם משפחה/טלפון/כתובת)
   const [duplicateChoices, setDuplicateChoices] = useState({}); // groupIndex -> 'both' | id של השורה שנשארת
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const [bulkEditDialogOpen, setBulkEditDialogOpen] = useState(false);
+  const [bulkEditField, setBulkEditField] = useState('');
+  const [bulkEditValue, setBulkEditValue] = useState('');
+  const [bulkEditMode, setBulkEditMode] = useState('replace');
   const duplicateDialogOpenRef = useRef(duplicateDialogOpen); // ל-Ctrl+S - לא לפתוח שוב את חלונית הכפילויות כשהיא כבר פתוחה
   duplicateDialogOpenRef.current = duplicateDialogOpen;
   const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא כתובת
@@ -462,16 +477,18 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     pendingExtraDeleteIdsRef.current = [];
   };
 
-  const handleSaveClick = () => {
-    const groups = findDuplicateGroups(rows);
+  const saveRowsWithDuplicateCheck = (rowsToSave) => {
+    const groups = findDuplicateGroups(rowsToSave);
     if (groups.length > 0) {
       setDuplicateGroups(groups);
       setDuplicateChoices({});
       setDuplicateDialogOpen(true);
       return;
     }
-    proceedAfterDuplicates(rows);
+    proceedAfterDuplicates(rowsToSave);
   };
+
+  const handleSaveClick = () => saveRowsWithDuplicateCheck(rows);
 
   // Ctrl+S (או Cmd+S במק) = לחיצה על "שמור", כולל בדיקת הכפילויות. ref כדי שהמאזין
   // (נרשם פעם אחת) תמיד יפעיל את handleSaveClick העדכני, עם השורות הנוכחיות. e.code
@@ -895,20 +912,14 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const renderTextCell = useCallback((pickListField) => {
     const TextCell = (params) => {
       const { id, field, value } = params;
+      const canShowSuggestions = Boolean(pickListField && pickListField !== 'belongsTo');
       const [menuOpen, setMenuOpen] = useState(false);
       const [menuOptions, setMenuOptions] = useState([]);
-      const [expanded, setExpanded] = useState(false); // "שייך ל" עם כמה ערכים - הוצג במלואו ביוזמת המשתמשת
-      const [isFocused, setIsFocused] = useState(false); // האם נמצאים בעריכה בפועל (לא רק "הצצה")
+      const [expanded, setExpanded] = useState(false);
+      const [isFocused, setIsFocused] = useState(false);
       const boxRef = useRef(null);
 
-      // "שייך ל" יכול להכיל כמה ערכים מופרדים בפסיק (למשל נמען ששייך גם ל"עבודה"
-      // וגם ל"שכנים") - כשזה ארוך, מציגים רק את הערך הראשון + תגית "+N", ורק לחיצה
-      // על התגית (או כניסה לעריכה) חושפת את הכל. זה ויזואלי בלבד - הערך עצמו בתא
-      // (ולכן גם החיפוש, שמסתמך עליו) לא משתנה כלל. "הצצה" (לחיצה על "+N" בלי להיכנס
-      // בפועל לעריכה) לא סוגרת את עצמה לבד ב-blur (כי הפוקוס אף פעם לא עבר ל-input) -
-      // לכן יש לה תגית "כווץ" נפרדת לחזרה מפורשת, בעוד שיציאה מעריכה אמיתית עדיין
-      // מכווצת אוטומטית
-      const valueParts = String(value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      const valueParts = String(value ?? '').split(',').map((item) => item.trim()).filter(Boolean);
       const isMultiValue = field === 'belongsTo' && valueParts.length > 1;
       const showCollapsed = isMultiValue && !expanded;
       const showExpandedPeek = isMultiValue && expanded && !isFocused;
@@ -922,11 +933,17 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       const openMenu = () => {
         const values = Array.from(
           new Set(
-            rowsRef.current
-              .map((row) => row[pickListField])
-              .filter((v) => v && String(v).trim())
+            rowsRef.current.flatMap((row) => {
+              const cellValue = String(row[pickListField] ?? '').trim();
+              if (!cellValue) return [];
+              // "שייך ל" נשמר כרשימת קבוצות מופרדת בפסיקים. מפרקים אותה לפני
+              // הסרת הכפילויות, כדי שכל קבוצה תופיע פעם אחת בהשלמה האוטומטית.
+              return pickListField === 'belongsTo'
+                ? cellValue.split(',').map((item) => item.trim()).filter(Boolean)
+                : [cellValue];
+            })
           )
-        );
+        ).sort(hebrewCollator.compare);
         setMenuOptions(values);
         setMenuOpen(true);
       };
@@ -943,6 +960,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         <Box ref={boxRef} sx={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', px: 1, position: 'relative' }}>
           <input
             value={value ?? ''}
+            autoComplete="off"
             {...createCellInputHandlers(id, field)}
             // לחיצה/כניסה לתא בעמודות הבחירה פותחת את רשימת הערכים הקיימים, בלי צורך
             // ללחוץ בנפרד על חץ - אפשר עדיין להקליד חופשי במקביל. כניסה לעריכה תמיד
@@ -950,7 +968,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             onFocus={() => {
               setIsFocused(true);
               setExpanded(true);
-              if (pickListField) openMenu();
+              if (canShowSuggestions) openMenu();
             }}
             onBlur={() => {
               setIsFocused(false);
@@ -966,63 +984,34 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
               font: 'inherit',
               background: 'transparent',
               opacity: showCollapsed ? 0 : 1,
-              // בהצצה (showExpandedPeek) יש תגית "כווץ" צפה מעל התא - משאירים לה מקום
-              // פנוי מהטקסט כדי שלא תכסה חלק מהתוכן
               paddingInlineEnd: showExpandedPeek ? 40 : 0,
             }}
           />
           {showCollapsed && (
             <Box
               onClick={() => boxRef.current?.querySelector('input')?.focus()}
-              sx={{
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                alignItems: 'center',
-                px: 1,
-                gap: 0.5,
-                cursor: 'text',
-              }}
+              sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', px: 1, gap: 0.5, cursor: 'text' }}
             >
-              <Typography variant="body2" noWrap sx={{ flex: 1, minWidth: 0 }}>
-                {valueParts[0]}
-              </Typography>
+              <Typography variant="body2" noWrap sx={{ flex: 1, minWidth: 0 }}>{valueParts[0]}</Typography>
               <Chip
                 size="small"
                 label={`+${valueParts.length - 1}`}
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setExpanded(true);
-                }}
+                onClick={(event) => { event.stopPropagation(); setExpanded(true); }}
                 sx={{ height: 20, fontSize: '0.7rem', flexShrink: 0 }}
               />
             </Box>
           )}
           {showExpandedPeek && (
-            // בהצצה, הטקסט המלא מוצג ישירות דרך ה-input עצמו (בלי חיתוך/שלוש נקודות) -
-            // רק תגית "כווץ" קטנה צפה מעליו בצד, לא מכסה את כל התא כמו במצב המכווץ
             <Chip
               size="small"
               label="כווץ"
               onMouseDown={(event) => event.preventDefault()}
-              onClick={(event) => {
-                event.stopPropagation();
-                setExpanded(false);
-              }}
-              sx={{
-                position: 'absolute',
-                insetInlineEnd: 4,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                height: 20,
-                fontSize: '0.7rem',
-                bgcolor: '#ffffff',
-                boxShadow: 1,
-              }}
+              onClick={(event) => { event.stopPropagation(); setExpanded(false); }}
+              sx={{ position: 'absolute', insetInlineEnd: 4, top: '50%', transform: 'translateY(-50%)', height: 20, fontSize: '0.7rem', bgcolor: '#ffffff', boxShadow: 1 }}
             />
           )}
-          {pickListField && (
+          {canShowSuggestions && (
             <Popper
               open={menuOpen}
               anchorEl={boxRef.current}
@@ -1362,6 +1351,61 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       .map((name) => fieldDefs.find((f) => f.technicalName === name))
       .filter(Boolean);
   }, [columnOrder, fieldDefs, orderedFieldDefs]);
+
+  const bulkEditFields = useMemo(() => (
+    BULK_EDIT_FIELD_NAMES.map((technicalName) => {
+      const definition = displayFieldDefs.find((field) => field.technicalName === technicalName);
+      return {
+        technicalName,
+        displayName: definition?.displayName ?? BULK_EDIT_FIELD_LABELS[technicalName],
+      };
+    })
+  ), [displayFieldDefs]);
+
+  const bulkEditSuggestions = useMemo(() => {
+    const values = rows.reduce((result, row) => {
+      BULK_EDIT_FIELD_NAMES.forEach((field) => {
+        String(row[field] ?? '')
+          .split(field === 'belongsTo' ? ',' : '\n')
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .forEach((value) => result[field].add(value));
+      });
+      return result;
+    }, Object.fromEntries(BULK_EDIT_FIELD_NAMES.map((field) => [field, new Set()])));
+    return Object.fromEntries(BULK_EDIT_FIELD_NAMES.map((field) => [field, [...values[field]].sort(hebrewCollator.compare)]));
+  }, [rows]);
+
+  // עריכה מרוכזת של כל השורות שסומנו: אותו ערך באותה עמודה, בפעולה אחת.
+  // משתמשים באותו מזהה שה-DataGrid משתמש בו (hashCode כשישנו), כדי שהפעולה
+  // תעבוד גם על שורות שהגיעו מהשרת וגם על שורות חדשות מקומיות.
+  const handleOpenBulkEdit = (field = bulkEditFields[0]?.technicalName ?? '') => {
+    setBulkEditField(field);
+    setBulkEditValue('');
+    setBulkEditMode('replace');
+    setBulkEditDialogOpen(true);
+  };
+
+  const handleApplyBulkEdit = () => {
+    if (!bulkEditField || selectionModel.length === 0) return;
+    const updatedRows = applyBulkRecipientEdit(
+      rowsRef.current,
+      selectionModel,
+      bulkEditField,
+      bulkEditValue,
+      bulkEditMode,
+    );
+    if (updatedRows.every((row, index) => row === rowsRef.current[index])) {
+      setBulkEditDialogOpen(false);
+      return;
+    }
+    setRows(updatedRows);
+    onAutoSave(updatedRows);
+    setBulkEditDialogOpen(false);
+    // שמירה אחת לכל השורות שהשתנו: DashboardPage בוחר רק את השורות שהשתנו
+    // ושולח אותן בבקשה טרנזקציונית אחת. הטריגר ב-DB כותב שורת היסטוריה לכל UPDATE.
+    saveRowsWithDuplicateCheck(updatedRows);
+  };
 
   // עמודות שריקות בכל שורות ההיסטוריה הנוכחית (בחלונית ההיסטוריה) לא מוצגות בכלל -
   // מחושב מחדש בכל פתיחה (תלוי ב-historyDialog), לא גלובלי לכל הנמענים
@@ -2555,32 +2599,126 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             zIndex: 10,
             display: 'flex',
             alignItems: 'center',
-            gap: 1,
-            px: 1.25,
-            py: 0.4,
-            bgcolor: '#ffffff',
-            borderRadius: 999,
-            border: '1px solid #e6e8ec',
-            boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
+            gap: 0.75,
+            px: 1.5,
+            py: 0.7,
+            bgcolor: '#eff6ff',
+            borderRadius: 3,
+            border: '2px solid #2563eb',
+            boxShadow: '0 10px 28px rgba(37, 99, 235, 0.24)',
           }}
         >
-          <IconButton size="small" onClick={() => { setSelectionModel([]); onSelectionChange([]); }} sx={{ p: 0.25 }}>
+          <IconButton size="small" title="נקה בחירה" onClick={() => { setSelectionModel([]); onSelectionChange([]); }} sx={{ p: 0.3, bgcolor: '#ffffff' }}>
             <CloseIcon sx={{ fontSize: '1rem' }} />
           </IconButton>
-          <Typography sx={{ fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '0.75rem' }}>
-            {selectionModel.length} נבחרו
+          <Typography sx={{ fontWeight: 800, color: '#1e3a8a', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>
+            פעולות עבור {selectionModel.length} שורות
           </Typography>
           <Button
+            variant="contained"
+            color="primary"
+            size="small"
+            startIcon={<EditOutlinedIcon sx={{ fontSize: '0.95rem !important' }} />}
+            onClick={handleOpenBulkEdit}
+            sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap', py: 0.4, px: 1.25, fontSize: '0.78rem', boxShadow: 'none' }}
+          >
+            עריכת שדות
+          </Button>
+          <Button
             variant="outlined"
+            color="primary"
+            size="small"
+            startIcon={<PrintOutlinedIcon sx={{ fontSize: '0.95rem !important' }} />}
+            onClick={handlePrintLabels}
+            sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap', py: 0.4, px: 1.25, fontSize: '0.78rem', bgcolor: '#ffffff' }}
+          >
+            הדפס
+          </Button>
+          <Button
+            variant="contained"
             color="error"
             size="small"
             onClick={handleDeleteRows}
-            sx={{ borderRadius: 999, textTransform: 'none', fontWeight: 600, whiteSpace: 'nowrap', py: 0.15, px: 1, fontSize: '0.75rem' }}
+            sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap', py: 0.4, px: 1.25, fontSize: '0.78rem', boxShadow: 'none' }}
           >
             מחק שורות
           </Button>
         </Box>
       )}
+
+      <Dialog
+        open={bulkEditDialogOpen}
+        onClose={() => setBulkEditDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>עריכת שדות בשורות המסומנות</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            בחרו שדה והזינו ערך חדש. הערך יוחל על כל {selectionModel.length} השורות שנבחרו.
+          </DialogContentText>
+          <Stack spacing={2} sx={{ pt: 0.5 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600, color: '#475569' }}>השדה לעריכה</Typography>
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+              {bulkEditFields.map((field) => (
+                <Button
+                  key={field.technicalName}
+                  variant={bulkEditField === field.technicalName ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => {
+                    setBulkEditField(field.technicalName);
+                    setBulkEditValue('');
+                    setBulkEditMode('replace');
+                  }}
+                  sx={{ textTransform: 'none', fontWeight: 600 }}
+                >
+                  {field.displayName}
+                </Button>
+              ))}
+            </Stack>
+            {bulkEditField === 'belongsTo' && (
+              <TextField
+                select
+                fullWidth
+                label="פעולה"
+                value={bulkEditMode}
+                onChange={(event) => setBulkEditMode(event.target.value)}
+              >
+                <MenuItem value="replace">החלף את השיוך</MenuItem>
+                <MenuItem value="append">הוסף לשיוך הקיים</MenuItem>
+              </TextField>
+            )}
+            <Autocomplete
+              freeSolo
+              fullWidth
+              options={bulkEditField === 'belongsTo' ? [] : (bulkEditSuggestions[bulkEditField] ?? [])}
+              inputValue={bulkEditValue}
+              onInputChange={(_, value) => setBulkEditValue(value)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  autoFocus
+                  inputProps={{ ...params.inputProps, autoComplete: 'off' }}
+                  label={`ערך חדש עבור ${bulkEditFields.find((field) => field.technicalName === bulkEditField)?.displayName ?? 'השדה'}`}
+                  helperText={bulkEditField === 'belongsTo' && bulkEditMode === 'append'
+                    ? 'הערך יתווסף לכל שיוך קיים, בלי כפילויות.'
+                    : 'אפשר להשאיר ריק כדי לנקות את הערך בשדה זה.'}
+                />
+              )}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkEditDialogOpen(false)}>ביטול</Button>
+          <Button
+            onClick={handleApplyBulkEdit}
+            variant="contained"
+            disabled={!bulkEditField || (bulkEditField === 'belongsTo' && bulkEditMode === 'append' && !bulkEditValue.trim())}
+          >
+            החל על השורות
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* סיכום קטן ומוצמד לתחתית המסך - נשאר גלוי כל הזמן, גם כשגוללים בטבלה */}
       <Box
