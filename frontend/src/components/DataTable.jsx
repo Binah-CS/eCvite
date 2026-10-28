@@ -228,6 +228,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const [duplicateGroups, setDuplicateGroups] = useState([]); // [[row, row, ...], ...] - קבוצות שורות עם אותה זהות (בעל/אישה/שם משפחה/טלפון/כתובת)
   const [duplicateChoices, setDuplicateChoices] = useState({}); // groupIndex -> 'both' | id של השורה שנשארת
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const [addressReminder, setAddressReminder] = useState(null); // { id, field }
   const duplicateDialogOpenRef = useRef(duplicateDialogOpen); // ל-Ctrl+S - לא לפתוח שוב את חלונית הכפילויות כשהיא כבר פתוחה
   duplicateDialogOpenRef.current = duplicateDialogOpen;
   const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא כתובת
@@ -248,6 +249,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   // ה-columns מחושבות רק פעם אחת (memo תלוי ב-fieldDefs) והפעולות שבתוכן (renderCell)
   // צריכות תמיד את השורות העדכניות ביותר - לכן משתמשים ב-ref ולא סוגרים על rows ישירות
   const rowsRef = useRef(rows);
+  const addressFieldInitialValuesRef = useRef(new Map());
+  const addressFieldChangedRef = useRef(new Set());
+  const addressReminderSnoozedRowsRef = useRef(new Set());
+  const addressReminderOpenRef = useRef(addressReminder);
+  addressReminderOpenRef.current = addressReminder;
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -770,6 +776,62 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     },
   }), [updateCellValue]);
 
+  const focusAnotherAddressField = useCallback((id, currentField) => {
+    const currentIndex = ADDRESS_FIELDS.indexOf(currentField);
+    const nextField = ADDRESS_FIELDS.find((field, index) => index > currentIndex) || ADDRESS_FIELDS[0];
+    const rowIndex = rowsRef.current.findIndex((row) => String(row.hashCode ?? row.id) === String(id));
+    if (rowIndex >= 0) apiRef.current?.scrollToIndexes({ rowIndex, colIndex: apiRef.current.getColumnIndex(nextField) });
+
+    setTimeout(() => {
+      const rowElement = Array.from(gridContainerRef.current?.querySelectorAll('.MuiDataGrid-row') ?? [])
+        .find((element) => String(element.getAttribute('data-id')) === String(id));
+      rowElement?.querySelector(`[data-field="${nextField}"] input`)?.focus();
+    }, 0);
+  }, [apiRef]);
+
+  const createAddressCellInputHandlers = useCallback((id, field) => {
+    const baseHandlers = createCellInputHandlers(id, field);
+    const key = `${id}:${field}`;
+    return {
+      ...baseHandlers,
+      onChange: (event) => {
+        addressFieldChangedRef.current.add(key);
+        baseHandlers.onChange(event);
+      },
+      onFocus: (event) => {
+        addressFieldInitialValuesRef.current.set(key, event.target.value ?? '');
+      },
+      onBlur: (event) => {
+        const initialValue = addressFieldInitialValuesRef.current.get(key);
+        addressFieldInitialValuesRef.current.delete(key);
+        const wasEdited = addressFieldChangedRef.current.delete(key);
+        const changed = wasEdited && (initialValue === undefined || String(initialValue) !== String(event.target.value ?? ''));
+        if (
+          changed &&
+          !addressReminderSnoozedRowsRef.current.has(String(id)) &&
+          !addressReminderOpenRef.current
+        ) {
+          setAddressReminder({ id, field });
+        }
+      },
+    };
+  }, [createCellInputHandlers]);
+
+  const handleAddressReminderContinue = () => {
+    if (!addressReminder) return;
+    addressReminderSnoozedRowsRef.current.add(String(addressReminder.id));
+    const reminder = addressReminder;
+    setAddressReminder(null);
+    focusAnotherAddressField(reminder.id, reminder.field);
+  };
+
+  const handleAddressReminderDismiss = () => {
+    if (addressReminder) {
+      addressReminderSnoozedRowsRef.current.add(String(addressReminder.id));
+    }
+    setAddressReminder(null);
+  };
+
   // מעבירה את הערך מתא בעמודת כתובת (כשהוא לא מתאים) לעמודת "הערת כתובת" -
   // ומרוקנת את התא המקורי. אם כבר יש תוכן בהערת הכתובת, משרשרת אליו (מופרד ב-";")
   // במקום לדרוס - בלי שום תיוג נראה בטקסט עצמו. מאיזה שדה הערך הגיע נשמר בנפרד,
@@ -871,7 +933,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       >
         <input
           value={value ?? ''}
-          {...createCellInputHandlers(id, field)}
+          {...createAddressCellInputHandlers(id, field)}
           style={{
             flex: 1,
             minWidth: 0,
@@ -884,7 +946,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         />
       </Box>
     );
-  }, [createCellInputHandlers]);
+  }, [createAddressCellInputHandlers]);
 
   // תא טקסט חי - קלט חופשי לגמרי תמיד, ואם יש pickListField (עמודות קידומת/סיום/
   // שייך ל) גם חץ קטן לצידו שפותח Menu לבחירה מהערכים הקיימים באותה עמודה. שתי
@@ -2366,6 +2428,20 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           </MenuItem>
         )}
       </Menu>
+      <Dialog open={Boolean(addressReminder)} onClose={() => setAddressReminder(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>המערכת זיהתה שערכתם כתובת</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            עדכנתם את השדה „{fieldDefs.find((field) => field.technicalName === addressReminder?.field)?.displayName ?? 'כתובת'}”.
+            האם ברצונכם להמשיך לערוך את שאר פרטי הכתובת?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleAddressReminderDismiss} color="inherit">לא, אל תזכירו לי שוב</Button>
+          <Button onClick={handleAddressReminderContinue} variant="contained">כן, המשך לעריכת הכתובת</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* חלונית שורות זהות - נבדק בכל לחיצה על "שמור את כל המוזמנים" (handleSaveClick),
           לפני בדיקת השדות החסרים/שגויים. אם כמה שורות בטבלה חלקות אותה זהות (בעל/אישה/
           שם משפחה/טלפון/כתובת) - כמו כשמעתיקים שורה ידנית, או שעריכה הופכת שתי שורות
