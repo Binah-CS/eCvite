@@ -376,8 +376,8 @@ export default function ExcelImport({ onImport }) {
           '&:hover': { bgcolor: '#eff6ff', borderColor: '#60a5fa' },
         }}
       >
-        ייבוא Excel
-        <input hidden type="file" accept=".xlsx,.xls" onChange={handleFile} />
+        ייבוא Excel או CSV
+        <input hidden type="file" accept=".xlsx,.xls,.csv,text/csv" onChange={handleFile} />
       </Button>
       {fileNames.length > 0 && (
         <Typography
