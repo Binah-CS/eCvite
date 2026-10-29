@@ -881,14 +881,6 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       event.stopPropagation();
       return true;
     }
-    if (event.ctrlKey && event.key.toLowerCase() === 'd') {
-      const navigation = getGridNavigation();
-      const rowIndex = navigation?.rows.findIndex((entry) => String(entry.id) === String(id)) ?? -1;
-      if (rowIndex > 0) updateCellValue(id, field, navigation.rows[rowIndex - 1].model?.[field] ?? '');
-      event.preventDefault();
-      event.stopPropagation();
-      return true;
-    }
     if (event.ctrlKey && event.key === ';') {
       updateCellValue(id, field, new Date().toISOString().slice(0, 10));
       event.preventDefault();
@@ -909,8 +901,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       event.stopPropagation();
       return true;
     }
-    if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'v') {
-      navigator.clipboard?.readText().then((text) => updateCellValue(id, field, text)).catch(() => {});
+    // מבטלים הדבקה מיוחדת: היא אינה קיצור פעיל בטבלה זו.
+    if (event.ctrlKey && event.key.toLowerCase() === 'v' && (event.shiftKey || event.altKey)) {
       event.preventDefault();
       event.stopPropagation();
       return true;
