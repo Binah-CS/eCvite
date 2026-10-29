@@ -225,6 +225,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const [inputValue, setInputValue] = useState('');
   const [fieldDefs, setFieldDefs] = useState([]);
   const [copyRange, setCopyRange] = useState(null);
+  const [cellClipboard, setCellClipboard] = useState(null);
 
   const [problemQueue, setProblemQueue] = useState([]); // תור התאים שקופצים ביניהם לתיקון (כפתור "תיקון שדות") - {id, field}
   const [duplicateGroups, setDuplicateGroups] = useState([]); // [[row, row, ...], ...] - קבוצות שורות עם אותה זהות (בעל/אישה/שם משפחה/טלפון/כתובת)
@@ -768,6 +769,47 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       }
     }
   }, [onAutoSave, apiRef]);
+
+  const getContextCellValue = useCallback(() => {
+    if (!contextMenu) return '';
+    const row = rowsRef.current.find((item) => String(item.id) === String(contextMenu.id));
+    return row?.[contextMenu.field] ?? '';
+  }, [contextMenu]);
+
+  const copyContextCell = useCallback(async () => {
+    const value = String(getContextCellValue());
+    setCellClipboard(value);
+    try {
+      await navigator.clipboard?.writeText(value);
+    } catch {
+      // ההעתקה הפנימית עדיין מאפשרת הדבקה בתפריט גם בדפדפן שחוסם Clipboard API.
+    }
+    handleCloseContextMenu();
+  }, [getContextCellValue]);
+
+  const cutContextCell = useCallback(async () => {
+    if (!contextMenu) return;
+    await copyContextCell();
+    updateCellValue(contextMenu.id, contextMenu.field, contextMenu.field === 'print' ? false : '');
+  }, [contextMenu, copyContextCell, updateCellValue]);
+
+  const pasteContextCell = useCallback(async () => {
+    if (!contextMenu) return;
+    let value = cellClipboard;
+    try {
+      value = await navigator.clipboard?.readText() ?? value;
+    } catch {
+      // משתמשים בערך הפנימי האחרון אם אין הרשאת קריאה מלוח המערכת.
+    }
+    if (value !== null && value !== undefined) {
+      updateCellValue(
+        contextMenu.id,
+        contextMenu.field,
+        contextMenu.field === 'print' ? /^(true|1|כן)$/i.test(String(value)) : value
+      );
+    }
+    handleCloseContextMenu();
+  }, [cellClipboard, contextMenu, updateCellValue]);
 
   const focusAdjacentRowInput = useCallback((id, field, direction) => {
     const sortedIds = apiRef.current?.getSortedRowIds?.() ?? filteredRowsRef.current.map((row) => row.hashCode ?? row.id);
@@ -2562,9 +2604,33 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         {contextMenu && (() => {
           const { id } = contextMenu;
           const row = rowsRef.current.find((r) => String(r.id) === String(id));
+          const isEditableCell = !systemColumns.some((column) => column.field === contextMenu.field);
           const itemSx = { gap: 0.75, py: 0.5, px: 1, fontSize: '0.78rem', minHeight: 'unset' };
           const iconSx = { color: '#475569', fontSize: '1rem' };
           return [
+            <MenuItem
+              key="copy"
+              onClick={copyContextCell}
+              sx={itemSx}
+            >
+              העתק
+            </MenuItem>,
+            <MenuItem
+              key="paste"
+              disabled={!isEditableCell}
+              onClick={pasteContextCell}
+              sx={itemSx}
+            >
+              הדבק
+            </MenuItem>,
+            <MenuItem
+              key="cut"
+              disabled={!isEditableCell}
+              onClick={cutContextCell}
+              sx={itemSx}
+            >
+              גזור
+            </MenuItem>,
             <MenuItem
               key="delete"
               onClick={() => { handleDeleteSingleRow(id); handleCloseContextMenu(); }}
