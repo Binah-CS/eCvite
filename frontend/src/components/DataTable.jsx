@@ -748,15 +748,92 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     }
   }, [onAutoSave, apiRef]);
 
+  // מעביר מוקד לתא אחר לפי השורות והעמודות שמוצגות כרגע. משתמשים ב-API של הגריד
+  // כדי שהניווט יכבד מיון, סינון, הסתרת עמודות וסדר עמודות שהמשתמשת בחרה.
+  const moveCellFocus = useCallback((id, field, rowDelta = 0, columnDelta = 0) => {
+    const grid = apiRef.current;
+    if (!grid?.getVisibleColumns) return false;
+
+    const visibleFields = grid
+      .getVisibleColumns()
+      .map((column) => column.field)
+      .filter((columnField) =>
+        !columnField.startsWith('__') &&
+        !systemColumns.some((column) => column.field === columnField)
+      );
+    const rowEntries = gridFilteredSortedRowEntriesSelector(apiRef);
+    const rowIndex = rowEntries.findIndex((entry) => String(entry.id) === String(id));
+    const columnIndex = visibleFields.indexOf(field);
+    if (rowIndex === -1 || columnIndex === -1) return false;
+
+    let nextRowIndex = rowIndex + rowDelta;
+    let nextColumnIndex = columnIndex + columnDelta;
+
+    // Tab מתנהג כמו Excel ועובר לתחילת/סוף השורה הסמוכה בקצה הטבלה.
+    if (nextColumnIndex >= visibleFields.length) {
+      nextColumnIndex = 0;
+      nextRowIndex += 1;
+    } else if (nextColumnIndex < 0) {
+      nextColumnIndex = visibleFields.length - 1;
+      nextRowIndex -= 1;
+    }
+    if (nextRowIndex < 0 || nextRowIndex >= rowEntries.length) return false;
+
+    const nextId = rowEntries[nextRowIndex].id;
+    const nextField = visibleFields[nextColumnIndex];
+    grid.scrollToIndexes({ rowIndex: nextRowIndex, colIndex: grid.getColumnIndex(nextField) });
+    setActiveRowId(nextId);
+
+    // scrollToIndexes עלול לרנדר את השורה רק אחרי כמה פריימים (virtualization),
+    // במיוחד במעבר לשורה שאינה על המסך. מנסים שוב זמן קצר כדי שהפוקוס — ובעקבותיו
+    // סמן התא הכחול — לא ייעלמו במעבר כזה.
+    const focusTarget = (attempt = 0) => {
+      const rowElement = Array.from(
+        gridContainerRef.current?.querySelectorAll('.MuiDataGrid-row') ?? []
+      ).find((element) => String(element.getAttribute('data-id')) === String(nextId));
+      const input = rowElement?.querySelector(`[data-field="${nextField}"] input`);
+      if (input) {
+        input.focus();
+      } else if (attempt < 4) {
+        setTimeout(() => focusTarget(attempt + 1), 25);
+      }
+    };
+    requestAnimationFrame(() => focusTarget());
+    return true;
+  }, [apiRef]);
+
   // handlers משותפים ל-input בתוך תא טבלה (renderAddressCell/renderTextCell) - בלי
   // stopPropagation ב-onKeyDown ה-DataGrid תופס את מקש הרווח כקיצור מקלדת שלו (למשל
-  // גלילה/בחירה) במקום לתת לו סתם להקליד תו רווח רגיל. Enter מבצע blur על השדה - זה
-  // מפעיל את בדיקת ה-focusout הקיימת, שאם השדה תקין מסירה אותו מתור התיקונים
-  // וקופצת אוטומטית לתא הבעייתי הבא
+  // גלילה/בחירה) במקום לתת לו סתם להקליד תו רווח רגיל. Enter/Tab והחצים מנווטים
+  // בין תאים; אם אין תא יעד (למשל אחרי השורה האחרונה), Enter שומר את התנהגות ה-blur
+  // הקיימת כדי שתור התיקונים ימשיך לעבוד.
   const createCellInputHandlers = useCallback((id, field) => ({
     onChange: (event) => updateCellValue(id, field, event.target.value),
     onClick: (event) => event.stopPropagation(),
     onKeyDown: (event) => {
+      let moved = false;
+
+      if (event.key === 'Tab') {
+        moved = moveCellFocus(id, field, 0, event.shiftKey ? -1 : 1);
+      } else if (event.key === 'Enter') {
+        moved = moveCellFocus(id, field, event.shiftKey ? -1 : 1, 0);
+      } else if (event.key === 'ArrowUp') {
+        moved = moveCellFocus(id, field, -1, 0);
+      } else if (event.key === 'ArrowDown') {
+        moved = moveCellFocus(id, field, 1, 0);
+      // ב-RTL סדר העמודות הפנימי של ה-DataGrid הפוך לכיוון החזותי,
+      // לכן החצים האופקיים צריכים delta הפוך כדי לנוע בכיוון שעל המקלדת.
+      } else if (event.key === 'ArrowLeft') {
+        moved = moveCellFocus(id, field, 0, 1);
+      } else if (event.key === 'ArrowRight') {
+        moved = moveCellFocus(id, field, 0, -1);
+      }
+
+      if (moved) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (event.key === ' ') {
         event.stopPropagation();
         return;
@@ -768,7 +845,27 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         event.currentTarget.blur();
       }
     },
-  }), [updateCellValue]);
+  }), [moveCellFocus, updateCellValue]);
+
+  const handleBooleanCellKeyDown = useCallback((id, field, event) => {
+    let moved = false;
+    if (event.key === 'Tab') {
+      moved = moveCellFocus(id, field, 0, event.shiftKey ? -1 : 1);
+    } else if (event.key === 'Enter' || event.key === 'ArrowDown') {
+      moved = moveCellFocus(id, field, 1, 0);
+    } else if (event.key === 'ArrowUp') {
+      moved = moveCellFocus(id, field, -1, 0);
+    } else if (event.key === 'ArrowLeft') {
+      moved = moveCellFocus(id, field, 0, 1);
+    } else if (event.key === 'ArrowRight') {
+      moved = moveCellFocus(id, field, 0, -1);
+    }
+    if (moved || event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === ' ') event.currentTarget.click();
+    }
+  }, [moveCellFocus]);
 
   // מעבירה את הערך מתא בעמודת כתובת (כשהוא לא מתאים) לעמודת "הערת כתובת" -
   // ומרוקנת את התא המקורי. אם כבר יש תוכן בהערת הכתובת, משרשרת אליו (מופרד ב-";")
@@ -1091,11 +1188,12 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           checked={Boolean(value)}
           onChange={(event) => updateCellValue(id, field, event.target.checked)}
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => handleBooleanCellKeyDown(id, field, event)}
           onFocus={() => setActiveRowId(id)}
         />
       </Box>
     );
-  }, [updateCellValue]);
+  }, [handleBooleanCellKeyDown, updateCellValue]);
 
     const handleInputChange = (e) => {
     setInputValue(e.target.value);
@@ -2030,6 +2128,13 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           },
           '& .MuiDataGrid-cell:focus, & .MuiDataGrid-cell:focus-within': {
             outline: 'none',
+          },
+          // ה-input שבתא מקבל את הפוקוס בפועל, ולכן מסגרת ברירת המחדל של הגריד
+          // מוסתרת. סימון זה משאיר "סמן תא" ברור גם בעת ניווט במקלדת.
+          '& .MuiDataGrid-cell:focus-within': {
+            backgroundColor: '#eff6ff !important',
+            boxShadow: 'inset 0 0 0 2px #2563eb',
+            zIndex: 2,
           },
           // ל-DataGrid יש כלל hover פנימי משלו (theme.palette.action.hover, אפור -
           // ר' GridRootStyles.js: '&:hover, &.Mui-hovered') שמתחרה עם הכללים שלנו על
