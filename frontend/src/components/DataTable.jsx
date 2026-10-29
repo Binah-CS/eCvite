@@ -231,6 +231,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const duplicateDialogOpenRef = useRef(duplicateDialogOpen); // ל-Ctrl+S - לא לפתוח שוב את חלונית הכפילויות כשהיא כבר פתוחה
   duplicateDialogOpenRef.current = duplicateDialogOpen;
   const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא בשורה
+  const [cellClipboard, setCellClipboard] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState(null); // { ids }
   const [exportMenuAnchor, setExportMenuAnchor] = useState(null); // כפתור "יצוא" - תפריט הדפסת מדבקות / הורדת קובץ
   const [secondarySortFields, setSecondarySortFields] = useState([]); // תת-מיון: שרשרת עמודות לשבירת שוויון, לפי בחירת המשתמשת
   const [columnOrder, setColumnOrder] = useState(null); // null = סדר ברירת המחדל (defaultOrder) - אחרת מערך שמות שדות בסדר שהמשתמשת גררה
@@ -637,27 +639,28 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   };
 
   const handleDeleteRows = () => {
-    const updatedRows = rows.filter((row) => !selectionModel.includes(row.id));
-    setRows(updatedRows);
-    setSelectionModel([]);
-    onSelectionChange([]);
-    onAutoSave(updatedRows);
-    // מחיקה מפורשת מיידית בשרת - רק השורות שבאמת סומנו ונלחצו עליהן "מחק", לא לפי השוואת רשימה
-    if (onDeleteRows) {
-      onDeleteRows(selectionModel);
-    }
+    if (selectionModel.length) setDeleteConfirmation({ ids: selectionModel });
   };
 
   // מחיקת שורה בודדת - כפתור הפח שמופיע בריחוף על שורה, בלי צורך לסמן אותה קודם
   const handleDeleteSingleRow = useCallback((id) => {
-    const updatedRows = rowsRef.current.filter((row) => String(row.id) !== String(id));
+    setDeleteConfirmation({ ids: [id] });
+  }, []);
+
+  const confirmDeleteRows = useCallback(() => {
+    if (!deleteConfirmation?.ids?.length) return;
+    const ids = deleteConfirmation.ids;
+    const updatedRows = rowsRef.current.filter((row) => !ids.some((id) => String(id) === String(row.id)));
+    const remainingSelection = selectionModel.filter((selectedId) => !ids.some((id) => String(id) === String(selectedId)));
     setRows(updatedRows);
-    setSelectionModel((prev) => prev.filter((selectedId) => String(selectedId) !== String(id)));
+    setSelectionModel(remainingSelection);
+    onSelectionChange(remainingSelection);
     onAutoSave(updatedRows);
     if (onDeleteRows) {
-      onDeleteRows([id]);
+      onDeleteRows(ids);
     }
-  }, [onAutoSave, onDeleteRows]);
+    setDeleteConfirmation(null);
+  }, [deleteConfirmation, onAutoSave, onDeleteRows, onSelectionChange, selectionModel]);
 
   // הסטוריה של נמען ספציפי - נטענת בלחיצה על אייקון ההסטוריה בשורה, מכל המשתמשות
   // שאי-פעם שינו את הנמען הזה (לא רק המשתמשת הנוכחית)
@@ -746,6 +749,47 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
       }
     }
   }, [onAutoSave, apiRef]);
+
+  const getContextCellValue = useCallback(() => {
+    if (!contextMenu) return '';
+    const row = rowsRef.current.find((item) => String(item.id) === String(contextMenu.id));
+    return row?.[contextMenu.field] ?? '';
+  }, [contextMenu]);
+
+  const copyContextCell = useCallback(async () => {
+    const value = String(getContextCellValue());
+    setCellClipboard(value);
+    try {
+      await navigator.clipboard?.writeText(value);
+    } catch {
+      // הדבקה פנימית עדיין זמינה גם אם הדפדפן חסם גישה ללוח המערכת.
+    }
+    handleCloseContextMenu();
+  }, [getContextCellValue]);
+
+  const cutContextCell = useCallback(async () => {
+    if (!contextMenu) return;
+    await copyContextCell();
+    updateCellValue(contextMenu.id, contextMenu.field, contextMenu.field === 'print' ? false : '');
+  }, [contextMenu, copyContextCell, updateCellValue]);
+
+  const pasteContextCell = useCallback(async () => {
+    if (!contextMenu) return;
+    let value = cellClipboard;
+    try {
+      value = await navigator.clipboard?.readText() ?? value;
+    } catch {
+      // אם אין הרשאת קריאה ללוח, משתמשים בערך האחרון שהועתק מתוך הטבלה.
+    }
+    if (value !== null && value !== undefined) {
+      updateCellValue(
+        contextMenu.id,
+        contextMenu.field,
+        contextMenu.field === 'print' ? /^(true|1|כן)$/i.test(String(value)) : value
+      );
+    }
+    handleCloseContextMenu();
+  }, [cellClipboard, contextMenu, updateCellValue]);
 
   // handlers משותפים ל-input בתוך תא טבלה (renderAddressCell/renderTextCell) - בלי
   // stopPropagation ב-onKeyDown ה-DataGrid תופס את מקש הרווח כקיצור מקלדת שלו (למשל
@@ -2375,9 +2419,19 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         {contextMenu && (() => {
           const { id } = contextMenu;
           const row = rowsRef.current.find((r) => String(r.id) === String(id));
+          const isEditableCell = !systemColumns.some((column) => column.field === contextMenu.field);
           const itemSx = { gap: 0.75, py: 0.5, px: 1, fontSize: '0.78rem', minHeight: 'unset' };
           const iconSx = { color: '#475569', fontSize: '1rem' };
           return [
+            <MenuItem key="copy" onClick={copyContextCell} sx={itemSx}>
+              העתק
+            </MenuItem>,
+            <MenuItem key="paste" disabled={!isEditableCell} onClick={pasteContextCell} sx={itemSx}>
+              הדבק
+            </MenuItem>,
+            <MenuItem key="cut" disabled={!isEditableCell} onClick={cutContextCell} sx={itemSx}>
+              גזור
+            </MenuItem>,
             <MenuItem
               key="delete"
               onClick={() => { handleDeleteSingleRow(id); handleCloseContextMenu(); }}
@@ -2421,6 +2475,21 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           ];
         })()}
       </Menu>
+      <Dialog open={Boolean(deleteConfirmation)} onClose={() => setDeleteConfirmation(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>האם את בטוחה?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {deleteConfirmation?.ids?.length === 1
+              ? 'השורה תימחק מהטבלה ולא ניתן יהיה לשחזר אותה.'
+              : `יימחקו ${deleteConfirmation?.ids?.length ?? 0} שורות מהטבלה ולא ניתן יהיה לשחזר אותן.`}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmation(null)}>ביטול</Button>
+          <Button color="error" variant="contained" onClick={confirmDeleteRows}>מחק</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* חלונית שורות זהות - נבדק בכל לחיצה על "שמור את כל המוזמנים" (handleSaveClick),
           לפני בדיקת השדות החסרים/שגויים. אם כמה שורות בטבלה חלקות אותה זהות (בעל/אישה/
           שם משפחה/טלפון/כתובת) - כמו כשמעתיקים שורה ידנית, או שעריכה הופכת שתי שורות
