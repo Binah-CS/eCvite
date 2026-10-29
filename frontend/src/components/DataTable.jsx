@@ -232,7 +232,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const duplicateDialogOpenRef = useRef(duplicateDialogOpen); // ל-Ctrl+S - לא לפתוח שוב את חלונית הכפילויות כשהיא כבר פתוחה
   duplicateDialogOpenRef.current = duplicateDialogOpen;
-  const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא כתובת
+  const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, id, field } - קליק ימני על תא בשורה
   const [exportMenuAnchor, setExportMenuAnchor] = useState(null); // כפתור "יצוא" - תפריט הדפסת מדבקות / הורדת קובץ
   const [secondarySortFields, setSecondarySortFields] = useState([]); // תת-מיון: שרשרת עמודות לשבירת שוויון, לפי בחירת המשתמשת
   const [columnOrder, setColumnOrder] = useState(null); // null = סדר ברירת המחדל (defaultOrder) - אחרת מערך שמות שדות בסדר שהמשתמשת גררה
@@ -284,10 +284,9 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
     const handleNativeContextMenu = (event) => {
       const cellEl = event.target.closest('.MuiDataGrid-cell');
       if (!cellEl) return;
+      // קליק ימני על כל תא בשורה פותח את תפריט השורה (מחיקה, הוספה מעל/מתחת, היסטוריה - #95).
+      // בעמודות כתובת יש בו גם "העבר להערת כתובת", ובעמודת הערת הכתובת - "החזר ל..."
       const field = cellEl.getAttribute('data-field');
-      // עמודות כתובת - קליק ימני מעביר ערך להערת כתובת. עמודת הערת הכתובת עצמה -
-      // קליק ימני מציע להחזיר ערכים שכבר הועברו אליה בעבר בחזרה לשדה המקורי שלהם
-      if (!ADDRESS_FIELDS.includes(field) && field !== 'addressNote') return;
       const rowEl = event.target.closest('.MuiDataGrid-row');
       const id = rowEl ? rowEl.getAttribute('data-id') : null;
       if (!id) return;
@@ -2136,6 +2135,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
           const classes = [];
           if (String(params.id) === String(activeRowId)) classes.push('app-active-row');
           if (hoveredRow?.inGutter && String(params.id) === String(hoveredRow.id)) classes.push('app-row-hovered');
+          // השורה שעליה נלחץ קליק ימני - מודגשת כל עוד התפריט שלה פתוח (#95)
+          if (contextMenu && String(params.id) === String(contextMenu.id)) classes.push('context-menu-target-row');
           return classes.join(' ');
         }}
         onCellClick={(params) => setActiveRowId(params.id)}
@@ -2265,8 +2266,11 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             outlineOffset: '-1.5px',
             borderRadius: '6px',
           },
+          '& .MuiDataGrid-row.context-menu-target-row': {
+            backgroundColor: '#dbeafe !important',
+          },
           '& .context-menu-target-cell': {
-            backgroundColor: '#eff6ff !important',
+            backgroundColor: '#bfdbfe !important',
           },
           '& .copy-range-cell': {
             backgroundColor: '#dbeafe !important',
@@ -2523,7 +2527,7 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
         }}
         MenuListProps={{ sx: { py: 0 } }}
       >
-        {contextMenu?.field === 'addressNote' ? (
+        {contextMenu?.field === 'addressNote' && (
           (() => {
             const row = rows.find((r) => String(r.id) === String(contextMenu.id));
             const tags = parseAddressNoteTags(row?.addressNoteSources, fieldDefs);
@@ -2544,7 +2548,8 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
               </MenuItem>
             ));
           })()
-        ) : (
+        )}
+        {ADDRESS_FIELDS.includes(contextMenu?.field) && (
           <MenuItem
             onClick={handleMoveToAddressNote}
             sx={{ py: 0.5, px: 1, fontSize: '0.78rem', minHeight: 'unset' }}
@@ -2552,6 +2557,56 @@ export default function DataTable({ records, loading, onSave, onAutoSave, onSele
             העבר להערת כתובת
           </MenuItem>
         )}
+        {/* פעולות השורה (#95) - אותן פונקציות כמו האייקונים שמופיעים בריחוף על השורה.
+            בעמודות כתובת הן מופיעות אחרי אפשרויות הכתובת */}
+        {contextMenu && (() => {
+          const { id } = contextMenu;
+          const row = rowsRef.current.find((r) => String(r.id) === String(id));
+          const itemSx = { gap: 0.75, py: 0.5, px: 1, fontSize: '0.78rem', minHeight: 'unset' };
+          const iconSx = { color: '#475569', fontSize: '1rem' };
+          return [
+            <MenuItem
+              key="delete"
+              onClick={() => { handleDeleteSingleRow(id); handleCloseContextMenu(); }}
+              sx={{ ...itemSx, color: '#b91c1c' }}
+            >
+              <DeleteOutlineIcon sx={{ ...iconSx, color: '#b91c1c' }} />
+              מחק שורה
+            </MenuItem>,
+            <MenuItem
+              key="insert-above"
+              onClick={() => { handleInsertRowAt(id, 'before'); handleCloseContextMenu(); }}
+              sx={itemSx}
+            >
+              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                <AddIcon sx={iconSx} />
+                <ArrowUpwardIcon sx={{ ...iconSx, fontSize: '0.8rem' }} />
+              </Box>
+              הוסף שורה מעל
+            </MenuItem>,
+            <MenuItem
+              key="insert-below"
+              onClick={() => { handleInsertRowAt(id, 'after'); handleCloseContextMenu(); }}
+              sx={itemSx}
+            >
+              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center' }}>
+                <AddIcon sx={iconSx} />
+                <ArrowDownwardIcon sx={{ ...iconSx, fontSize: '0.8rem' }} />
+              </Box>
+              הוסף שורה מתחת
+            </MenuItem>,
+            // שורה חדשה שעוד לא נשמרה (בלי hashCode) - אין לה היסטוריה בשרת
+            <MenuItem
+              key="history"
+              disabled={!row?.hashCode}
+              onClick={() => { if (row) handleOpenHistory(row); handleCloseContextMenu(); }}
+              sx={itemSx}
+            >
+              <HistoryOutlinedIcon sx={iconSx} />
+              היסטוריה של השורה
+            </MenuItem>,
+          ];
+        })()}
       </Menu>
       {/* חלונית שורות זהות - נבדק בכל לחיצה על "שמור את כל המוזמנים" (handleSaveClick),
           לפני בדיקת השדות החסרים/שגויים. אם כמה שורות בטבלה חלקות אותה זהות (בעל/אישה/
