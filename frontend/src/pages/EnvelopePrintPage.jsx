@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Box, Button, Stack, Typography } from '@mui/material';
+import EnvelopePreview from '../components/EnvelopePreview';
 import EnvelopeSheet, { createPrintFlagGetter } from '../components/EnvelopeSheet';
 import { buildEnvelopeLayout } from '../utils/envelopeLayout';
 import { loadEnvelopePrintSettings } from '../utils/envelopePrintSettings';
@@ -10,6 +11,7 @@ import { getSavedSelectedRows, saveSelectedRows } from './PrintPreviewPage';
 import { MODAL_TEXTS } from './HardCodePage';
 
 const SHEET_CLASS = 'envelope-print-sheet';
+const PREVIEW_WIDTH = 640;
 
 // margin: 0 כי הטקסט ממוקם ביחס לקצה המעטפה עצמה, והשוליים כבר חלק מהפריסה.
 // ה-CSS כאן בתוך style רגיל, ולכן מטמון ה-RTL של MUI לא נוגע בו
@@ -99,6 +101,18 @@ export default function EnvelopePrintPage() {
           <Typography variant="body2" color="text.secondary" mb={2}>
             {MODAL_TEXTS.ENVELOPE_PRINT_HINT(firstPass.pageWidthMm, firstPass.pageHeightMm, settings.senderMode === 'openFlap')}
           </Typography>
+        )}
+        {canPrint && layout.finishedViews && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+            <EnvelopePreview
+              width={PREVIEW_WIDTH}
+              layout={layout}
+              row={rows[0]}
+              senders={settings.senders}
+              textOptions={textOptions}
+              getPrintFlag={getPrintFlag}
+            />
+          </Box>
         )}
       </Box>
 

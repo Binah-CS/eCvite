@@ -8,7 +8,9 @@ import { loadLabelPrintSettings, saveLabelPrintSettings } from '../utils/labelPr
 import { orderLikeTable } from '../utils/printOrder';
 import EnvelopeSettingsStep from './EnvelopeSettingsStep';
 import { resolveEnvelopeDimensions } from '../utils/envelopeFormats';
-import { clampEnvelopeFontScale, getMaxEnvelopeFontScale, isEnvelopeSettingsReady } from '../utils/envelopeLayout';
+import EnvelopePreview from './EnvelopePreview';
+import { createPrintFlagGetter } from './EnvelopeSheet';
+import { buildEnvelopeLayout, clampEnvelopeFontScale, getMaxEnvelopeFontScale, isEnvelopeSettingsReady } from '../utils/envelopeLayout';
 import { loadEnvelopePrintSettings, saveEnvelopePrintSettings } from '../utils/envelopePrintSettings';
 import {
   DEFAULT_CUSTOM_LABEL_FORMAT,
@@ -61,6 +63,8 @@ const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
 const CUSTOM_ENGLISH_SALUTATION = '__custom__';
 const PRESET_ENGLISH_SALUTATIONS = ['', 'To:', 'Dear'];
 const GREETING_ALIGNMENTS = ['right', 'center', 'left'];
+const ENVELOPE_PREVIEW_WIDTH = PREVIEW_PANEL_WIDTH;
+const ENVELOPE_PREVIEW_SAMPLE_ROW = { man: 'ישראל', woman: 'שרה', lastName: 'ישראלי', street: 'הרצל', houseNo: '1', city: 'ירושלים' };
 
 function saveSelectedRows(rows) {
   sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
@@ -660,7 +664,18 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
               <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
 
-              {!isEnvelopes && <LabelSheetPreview labelSize={labelSize} customFormat={customFormat} />}
+              {isEnvelopes ? (
+                <EnvelopePreview
+                  width={ENVELOPE_PREVIEW_WIDTH}
+                  layout={buildEnvelopeLayout(envelopeSettings, { fontType, fontScale, fontWeight })}
+                  row={rowsToPrint[0] ?? ENVELOPE_PREVIEW_SAMPLE_ROW}
+                  senders={envelopeSettings.senders}
+                  textOptions={{ englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign }}
+                  getPrintFlag={createPrintFlagGetter()}
+                />
+              ) : (
+                <LabelSheetPreview labelSize={labelSize} customFormat={customFormat} />
+              )}
             </Stack>
 
             <Stack direction="row" spacing={1} justifyContent="space-between" mt={4}>
