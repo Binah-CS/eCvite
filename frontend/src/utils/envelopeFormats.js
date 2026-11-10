@@ -19,8 +19,8 @@ const DEFAULT_CUSTOM_FLAP_DEPTH_MM = 40;
 export const MAX_SENDERS = 2;
 
 // אותם שמות שדות כמו אצל הנמען (street, houseNo, city, country). מיקוד קיים רק לשולח
-export const SENDER_REQUIRED_FIELDS = ['name', 'street', 'houseNo', 'city'];
-export const SENDER_FIELDS = [...SENDER_REQUIRED_FIELDS, 'zip', 'country'];
+export const SENDER_REQUIRED_FIELDS = ['name', 'street', 'city'];
+export const SENDER_FIELDS = [...SENDER_REQUIRED_FIELDS, 'houseNo', 'zip', 'country'];
 
 export function createEmptySender() {
   return Object.fromEntries(SENDER_FIELDS.map((field) => [field, '']));

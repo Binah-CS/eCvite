@@ -62,11 +62,12 @@ describe('flap depth', () => {
 describe('senders', () => {
   const complete = { ...createEmptySender(), name: 'כהן', street: 'הרצל', houseNo: '12', city: 'ירושלים' };
 
-  test('zip and country are optional', () => {
+  test('house number, zip and country are optional', () => {
     expect(isSenderComplete(complete)).toBe(true);
+    expect(isSenderComplete({ ...complete, houseNo: '', zip: '', country: '' })).toBe(true);
   });
 
-  test.each(['name', 'street', 'houseNo', 'city'])('%s is required', (field) => {
+  test.each(['name', 'street', 'city'])('%s is required', (field) => {
     expect(isSenderComplete({ ...complete, [field]: '   ' })).toBe(false);
   });
 
