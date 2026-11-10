@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import PrintPreviewPage from './pages/PrintPreviewPage'; // עמוד חדש שניצור
+import EnvelopePrintPage from './pages/EnvelopePrintPage';
 import RegisterPage from "./pages/RegisterPage";
 import Terms from "./pages/Terms";
 import SettingsPage from './pages/SettingsPage';
@@ -23,6 +24,10 @@ function App() {
         <Route
             path="/print-preview"
             element={loggedIn ? <PrintPreviewPage /> : <Navigate to="/login" replace />}
+        />
+        <Route
+            path="/print-envelopes"
+            element={loggedIn ? <EnvelopePrintPage /> : <Navigate to="/login" replace />}
         />
         <Route path="/terms" element={<Terms />} />
         <Route

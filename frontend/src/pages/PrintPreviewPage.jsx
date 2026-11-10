@@ -33,7 +33,7 @@ const EXTRA_PRINT_FIELDS = [
 // שורת "לכבוד ..." - קידומת/בעל/אישה/שם משפחה/סיום מתאחדים לשורה אחת, אבל כל חלק
 // מופיע רק אם הוא מסומן להדפסה. אם row.display קיים (שם מותאם אישית) הוא משמש כמו
 // שהיה קודם, ללא תלות בסימוני בעל/אישה/שם משפחה - קידומת/סיום עדיין חלים סביבו
-function buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) {
+export function buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) {
   const prefixPart = getPrintFlag('prefix') && row.prefix ? row.prefix : '';
   const suffixPart = getPrintFlag('suffix') && row.suffix ? row.suffix : '';
 
@@ -61,7 +61,7 @@ function buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) {
 // englishSalutation). מחזיר את שורת "לכבוד" הנפרדת (או ריק) ואת שורת השם בלעדיו
 // או איתו, כמו קודם
 const HEBREW_GREETING = 'לכבוד';
-function splitHebrewGreeting(nameLine, printLanguage, greetingShow, greetingSeparateLine) {
+export function splitHebrewGreeting(nameLine, printLanguage, greetingShow, greetingSeparateLine) {
   const prefix = `${HEBREW_GREETING} `;
   if (printLanguage === 'en' || !nameLine.startsWith(prefix)) return { greetingLine: '', nameLine };
   const nameOnly = nameLine.slice(prefix.length);
@@ -70,11 +70,11 @@ function splitHebrewGreeting(nameLine, printLanguage, greetingShow, greetingSepa
   return { greetingLine: '', nameLine };
 }
 
-function hasHebrewEnglishSalutation(salutation) {
+export function hasHebrewEnglishSalutation(salutation) {
   return /[\u0590-\u05FF]/.test(salutation);
 }
 
-function buildAddressLine1(row, getPrintFlag, printLanguage) {
+export function buildAddressLine1(row, getPrintFlag, printLanguage) {
   const street = getPrintFlag('street') && row.street ? row.street : '';
   const houseNo = getPrintFlag('houseNo') && row.houseNo ? row.houseNo : '';
   return (printLanguage === 'en' ? [houseNo, street] : [street, houseNo])
@@ -82,7 +82,7 @@ function buildAddressLine1(row, getPrintFlag, printLanguage) {
     .join(' ');
 }
 
-function buildAddressLine2(row, getPrintFlag) {
+export function buildAddressLine2(row, getPrintFlag) {
   return getPrintFlag('city') && row.city ? row.city : '';
 }
 
@@ -90,7 +90,7 @@ function buildAddressLine2(row, getPrintFlag) {
 // אותה על כל מדבקה. ארץ אחרת מודפסת בשורה נפרדת, מתחת לכל הכתובת
 const DOMESTIC_COUNTRY_NAMES = new Set(['ישראל', 'israel', 'il', 'isr']);
 
-function buildCountryLine(row, getPrintFlag) {
+export function buildCountryLine(row, getPrintFlag) {
   const country = String(row.country ?? '').trim();
   if (!getPrintFlag('country') || !country) return '';
   return DOMESTIC_COUNTRY_NAMES.has(country.toLowerCase()) ? '' : country;
@@ -100,7 +100,7 @@ function countCharacters(text, pattern) {
   return (String(text ?? '').match(pattern) ?? []).length;
 }
 
-function detectPrintLanguage(row, getPrintFlag) {
+export function detectPrintLanguage(row, getPrintFlag) {
   const addressText = ['street', 'city', 'country']
     .filter((field) => getPrintFlag(field))
     .map((field) => row[field])
@@ -129,7 +129,7 @@ const LABEL_LAYOUT = {
 const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
 const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
 
-function getSavedSelectedRows() {
+export function getSavedSelectedRows() {
   try {
     const saved = sessionStorage.getItem(SELECTED_ROWS_STORAGE_KEY);
     const rows = saved ? JSON.parse(saved) : [];
@@ -139,7 +139,7 @@ function getSavedSelectedRows() {
   }
 }
 
-function saveSelectedRows(rows) {
+export function saveSelectedRows(rows) {
   sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
   sessionStorage.setItem(
     SELECTED_ROW_IDS_STORAGE_KEY,
