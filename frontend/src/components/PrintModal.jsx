@@ -6,6 +6,12 @@ import RemoveIcon from '@mui/icons-material/Remove';
 import { useNavigate } from 'react-router-dom';
 import { loadLabelPrintSettings, saveLabelPrintSettings } from '../utils/labelPrintSettings';
 import { orderLikeTable } from '../utils/printOrder';
+import EnvelopeSettingsStep from './EnvelopeSettingsStep';
+import { resolveEnvelopeDimensions } from '../utils/envelopeFormats';
+import EnvelopePreview from './EnvelopePreview';
+import { createPrintFlagGetter } from './EnvelopeSheet';
+import { buildEnvelopeLayout, clampEnvelopeFontScale, getMaxEnvelopeFontScale, isEnvelopeSettingsReady } from '../utils/envelopeLayout';
+import { SAVED_ENVELOPE_SETTINGS_KEY, loadInitialEnvelopeSettings, saveSenders } from '../utils/envelopePrintSettings';
 import {
   DEFAULT_CUSTOM_LABEL_FORMAT,
   getCustomLabelLayout,
@@ -57,6 +63,8 @@ const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
 const CUSTOM_ENGLISH_SALUTATION = '__custom__';
 const PRESET_ENGLISH_SALUTATIONS = ['', 'To:', 'Dear'];
 const GREETING_ALIGNMENTS = ['right', 'center', 'left'];
+const ENVELOPE_PREVIEW_WIDTH = PREVIEW_PANEL_WIDTH;
+const ENVELOPE_PREVIEW_SAMPLE_ROW = { man: 'ישראל', woman: 'שרה', lastName: 'ישראלי', street: 'הרצל', houseNo: '1', city: 'ירושלים' };
 
 function saveSelectedRows(rows) {
   sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
@@ -178,6 +186,15 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   // הפעם הראשונה אלה ברירות המחדל שלה. נקרא פעם אחת, כשהחלון נטען
   const [userLabelSettings] = useState(loadLabelPrintSettings);
 
+  // חזרה מ"שינוי הגדרות הדפסה" בעמוד המעטפות. נקרא פעם אחת, לפני שהמפתחות נמחקים
+  const [returningToEnvelopes] = useState(() => sessionStorage.getItem('fromPreview') === 'true'
+    && sessionStorage.getItem('savedPrintType') === 'envelopes');
+  // ברירות המחדל, או מה שנבחר לפני המעבר לתצוגה המקדימה. פרטי השולחים תמיד מהשמירה
+  const [envelopeSettings, setEnvelopeSettings] = useState(
+    () => loadInitialEnvelopeSettings({ returning: returningToEnvelopes }),
+  );
+  const envelopeDimensions = resolveEnvelopeDimensions(envelopeSettings);
+
   // ערך התחלתי לכל בחירה: קודם מה שנשמר בחזרה מהתצוגה המקדימה ("שינוי הגדרות
   // הדפסה"), אחר כך הבחירה השמורה של המשתמשת, ורק אז ברירת המחדל. ערך לא תקין
   // (כמו "printer1" מגרסה קודמת, או כתב שכבר לא ברשימה) מדולג
@@ -259,12 +276,21 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const [greetingAlign, setGreetingAlign] = useState(() =>
     initialChoice('savedGreetingAlign', 'greetingAlign', (v) => GREETING_ALIGNMENTS.includes(v), 'center'));
 
+  // גודל הכתב ההתחלתי מוגבל לפי גודל המדבקה. בחזרה ממעטפות מחזירים את הגודל שנבחר שם
+  useEffect(() => {
+    const savedFontScale = sessionStorage.getItem('savedFontScale');
+    if (returningToEnvelopes && savedFontScale !== null) {
+      setFontScale(clampEnvelopeFontScale(savedFontScale, envelopeDimensions));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // הערכים שנשמרו בחזרה מהתצוגה המקדימה ("שינוי הגדרות הדפסה") נקראים פעם אחת - כבר
   // נקלטו למעלה - ונמחקים מיד. בלי זה, ערך שנשאר (למשל אחרי הדפסה מהתצוגה המקדימה
   // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
   // אפילו עובר למשתמשת אחרת שמתחברת באותה לשונית
   useEffect(() => {
-    ['savedLabelSize', 'savedCustomFormat', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
+    ['savedPrintType', SAVED_ENVELOPE_SETTINGS_KEY, 'savedLabelSize', 'savedCustomFormat', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
       .forEach((key) => sessionStorage.removeItem(key));
     sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
     ['savedGreetingShow', 'savedGreetingSeparateLine', 'savedGreetingAlign'].forEach((key) => sessionStorage.removeItem(key));
@@ -286,13 +312,53 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     ));
   };
 
-  const [printType, setPrintType] = useState('labels');
+  const [printType, setPrintType] = useState(returningToEnvelopes ? 'envelopes' : 'labels');
+  const isEnvelopes = printType === 'envelopes';
   const [notification, setNotification] = useState('');
+
+  // גודל הכתב משותף לשני סוגי ההדפסה, אבל התקרה שלו נגזרת ממה שמדפיסים עליו
+  const clampCurrentFontScale = (scale) => (isEnvelopes
+    ? clampEnvelopeFontScale(scale, envelopeDimensions)
+    : clampFontScale(scale, labelSize, labelSize === 'custom' ? customLayout?.height : undefined));
+  const maxCurrentFontScale = isEnvelopes
+    ? getMaxEnvelopeFontScale(envelopeDimensions)
+    : getMaxFontScale(labelSize, labelSize === 'custom' ? customLayout?.height : undefined);
+
+  const printDisabled = isEnvelopes
+    ? !isEnvelopeSettingsReady(envelopeSettings)
+    : labelSize === 'large' || (labelSize === 'custom' && !customFormatValid);
+
+  // מעבר למעטפה קטנה יותר מוריד גודל כתב שכבר לא נכנס בה
+  const handleEnvelopeSettingsChange = (next) => {
+    if (next.senders !== envelopeSettings.senders) saveSenders(next.senders);
+    setEnvelopeSettings(next);
+    setFontScale((current) => clampEnvelopeFontScale(current, resolveEnvelopeDimensions(next)));
+  };
+
+  const enterEnvelopeSettings = () => {
+    setFontScale((current) => clampEnvelopeFontScale(current, envelopeDimensions));
+    setStep(2);
+  };
+
+  // המעבר לעמוד המעטפות. הזרימה של המדבקות למטה לא עוברת כאן בכלל
+  const goToEnvelopes = (autoPrint) => {
+    // בחירת המדפסת נזכרת כמו במדבקות. שאר הבחירות השמורות של המדבקות נשארות כמו שהן
+    saveLabelPrintSettings({ ...loadLabelPrintSettings(), printer, deliveryMethod });
+    const textStyle = { fontType, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
+    saveSelectedRows(rowsToPrint);
+    navigate('/print-envelopes', {
+      state: { selectedItems: rowsToPrint, envelopeSettings, ...textStyle, printer, deliveryMethod, englishSalutation: selectedEnglishSalutation, autoPrint },
+    });
+  };
 
   // פונקציה שמטפלת במעבר משלב 1 לשלב 2
   const handleNextStep = () => {
     if (printType === 'labels') {
+      // הכתב משותף, ואם קודם נבחר כתב גדול למעטפה הוא צריך להיכנס גם במדבקה
+      setFontScale((current) => clampFontScale(current, labelSize, labelSize === 'custom' ? customLayout?.height : undefined));
       setStep(2);
+    } else if (printType === 'envelopes') {
+      enterEnvelopeSettings();
     } else {
       // 🌟 שימוש בפונקציית הטקסט הדינמית מהקבועים
       setNotification(MODAL_TEXTS.NOT_AVAILABLE_ALERT(printType));
@@ -300,6 +366,14 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   };
 
   const handlePrint = () => {
+    if (isEnvelopes) {
+      goToEnvelopes(true);
+      sessionStorage.removeItem('fromPreview');
+      sessionStorage.removeItem('savedEnglishSalutation');
+      onClose();
+      setStep(1);
+      return;
+    }
     rememberChoices();
     // אותו דף הדפסה בדיוק כמו מה"תצוגה מקדימה" - רק עם דגל שגורם לו לפתוח את חלון
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
@@ -329,6 +403,10 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   };
 
   const handlePreview = () => {
+    if (isEnvelopes) {
+      goToEnvelopes(false);
+      return;
+    }
     rememberChoices();
     saveSelectedRows(rowsToPrint);
     navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign } });
@@ -362,7 +440,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
         {/* --- שלב 2: הגדרות מדבקה ומדפסת --- */}
         {step === 2 && (
           <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <Typography variant="h6" mb={3}>{MODAL_TEXTS.STEP_2_TITLE}</Typography>
+            <Typography variant="h6" mb={3}>{isEnvelopes ? MODAL_TEXTS.ENVELOPE_STEP_2_TITLE : MODAL_TEXTS.STEP_2_TITLE}</Typography>
 
             {/* רק האזור הזה נגלל כשהאפשרויות לא נכנסות. pt - כדי שהתווית של השדה העליון
                 (שיושבת מעל המסגרת שלו) לא תיחתך בראש אזור הגלילה */}
@@ -394,7 +472,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <IconButton
                     size="small"
-                    onClick={() => setFontScale((s) => clampFontScale(s - FONT_SCALE_STEP, labelSize, labelSize === 'custom' ? customLayout?.height : undefined))}
+                    onClick={() => setFontScale((s) => clampCurrentFontScale(s - FONT_SCALE_STEP))}
                     disabled={fontScale <= FONT_SCALE_MIN}
                   >
                     <RemoveIcon fontSize="small" />
@@ -404,8 +482,8 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <IconButton
                     size="small"
-                    onClick={() => setFontScale((s) => clampFontScale(s + FONT_SCALE_STEP, labelSize, labelSize === 'custom' ? customLayout?.height : undefined))}
-                    disabled={fontScale >= getMaxFontScale(labelSize, labelSize === 'custom' ? customLayout?.height : undefined)}
+                    onClick={() => setFontScale((s) => clampCurrentFontScale(s + FONT_SCALE_STEP))}
+                    disabled={fontScale >= maxCurrentFontScale}
                   >
                     <AddIcon fontSize="small" />
                   </IconButton>
@@ -479,6 +557,10 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   />
                 )}
 
+                {/* במעטפות מתחלף רק בלוק הגודל. הכתב, הפנייה והמדפסת משותפים */}
+                {isEnvelopes ? (
+                  <EnvelopeSettingsStep settings={envelopeSettings} onChange={handleEnvelopeSettingsChange} />
+                ) : (<>
                 <FormControl fullWidth>
                   <InputLabel id="size-label">{MODAL_TEXTS.SIZE_INPUT_LABEL}</InputLabel>
                   <Select
@@ -538,6 +620,8 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Stack>
                 )}
 
+                </>)}
+
                 <FormControl fullWidth>
                   <InputLabel id="printer-label">{MODAL_TEXTS.PRINTER_INPUT_LABEL}</InputLabel>
                   <Select
@@ -572,14 +656,25 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
               <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
 
-              <LabelSheetPreview labelSize={labelSize} customFormat={customFormat} />
+              {isEnvelopes ? (
+                <EnvelopePreview
+                  width={ENVELOPE_PREVIEW_WIDTH}
+                  layout={buildEnvelopeLayout(envelopeSettings, { fontType, fontScale, fontWeight })}
+                  row={rowsToPrint[0] ?? ENVELOPE_PREVIEW_SAMPLE_ROW}
+                  senders={envelopeSettings.senders}
+                  textOptions={{ englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign }}
+                  getPrintFlag={createPrintFlagGetter()}
+                />
+              ) : (
+                <LabelSheetPreview labelSize={labelSize} customFormat={customFormat} />
+              )}
             </Stack>
 
             <Stack direction="row" spacing={1} justifyContent="space-between" mt={4}>
               <Button onClick={() => setStep(1)} color="inherit">{MODAL_TEXTS.BUTTON_BACK}</Button>
               <Stack direction="row" spacing={1}>
-                <Button variant="outlined" onClick={handlePreview} disabled={labelSize === 'large' || (labelSize === 'custom' && !customFormatValid)}>{MODAL_TEXTS.BUTTON_PREVIEW}</Button>
-                <Button variant="contained" onClick={handlePrint} color="success" disabled={labelSize === 'large' || (labelSize === 'custom' && !customFormatValid)}>{MODAL_TEXTS.BUTTON_PRINT}</Button>
+                <Button variant="outlined" onClick={handlePreview} disabled={printDisabled}>{MODAL_TEXTS.BUTTON_PREVIEW}</Button>
+                <Button variant="contained" onClick={handlePrint} color="success" disabled={printDisabled}>{MODAL_TEXTS.BUTTON_PRINT}</Button>
               </Stack>
             </Stack>
           </Box>
