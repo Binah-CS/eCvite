@@ -342,10 +342,12 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
   // המעבר לעמוד המעטפות. הזרימה של המדבקות למטה לא עוברת כאן בכלל
   const goToEnvelopes = (autoPrint) => {
+    // בחירת המדפסת נזכרת כמו במדבקות. שאר הבחירות השמורות של המדבקות נשארות כמו שהן
+    saveLabelPrintSettings({ ...loadLabelPrintSettings(), printer, deliveryMethod });
     const textStyle = { fontType, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
     saveSelectedRows(rowsToPrint);
     navigate('/print-envelopes', {
-      state: { selectedItems: rowsToPrint, envelopeSettings, ...textStyle, englishSalutation: selectedEnglishSalutation, autoPrint },
+      state: { selectedItems: rowsToPrint, envelopeSettings, ...textStyle, printer, deliveryMethod, englishSalutation: selectedEnglishSalutation, autoPrint },
     });
   };
 
@@ -555,7 +557,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   />
                 )}
 
-                {/* במעטפות מתחלפים רק הגודל והמדפסת. הכתב והפנייה למעלה משותפים */}
+                {/* במעטפות מתחלף רק בלוק הגודל. הכתב, הפנייה והמדפסת משותפים */}
                 {isEnvelopes ? (
                   <EnvelopeSettingsStep settings={envelopeSettings} onChange={handleEnvelopeSettingsChange} />
                 ) : (<>
@@ -618,6 +620,8 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Stack>
                 )}
 
+                </>)}
+
                 <FormControl fullWidth>
                   <InputLabel id="printer-label">{MODAL_TEXTS.PRINTER_INPUT_LABEL}</InputLabel>
                   <Select
@@ -643,7 +647,6 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                     </RadioGroup>
                   </Box>
                 )}
-                </>)}
 
                 <FormControlLabel
                   control={<Checkbox checked={emptyLineWhenNoAddress} onChange={(e) => setEmptyLineWhenNoAddress(e.target.checked)} />}

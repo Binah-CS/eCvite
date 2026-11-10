@@ -40,6 +40,8 @@ export default function EnvelopePrintPage() {
     greetingShow = true,
     greetingSeparateLine = true,
     greetingAlign = 'center',
+    printer = 'home',
+    deliveryMethod = 'courier',
     autoPrint = false,
   } = location.state || {};
 
@@ -72,6 +74,8 @@ export default function EnvelopePrintPage() {
     sessionStorage.setItem('fromPreview', 'true');
     sessionStorage.setItem('savedPrintType', 'envelopes');
     saveEnvelopeSettingsForReturn(settings);
+    sessionStorage.setItem('savedPrinter', printer);
+    sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
     sessionStorage.setItem('savedFontType', fontType);
     sessionStorage.setItem('savedFontScale', String(fontScale));
     sessionStorage.setItem('savedFontWeight', fontWeight);
