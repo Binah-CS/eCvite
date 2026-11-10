@@ -5,7 +5,7 @@ import { Box, Button, Stack, Typography } from '@mui/material';
 import EnvelopePreview from '../components/EnvelopePreview';
 import EnvelopeSheet, { createPrintFlagGetter } from '../components/EnvelopeSheet';
 import { buildEnvelopeLayout } from '../utils/envelopeLayout';
-import { loadEnvelopePrintSettings } from '../utils/envelopePrintSettings';
+import { loadInitialEnvelopeSettings, saveEnvelopeSettingsForReturn } from '../utils/envelopePrintSettings';
 import { FONT_SCALE_DEFAULT } from '../utils/labelSheetLayout';
 import { getSavedSelectedRows, saveSelectedRows } from './PrintPreviewPage';
 import { MODAL_TEXTS } from './HardCodePage';
@@ -44,7 +44,7 @@ export default function EnvelopePrintPage() {
   } = location.state || {};
 
   const rows = selectedItems.length > 0 ? selectedItems : getSavedSelectedRows();
-  const settings = envelopeSettings ?? loadEnvelopePrintSettings().settings;
+  const settings = envelopeSettings ?? loadInitialEnvelopeSettings();
   const layout = buildEnvelopeLayout(settings, { fontType, fontScale, fontWeight });
   const textOptions = { englishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
   const getPrintFlag = createPrintFlagGetter();
@@ -66,11 +66,12 @@ export default function EnvelopePrintPage() {
     navigate('/');
   };
 
-  // אותם מפתחות שחלון ההדפסה קורא בחזרה, בנוסף לסוג ההדפסה. הגדרות המעטפה עצמן כבר
-  // שמורות דרך envelopePrintSettings
+  // אותם מפתחות שחלון ההדפסה קורא בחזרה, בנוסף לסוג ההדפסה ולהגדרות המעטפה. זו הדרך
+  // היחידה שההגדרות נשמרות בה: "ביטול וחזרה" לא שומר כלום, ולכן החלון יתחיל מההתחלה
   const backToSettings = () => {
     sessionStorage.setItem('fromPreview', 'true');
     sessionStorage.setItem('savedPrintType', 'envelopes');
+    saveEnvelopeSettingsForReturn(settings);
     sessionStorage.setItem('savedFontType', fontType);
     sessionStorage.setItem('savedFontScale', String(fontScale));
     sessionStorage.setItem('savedFontWeight', fontWeight);

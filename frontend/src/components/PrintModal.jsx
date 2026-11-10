@@ -1,5 +1,5 @@
 // src/components/PrintModal.jsx
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert, IconButton, Checkbox, TextField } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
@@ -11,7 +11,7 @@ import { resolveEnvelopeDimensions } from '../utils/envelopeFormats';
 import EnvelopePreview from './EnvelopePreview';
 import { createPrintFlagGetter } from './EnvelopeSheet';
 import { buildEnvelopeLayout, clampEnvelopeFontScale, getMaxEnvelopeFontScale, isEnvelopeSettingsReady } from '../utils/envelopeLayout';
-import { loadEnvelopePrintSettings, saveEnvelopePrintSettings } from '../utils/envelopePrintSettings';
+import { SAVED_ENVELOPE_SETTINGS_KEY, loadInitialEnvelopeSettings, saveSenders } from '../utils/envelopePrintSettings';
 import {
   DEFAULT_CUSTOM_LABEL_FORMAT,
   getCustomLabelLayout,
@@ -186,15 +186,14 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   // הפעם הראשונה אלה ברירות המחדל שלה. נקרא פעם אחת, כשהחלון נטען
   const [userLabelSettings] = useState(loadLabelPrintSettings);
 
-  // הגדרות המעטפה ופרטי השולח השמורים בדפדפן (ר' envelopePrintSettings.js)
-  const [savedEnvelope] = useState(loadEnvelopePrintSettings);
-  const [envelopeSettings, setEnvelopeSettings] = useState(savedEnvelope.settings);
-  const envelopeDimensions = resolveEnvelopeDimensions(envelopeSettings);
   // חזרה מ"שינוי הגדרות הדפסה" בעמוד המעטפות. נקרא פעם אחת, לפני שהמפתחות נמחקים
   const [returningToEnvelopes] = useState(() => sessionStorage.getItem('fromPreview') === 'true'
     && sessionStorage.getItem('savedPrintType') === 'envelopes');
-  // בחירות הכתב השמורות למעטפות נטענות פעם אחת, בכניסה הראשונה להגדרות המעטפה
-  const envelopeTextStyleLoadedRef = useRef(returningToEnvelopes);
+  // ברירות המחדל, או מה שנבחר לפני המעבר לתצוגה המקדימה. פרטי השולחים תמיד מהשמירה
+  const [envelopeSettings, setEnvelopeSettings] = useState(
+    () => loadInitialEnvelopeSettings({ returning: returningToEnvelopes }),
+  );
+  const envelopeDimensions = resolveEnvelopeDimensions(envelopeSettings);
 
   // ערך התחלתי לכל בחירה: קודם מה שנשמר בחזרה מהתצוגה המקדימה ("שינוי הגדרות
   // הדפסה"), אחר כך הבחירה השמורה של המשתמשת, ורק אז ברירת המחדל. ערך לא תקין
@@ -279,8 +278,9 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
   // גודל הכתב ההתחלתי מוגבל לפי גודל המדבקה. בחזרה ממעטפות מחזירים את הגודל שנבחר שם
   useEffect(() => {
-    if (returningToEnvelopes && savedEnvelope.textStyle?.fontScale !== undefined) {
-      setFontScale(clampEnvelopeFontScale(savedEnvelope.textStyle.fontScale, envelopeDimensions));
+    const savedFontScale = sessionStorage.getItem('savedFontScale');
+    if (returningToEnvelopes && savedFontScale !== null) {
+      setFontScale(clampEnvelopeFontScale(savedFontScale, envelopeDimensions));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -290,7 +290,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
   // אפילו עובר למשתמשת אחרת שמתחברת באותה לשונית
   useEffect(() => {
-    ['savedPrintType', 'savedLabelSize', 'savedCustomFormat', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
+    ['savedPrintType', SAVED_ENVELOPE_SETTINGS_KEY, 'savedLabelSize', 'savedCustomFormat', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
       .forEach((key) => sessionStorage.removeItem(key));
     sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
     ['savedGreetingShow', 'savedGreetingSeparateLine', 'savedGreetingAlign'].forEach((key) => sessionStorage.removeItem(key));
@@ -330,22 +330,12 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
   // מעבר למעטפה קטנה יותר מוריד גודל כתב שכבר לא נכנס בה
   const handleEnvelopeSettingsChange = (next) => {
+    if (next.senders !== envelopeSettings.senders) saveSenders(next.senders);
     setEnvelopeSettings(next);
     setFontScale((current) => clampEnvelopeFontScale(current, resolveEnvelopeDimensions(next)));
   };
 
   const enterEnvelopeSettings = () => {
-    const textStyle = envelopeTextStyleLoadedRef.current ? null : savedEnvelope.textStyle;
-    envelopeTextStyleLoadedRef.current = true;
-    if (textStyle) {
-      if (FONT_OPTIONS.some((font) => font.value === textStyle.fontType)) setFontType(textStyle.fontType);
-      if (textStyle.fontWeight === 'regular' || textStyle.fontWeight === 'bold') setFontWeight(textStyle.fontWeight);
-      if (Number.isFinite(textStyle.fontScale)) setFontScale(textStyle.fontScale);
-      if (typeof textStyle.emptyLineWhenNoAddress === 'boolean') setEmptyLineWhenNoAddress(textStyle.emptyLineWhenNoAddress);
-      if (typeof textStyle.greetingShow === 'boolean') setGreetingShow(textStyle.greetingShow);
-      if (typeof textStyle.greetingSeparateLine === 'boolean') setGreetingSeparateLine(textStyle.greetingSeparateLine);
-      if (GREETING_ALIGNMENTS.includes(textStyle.greetingAlign)) setGreetingAlign(textStyle.greetingAlign);
-    }
     setFontScale((current) => clampEnvelopeFontScale(current, envelopeDimensions));
     setStep(2);
   };
@@ -353,7 +343,6 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   // המעבר לעמוד המעטפות. הזרימה של המדבקות למטה לא עוברת כאן בכלל
   const goToEnvelopes = (autoPrint) => {
     const textStyle = { fontType, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
-    saveEnvelopePrintSettings(envelopeSettings, textStyle);
     saveSelectedRows(rowsToPrint);
     navigate('/print-envelopes', {
       state: { selectedItems: rowsToPrint, envelopeSettings, ...textStyle, englishSalutation: selectedEnglishSalutation, autoPrint },

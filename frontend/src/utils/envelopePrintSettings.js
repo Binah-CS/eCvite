@@ -1,6 +1,9 @@
-// המקום היחיד שקורא וכותב את הגדרות המעטפה ופרטי השולח. נשמרים ב-localStorage של
-// הדפדפן, בנפרד לכל משתמשת (לפי טלפון, כמו records-${phone} ב-DashboardPage). כל גישה
-// עטופה ב-try/catch - אחסון חסום, מלא או ערך פגום לא יכולים לשבור את ההדפסה
+// שמירה של הגדרות המעטפה, בשתי רמות:
+// - פרטי השולחים: ב-localStorage, בנפרד לכל משתמשת (לפי טלפון, כמו records-${phone}
+//   ב-DashboardPage). לא מתאפסים לעולם. זה המקום היחיד שנוגע ב-localStorage של המעטפות.
+// - כל שאר ההגדרות: רק לחזרה מ"שינוי הגדרות הדפסה", ב-sessionStorage, כמו ערכי saved*
+//   של המדבקות. בכל פתיחה אחרת החלון מתחיל מברירות המחדל.
+// כל גישה עטופה ב-try/catch - אחסון חסום, מלא או ערך פגום לא יכולים לשבור את ההדפסה
 import {
   FLAP_SHAPES,
   MAX_SENDERS,
@@ -11,14 +14,16 @@ import {
 } from './envelopeFormats';
 import { SENDER_MODES } from './envelopeLayout';
 
-function getStorageKey() {
+export const SAVED_ENVELOPE_SETTINGS_KEY = 'savedEnvelopeSettings';
+
+function getSendersStorageKey() {
   let phone = '';
   try {
     phone = JSON.parse(sessionStorage.getItem('user') || 'null')?.phone ?? '';
   } catch {
     phone = '';
   }
-  return `envelopePrintSettings-${phone || 'guest'}`;
+  return `envelopeSenders-${phone || 'guest'}`;
 }
 
 function sanitizeSender(raw) {
@@ -29,10 +34,27 @@ function sanitizeSender(raw) {
   return sender;
 }
 
+export function loadSavedSenders() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(getSendersStorageKey()) || 'null');
+    const senders = Array.isArray(parsed) ? parsed.slice(0, MAX_SENDERS).map(sanitizeSender) : [];
+    return senders.length > 0 ? senders : [createEmptySender()];
+  } catch {
+    return [createEmptySender()];
+  }
+}
+
+export function saveSenders(senders) {
+  try {
+    localStorage.setItem(getSendersStorageKey(), JSON.stringify(senders));
+  } catch (err) {
+    console.error('שמירת פרטי השולח בדפדפן נכשלה:', err);
+  }
+}
+
 function sanitizeSettings(raw) {
   const defaults = createDefaultEnvelopeSettings();
   if (!raw || typeof raw !== 'object') return defaults;
-  const senders = Array.isArray(raw.senders) ? raw.senders.slice(0, MAX_SENDERS).map(sanitizeSender) : [];
   return {
     ...defaults,
     sizeId: isKnownEnvelopeSize(raw.sizeId) ? raw.sizeId : defaults.sizeId,
@@ -42,28 +64,29 @@ function sanitizeSettings(raw) {
     senderMode: Object.prototype.hasOwnProperty.call(SENDER_MODES, raw.senderMode) ? raw.senderMode : defaults.senderMode,
     flapDepthMm: raw.flapDepthMm ?? defaults.flapDepthMm,
     flapShape: FLAP_SHAPES.includes(raw.flapShape) ? raw.flapShape : defaults.flapShape,
-    senders: senders.length > 0 ? senders : defaults.senders,
   };
 }
 
-// מחזירה תמיד הגדרות שאפשר לעבוד איתן. textStyle הוא null כשעוד לא נשמרו בחירות כתב
-export function loadEnvelopePrintSettings() {
+// נקרא רק ב"שינוי הגדרות הדפסה". השולחים לא כאן, כי הם כבר שמורים בנפרד
+export function saveEnvelopeSettingsForReturn(settings) {
   try {
-    const saved = localStorage.getItem(getStorageKey());
-    const parsed = saved ? JSON.parse(saved) : null;
-    return {
-      settings: sanitizeSettings(parsed?.settings),
-      textStyle: parsed?.textStyle && typeof parsed.textStyle === 'object' ? parsed.textStyle : null,
-    };
-  } catch {
-    return { settings: createDefaultEnvelopeSettings(), textStyle: null };
+    const { senders, ...rest } = settings;
+    sessionStorage.setItem(SAVED_ENVELOPE_SETTINGS_KEY, JSON.stringify(rest));
+  } catch (err) {
+    console.error('שמירת הגדרות המעטפה לחזרה מהתצוגה נכשלה:', err);
   }
 }
 
-export function saveEnvelopePrintSettings(settings, textStyle) {
-  try {
-    localStorage.setItem(getStorageKey(), JSON.stringify({ settings, textStyle }));
-  } catch (err) {
-    console.error('שמירת הגדרות המעטפה בדפדפן נכשלה:', err);
+// ההגדרות שהחלון נפתח איתן: ברירות המחדל, או בחזרה מהתצוגה המקדימה מה שנשמר לפני
+// היציאה אליה. בשני המקרים עם השולחים השמורים, כך שהשדות כבר מלאים כשמסמנים הדפסת שולח
+export function loadInitialEnvelopeSettings({ returning = false } = {}) {
+  let saved = null;
+  if (returning) {
+    try {
+      saved = JSON.parse(sessionStorage.getItem(SAVED_ENVELOPE_SETTINGS_KEY) || 'null');
+    } catch {
+      saved = null;
+    }
   }
+  return { ...sanitizeSettings(saved), senders: loadSavedSenders() };
 }
