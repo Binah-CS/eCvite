@@ -68,7 +68,7 @@ export const MODAL_TEXTS = {
   ENVELOPE_PREVIEW_BACK: "גב",
   ENVELOPE_PREVIEW_INVALID: "אין תצוגה: בדקו את המידות.",
   ENVELOPE_PRINT_BUTTON: "הדפס מעטפות",
-  ENVELOPE_PRINT_HINT: (widthMm, heightMm, flapOpen) => `גודל הדף: ${widthMm}×${heightMm} מ"מ. בחלון ההדפסה יש לבחור נייר בגודל הזה, קנה מידה 100% וללא שוליים.${flapOpen ? ' מזינים את המעטפה כשהחזית בצד שעליו המדפסת מדפיסה, הלשונית פתוחה ונכנסת ראשונה.' : ''}`,
+  ENVELOPE_PRINT_HINT: (widthMm, heightMm, flapOpen) => `גודל הדף: ⁦${widthMm}×${heightMm}⁩ מ"מ. בחלון ההדפסה יש לבחור נייר בגודל הזה, קנה מידה 100% וללא שוליים.${flapOpen ? ' מזינים את המעטפה כשהחזית בצד שעליו המדפסת מדפיסה, הלשונית פתוחה ונכנסת ראשונה.' : ''}`,
   ENVELOPE_NOTHING_TO_PRINT: "אין מה להדפיס. חזרי לטבלה ובדקי את הנמענים ואת המידות.",
 
   BUTTON_CANCEL: "ביטול",
