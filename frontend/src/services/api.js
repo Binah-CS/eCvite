@@ -111,6 +111,8 @@ const api = {
 
   getRecipientHistory: (hashCode, phone) =>
       apiClient.get(`/recipients/${encodeURIComponent(hashCode)}/history`, { params: { phone } }),
+  optimizeDistributionRoutes: (assignments) =>
+      apiClient.post('/distribution-routes/optimize', { assignments }),
 };
 
 export default api;

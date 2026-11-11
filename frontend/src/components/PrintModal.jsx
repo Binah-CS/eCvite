@@ -155,7 +155,7 @@ function LabelSheetPreview({ labelSize, customFormat }) {
   );
 }
 
-export default function PrintModal({ open, onClose, selectedRows, records: allRecords = [], visibleRows = null }) {
+export default function PrintModal({ open, onClose, selectedRows, records: allRecords = [], visibleRows = null, routeAssignments = {}, returnPath = "", onOpenLabelEditor = null }) {
   const navigate = useNavigate();
   // visibleRows - { rows, filtered } מהטבלה (ר' VisibleRowsContext). כשהטבלה מסוננת (חיפוש
   // או חלון "סינון") - "כולן" הן השורות שמוצגות בה, לא כל הרשימה
@@ -259,6 +259,10 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const [greetingAlign, setGreetingAlign] = useState(() =>
     initialChoice('savedGreetingAlign', 'greetingAlign', (v) => GREETING_ALIGNMENTS.includes(v), 'center'));
 
+  // מספר השקית הראשון מודפס על הפס של Click Post. כל מדבקה שאחריו מקבלת את המספר הבא.
+  const [firstBagNumber, setFirstBagNumber] = useState(() =>
+    initialChoice('savedFirstBagNumber', 'firstBagNumber', (v) => /^\d+$/.test(v), '1'));
+
   // הערכים שנשמרו בחזרה מהתצוגה המקדימה ("שינוי הגדרות הדפסה") נקראים פעם אחת - כבר
   // נקלטו למעלה - ונמחקים מיד. בלי זה, ערך שנשאר (למשל אחרי הדפסה מהתצוגה המקדימה
   // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
@@ -267,13 +271,13 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     ['savedLabelSize', 'savedCustomFormat', 'savedPrinter', 'savedFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
       .forEach((key) => sessionStorage.removeItem(key));
     sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
-    ['savedGreetingShow', 'savedGreetingSeparateLine', 'savedGreetingAlign'].forEach((key) => sessionStorage.removeItem(key));
+    ['savedGreetingShow', 'savedGreetingSeparateLine', 'savedGreetingAlign', 'savedFirstBagNumber'].forEach((key) => sessionStorage.removeItem(key));
   }, []);
 
   // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
   // ייפתח אצלה עם הבחירות האלה. לא מחכים לתשובה - ההדפסה לא תלויה בשמירה
   const rememberChoices = () => {
-    saveLabelPrintSettings({ fontType, labelSize, customFormat, printer, deliveryMethod, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign });
+    saveLabelPrintSettings({ fontType, labelSize, customFormat, printer, deliveryMethod, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, firstBagNumber });
   };
 
   // מעבר לגודל מדבקה קטן יותר מוריד גודל כתב שכבר לא נכנס בו למקסימום החדש
@@ -305,7 +309,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     saveSelectedRows(rowsToPrint);
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, firstBagNumber, routeAssignments, returnPath, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
@@ -321,6 +325,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     sessionStorage.removeItem('savedGreetingShow');
     sessionStorage.removeItem('savedGreetingSeparateLine');
     sessionStorage.removeItem('savedGreetingAlign');
+    sessionStorage.removeItem('savedFirstBagNumber');
     sessionStorage.removeItem('savedFontScale');
     sessionStorage.removeItem('savedFontWeight');
 
@@ -331,7 +336,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const handlePreview = () => {
     rememberChoices();
     saveSelectedRows(rowsToPrint);
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign } });
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, firstBagNumber, routeAssignments, returnPath } });
   };
 
   return (
@@ -568,6 +573,16 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   control={<Checkbox checked={emptyLineWhenNoAddress} onChange={(e) => setEmptyLineWhenNoAddress(e.target.checked)} />}
                   label={MODAL_TEXTS.EMPTY_LINE_NO_ADDRESS}
                 />
+
+                <TextField
+                  fullWidth
+                  type="text"
+                  label="מספר השקית הראשון"
+                  value={firstBagNumber}
+                  onChange={(e) => setFirstBagNumber(e.target.value.replace(/\D/g, ''))}
+                  helperText="יודפס בפס Click Post; המספר מתקדם בכל מדבקה"
+                  inputProps={{ inputMode: 'numeric', dir: 'ltr' }}
+                />
               </Stack>
 
               <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
@@ -578,6 +593,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
             <Stack direction="row" spacing={1} justifyContent="space-between" mt={4}>
               <Button onClick={() => setStep(1)} color="inherit">{MODAL_TEXTS.BUTTON_BACK}</Button>
               <Stack direction="row" spacing={1}>
+                {onOpenLabelEditor && <Button variant="outlined" onClick={onOpenLabelEditor}>עריכת מדבקות</Button>}
                 <Button variant="outlined" onClick={handlePreview} disabled={labelSize === 'large' || (labelSize === 'custom' && !customFormatValid)}>{MODAL_TEXTS.BUTTON_PREVIEW}</Button>
                 <Button variant="contained" onClick={handlePrint} color="success" disabled={labelSize === 'large' || (labelSize === 'custom' && !customFormatValid)}>{MODAL_TEXTS.BUTTON_PRINT}</Button>
               </Stack>

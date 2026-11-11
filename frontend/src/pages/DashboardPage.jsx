@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Typography, Avatar, IconButton, Menu, MenuItem, Snackbar, Alert } from '@mui/material';
+import { Box, Typography, Avatar, IconButton, Menu, MenuItem, Snackbar, Alert, Button } from '@mui/material';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import DataTable from '../components/DataTable';
@@ -630,6 +630,10 @@ export default function DashboardPage() {
 
   return (
       <Box sx={{ width: '100%', height: '100vh', px: 1, pt: 0.5, pb: 1, display: 'flex', flexDirection: 'column' }}>
+
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5 }}>
+          <Button size="small" variant="outlined" onClick={() => navigate('/distribution-routes')}>מסלולי חלוקה</Button>
+        </Box>
 
         {error && (
             <Typography color="error" variant="body2" mb={1}>

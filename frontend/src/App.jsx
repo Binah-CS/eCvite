@@ -5,6 +5,7 @@ import PrintPreviewPage from './pages/PrintPreviewPage'; // עמוד חדש שנ
 import RegisterPage from "./pages/RegisterPage";
 import Terms from "./pages/Terms";
 import SettingsPage from './pages/SettingsPage';
+import DistributionRoutesPage from './pages/DistributionRoutesPage';
 function App() {
 
   // useLocation גורם ל-App להתעדכן בכל ניווט, כדי ש-loggedIn ייבדק מחדש אחרי login/logout
@@ -25,6 +26,7 @@ function App() {
             element={loggedIn ? <PrintPreviewPage /> : <Navigate to="/login" replace />}
         />
         <Route path="/terms" element={<Terms />} />
+        <Route path="/distribution-routes" element={loggedIn ? <DistributionRoutesPage /> : <Navigate to="/login" replace />} />
         <Route
             path="/settings"
             element={loggedIn ? <SettingsPage /> : <Navigate to="/login" replace />}
