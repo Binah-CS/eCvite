@@ -176,11 +176,12 @@ export default function PrintPreviewPage() {
     : greetingAlign === 'left'
       ? 'end'
       : 'center';
-  const greetingInsetSx = greetingAlign === 'right'
-    ? { marginInlineStart: '1mm' }
-    : greetingAlign === 'left'
-      ? { marginInlineEnd: '1mm' }
-      : {};
+  // כש"לכבוד" בשורה נפרדת, כל שורות המדבקה נעטפות בבלוק אחד שרוחבו כרוחב השורה
+  // הארוכה ביותר וממורכז במדבקה - כך ימין/שמאל של "לכבוד" הם ביחס לקצה הטקסט ולא
+  // לקצה המדבקה. maxWidth מונע מהבלוק לחרוג מהמדבקה (ואז "לכבוד" היה נחתך)
+  const greetingBlockSx = {
+    display: 'flex', flexDirection: 'column', alignItems: 'center', maxWidth: '100%',
+  };
   const nameLineSx = {
     fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
     lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
@@ -326,26 +327,8 @@ export default function PrintPreviewPage() {
               const printLanguage = detectPrintLanguage(row, getPrintFlag);
               const { greetingLine, nameLine } = splitHebrewGreeting(
                 buildNameLine(row, getPrintFlag, printLanguage, englishSalutation), printLanguage, greetingShow, greetingSeparateLine);
-              return (
-                <Box
-                key={row.id || index}
-                sx={{
-                  boxSizing: 'border-box',
-                  width: layout.width,
-                  height: layout.height,
-                  flexShrink: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflow: 'hidden',
-                  p: 0.5,
-                  backgroundColor: '#ffffff',
-                  pageBreakInside: 'avoid',
-                  fontFamily: fontType,
-                  direction: printLanguage === 'en' ? 'ltr' : 'rtl',
-                }}
-              >
+              const labelLines = (
+              <>
                 {/* פנייה עברית שנבחרה למדבקה באנגלית מודפסת מעל השם. */}
                 {printLanguage === 'en' && hasHebrewEnglishSalutation(englishSalutation) && buildNameLine(row, getPrintFlag, printLanguage, englishSalutation) && (
                   <Typography
@@ -356,12 +339,12 @@ export default function PrintPreviewPage() {
                   </Typography>
                 )}
 
-                {/* "לכבוד" בשורה נפרדת מעל השם, בצד שנבחר בחלון ההדפסה - על כל רוחב המדבקה,
-                    כדי שימין/שמאל יהיו ביחס למדבקה ולא רק לאורך השם */}
+                {/* "לכבוד" בשורה נפרדת מעל השם, בצד שנבחר בחלון ההדפסה - נמתח לרוחב בלוק
+                    הטקסט (greetingBlockSx), כך שימין/שמאל מיושרים לקצה השורה הארוכה ביותר */}
                 {greetingLine && (
                   <Typography
                     variant={layout.nameVariant}
-                    sx={{ ...nameLineSx, ...greetingInsetSx, mb: 0, alignSelf: 'stretch', textAlign: greetingTextAlign }}
+                    sx={{ ...nameLineSx, mb: 0, alignSelf: 'stretch', textAlign: greetingTextAlign }}
                   >
                     {greetingLine}
                   </Typography>
@@ -426,6 +409,30 @@ export default function PrintPreviewPage() {
                     </Typography>
                   ) : null
                 )}
+              </>
+              );
+              return (
+                <Box
+                key={row.id || index}
+                sx={{
+                  boxSizing: 'border-box',
+                  width: layout.width,
+                  height: layout.height,
+                  flexShrink: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                  p: 0.5,
+                  backgroundColor: '#ffffff',
+                  pageBreakInside: 'avoid',
+                  fontFamily: fontType,
+                  direction: printLanguage === 'en' ? 'ltr' : 'rtl',
+                }}
+              >
+                {/* העטיפה מרונדרת רק כש"לכבוד" בשורה נפרדת - בשאר המצבים ה-DOM זהה לקודם */}
+                {greetingLine ? <Box sx={greetingBlockSx}>{labelLines}</Box> : labelLines}
                 </Box>
               );
             })}
