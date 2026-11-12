@@ -1,5 +1,11 @@
 // src/pages/HardCodePage.jsx
 import React from 'react';
+import {
+  MAX_ENVELOPE_HEIGHT_MM,
+  MAX_ENVELOPE_WIDTH_MM,
+  MIN_ENVELOPE_HEIGHT_MM,
+  MIN_ENVELOPE_WIDTH_MM,
+} from '../utils/envelopeFormats';
 
 // 🌟 הקבועים החדשים של ה-PrintModal שהוצאנו מה-Hard Code:
 export const MODAL_TEXTS = {
@@ -44,8 +50,24 @@ export const MODAL_TEXTS = {
   ENVELOPE_WIDTH: "רוחב מעטפה",
   ENVELOPE_HEIGHT: "גובה מעטפה",
   ENVELOPE_MM_NOTE: "מידות במילימטרים",
-  ENVELOPE_SIZE_INVALID: "בדקו שהמידות חיוביות.",
+  // לפי הסיבה מ-getCustomSizeError. הלשונית על הצלע הארוכה, ולכן הרוחב לפחות כמו הגובה
+  ENVELOPE_SIZE_ERRORS: {
+    invalid: "בדקו שהמידות חיוביות.",
+    swapped: "נראה שהרוחב והגובה הפוכים. הרוחב הוא הצלע הארוכה, שעליה הלשונית.",
+    portrait: "הרוחב צריך להיות גדול מהגובה או שווה לו (הלשונית בצלע הארוכה).",
+    tooSmall: `המעטפה קטנה מדי. רוחב לפחות ${MIN_ENVELOPE_WIDTH_MM} מ"מ וגובה לפחות ${MIN_ENVELOPE_HEIGHT_MM} מ"מ.`,
+    tooLarge: `המעטפה גדולה מדי. רוחב עד ${MAX_ENVELOPE_WIDTH_MM} מ"מ וגובה עד ${MAX_ENVELOPE_HEIGHT_MM} מ"מ.`,
+  },
+  ENVELOPE_SWAP_SIZE: "החלפה",
   ENVELOPE_PRINT_SENDER: "הדפס גם את פרטי השולח",
+  ENVELOPE_SENDER_PLACEMENT: "מיקום השולח",
+  ENVELOPE_PLACEMENT_FLAP: "על הלשונית (גב המעטפה)",
+  ENVELOPE_PLACEMENT_CORNER: "בפינה העליונה בחזית",
+  ENVELOPE_CORNER_SIDE: "צד",
+  ENVELOPE_SIDE_AUTO: "אוטומטי",
+  ENVELOPE_SIDE_RIGHT: "ימין",
+  ENVELOPE_SIDE_LEFT: "שמאל",
+  ENVELOPE_SIDE_AUTO_NOTE: "באוטומטי: נמען בעברית - השולח בימין, נמען באנגלית - השולח בשמאל.",
   ENVELOPE_FLAP_DEPTH: "עומק לשונית (מ\"מ)",
   ENVELOPE_FLAP_DEPTH_INVALID: "עומק הלשונית צריך להיות חיובי ולא גדול מגובה המעטפה.",
   ENVELOPE_FLAP_SHAPE: "צורת לשונית",
@@ -62,13 +84,25 @@ export const MODAL_TEXTS = {
   ENVELOPE_ADD_SENDER: "הוספת שולח שני",
   ENVELOPE_REMOVE_SENDER: "הסרה",
   ENVELOPE_SENDER_OVERFLOW: "טקסט השולח לא נכנס בשטח הלשונית. כדאי להקטין את הכתב, להגדיל את עומק הלשונית או לקצר את הכתובת.",
+  ENVELOPE_SENDER_CORNER_OVERFLOW: "טקסט השולח לא נכנס בפינה. כדאי להקטין את הכתב או לקצר את הכתובת.",
+  // count: בעמוד ההדפסה - בכמה מעטפות. null בחלון ההגדרות, שבו מוצג נמען אחד
+  ENVELOPE_RECIPIENT_OVERFLOW: (count) => {
+    let where = 'כתובת הנמען';
+    if (count === 1) where = 'במעטפה אחת כתובת הנמען';
+    else if (count > 1) where = `ב-${count} מעטפות כתובת הנמען`;
+    return `${where} לא נכנסת במלואה, בדרך כלל בגלל שורה ארוכה שנשברה. כדאי להקטין את הכתב או לקצר את השורה. ההדפסה אפשרית גם כך.`;
+  },
+  ENVELOPE_ONE_SENDER_NOTE: "בפינה העליונה מודפס השולח הראשון בלבד. להדפסת שני השולחים, בחרו \"על הלשונית\".",
   ENVELOPE_PREVIEW_OPEN: "מעטפה פתוחה",
   ENVELOPE_PREVIEW_SINGLE: "מעטפה",
   ENVELOPE_PREVIEW_FRONT: "חזית",
   ENVELOPE_PREVIEW_BACK: "גב",
   ENVELOPE_PREVIEW_INVALID: "אין תצוגה: בדקו את המידות.",
   ENVELOPE_PRINT_BUTTON: "הדפס מעטפות",
-  ENVELOPE_PRINT_HINT: (widthMm, heightMm, flapOpen) => `גודל הדף: ⁦${widthMm}×${heightMm}⁩ מ"מ. בחלון ההדפסה יש לבחור נייר בגודל הזה, קנה מידה 100% וללא שוליים.${flapOpen ? ' מזינים את המעטפה כשהחזית בצד שעליו המדפסת מדפיסה, הלשונית פתוחה ונכנסת ראשונה.' : ''}`,
+  ENVELOPE_PRINT_HINT: (widthMm, heightMm, senderMode) => `גודל הדף: ⁦${widthMm}×${heightMm}⁩ מ"מ. בחלון ההדפסה יש לבחור נייר בגודל הזה, קנה מידה 100% וללא שוליים.${{
+    openFlap: ' מזינים את המעטפה כשהחזית בצד שעליו המדפסת מדפיסה, הלשונית פתוחה ונכנסת ראשונה.',
+    frontCorner: ' מזינים את המעטפה סגורה, כשהחזית בצד שעליו המדפסת מדפיסה והצד העליון שלה נכנס ראשון.',
+  }[senderMode] ?? ''}`,
   ENVELOPE_NOTHING_TO_PRINT: "אין מה להדפיס. חזרי לטבלה ובדקי את הנמענים ואת המידות.",
 
   BUTTON_CANCEL: "ביטול",

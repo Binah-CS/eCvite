@@ -5,14 +5,15 @@
 //   של המדבקות. בכל פתיחה אחרת החלון מתחיל מברירות המחדל.
 // כל גישה עטופה ב-try/catch - אחסון חסום, מלא או ערך פגום לא יכולים לשבור את ההדפסה
 import {
+  CORNER_SIDES,
   FLAP_SHAPES,
   MAX_SENDERS,
   SENDER_FIELDS,
+  SENDER_PLACEMENTS,
   createDefaultEnvelopeSettings,
   createEmptySender,
   isKnownEnvelopeSize,
 } from './envelopeFormats';
-import { SENDER_MODES } from './envelopeLayout';
 
 export const SAVED_ENVELOPE_SETTINGS_KEY = 'savedEnvelopeSettings';
 
@@ -61,7 +62,9 @@ function sanitizeSettings(raw) {
     customSize: raw.customSize && typeof raw.customSize === 'object'
       ? { ...defaults.customSize, ...raw.customSize }
       : defaults.customSize,
-    senderMode: Object.prototype.hasOwnProperty.call(SENDER_MODES, raw.senderMode) ? raw.senderMode : defaults.senderMode,
+    printSender: typeof raw.printSender === 'boolean' ? raw.printSender : defaults.printSender,
+    senderPlacement: SENDER_PLACEMENTS.includes(raw.senderPlacement) ? raw.senderPlacement : defaults.senderPlacement,
+    cornerSide: CORNER_SIDES.includes(raw.cornerSide) ? raw.cornerSide : defaults.cornerSide,
     flapDepthMm: raw.flapDepthMm ?? defaults.flapDepthMm,
     flapShape: FLAP_SHAPES.includes(raw.flapShape) ? raw.flapShape : defaults.flapShape,
   };

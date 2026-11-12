@@ -20,7 +20,7 @@ function getLoggedUser() {
 
 // שדות נוספים (לא חלק מהתבנית הקבועה של שם/כתובת) שמופיעים במדבקה כשורה נפרדת רק
 // אם סומנו להדפסה ב"ניהול עמודות" וגם יש להם ערך בפועל אצל הנמען הספציפי
-const EXTRA_PRINT_FIELDS = [
+export const EXTRA_PRINT_FIELDS = [
   { field: 'phone', labels: { he: 'טלפון', en: 'Phone' } },
   { field: 'mail', labels: { he: 'מייל', en: 'Email' } },
   { field: 'fatherName', labels: { he: 'שם האב', en: "Father's name" } },

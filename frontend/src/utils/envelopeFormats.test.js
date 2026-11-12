@@ -1,9 +1,13 @@
 import {
   ENVELOPE_SIZES,
   CUSTOM_ENVELOPE_ID,
+  DEFAULT_CUSTOM_ENVELOPE,
   createDefaultEnvelopeSettings,
+  getCustomSizeError,
   createEmptySender,
   getDefaultFlapDepth,
+  getSenderMode,
+  hasSenderDetails,
   isKnownEnvelopeSize,
   isSenderComplete,
   isValidFlapDepth,
@@ -36,6 +40,37 @@ describe('envelope sizes', () => {
     [undefined],
   ])('invalid custom measurements resolve to null', (customSize) => {
     expect(resolveEnvelopeDimensions({ sizeId: CUSTOM_ENVELOPE_ID, customSize })).toBeNull();
+  });
+
+  test.each([
+    [{ widthMm: 110, heightMm: 80 }, null],
+    [{ widthMm: 350, heightMm: 260 }, null],
+    [{ widthMm: '184', heightMm: '133' }, null],
+    [{ widthMm: 150, heightMm: 150 }, null],
+    [{ widthMm: 109, heightMm: 80 }, 'tooSmall'],
+    [{ widthMm: 110, heightMm: 79 }, 'tooSmall'],
+    [{ widthMm: 351, heightMm: 200 }, 'tooLarge'],
+    [{ widthMm: 300, heightMm: 261 }, 'tooLarge'],
+    [{ widthMm: 133, heightMm: 184 }, 'swapped'],
+    [{ widthMm: 260, heightMm: 350 }, 'swapped'],
+    [{ widthMm: 80, heightMm: 100 }, 'portrait'],
+    [{ widthMm: 100, heightMm: 400 }, 'portrait'],
+    [{ widthMm: '', heightMm: 100 }, 'invalid'],
+    [{ widthMm: -5, heightMm: 100 }, 'invalid'],
+  ])('custom size %o: error %p', (customSize, error) => {
+    expect(getCustomSizeError(customSize)).toBe(error);
+    expect(resolveEnvelopeDimensions({ sizeId: CUSTOM_ENVELOPE_ID, customSize }) === null).toBe(error !== null);
+  });
+
+  test('the fixed sizes and the default custom size are inside the allowed range', () => {
+    ENVELOPE_SIZES.forEach((size) => expect(getCustomSizeError(size)).toBeNull());
+    expect(getCustomSizeError(DEFAULT_CUSTOM_ENVELOPE)).toBeNull();
+  });
+
+  test('swapping the measurements of a swapped envelope makes it valid', () => {
+    const swapped = { widthMm: 133, heightMm: 184 };
+    expect(getCustomSizeError(swapped)).toBe('swapped');
+    expect(getCustomSizeError({ widthMm: swapped.heightMm, heightMm: swapped.widthMm })).toBeNull();
   });
 
   test('an unknown size resolves to null', () => {
@@ -73,7 +108,41 @@ describe('senders', () => {
 
   test('the default settings print the recipient only, with a straight flap', () => {
     expect(createDefaultEnvelopeSettings()).toMatchObject({
-      sizeId: 'a7', senderMode: 'none', flapDepthMm: 40, flapShape: 'straight', senderTypography: null,
+      sizeId: 'a7',
+      printSender: false,
+      senderPlacement: 'openFlap',
+      cornerSide: 'auto',
+      flapDepthMm: 40,
+      flapShape: 'straight',
+      senderTypography: null,
     });
+    expect(getSenderMode(createDefaultEnvelopeSettings())).toBe('none');
+  });
+
+  test('a sender with any detail counts as filled in', () => {
+    expect(hasSenderDetails(createEmptySender())).toBe(false);
+    expect(hasSenderDetails({ ...createEmptySender(), zip: ' ' })).toBe(false);
+    expect(hasSenderDetails({ ...createEmptySender(), country: 'ישראל' })).toBe(true);
+  });
+});
+
+describe('sender mode', () => {
+  test('off prints no sender, on prints at the chosen placement', () => {
+    expect(getSenderMode({ printSender: false, senderPlacement: 'frontCorner' })).toBe('none');
+    expect(getSenderMode({ printSender: true, senderPlacement: 'frontCorner' })).toBe('frontCorner');
+    expect(getSenderMode({ printSender: true, senderPlacement: 'openFlap' })).toBe('openFlap');
+  });
+
+  test('an unknown placement falls back to the flap', () => {
+    expect(getSenderMode({ printSender: true, senderPlacement: 'nope' })).toBe('openFlap');
+  });
+
+  test('turning the sender off and on again keeps the corner', () => {
+    const corner = { ...createDefaultEnvelopeSettings(), printSender: true, senderPlacement: 'frontCorner', cornerSide: 'left' };
+    const off = { ...corner, printSender: false };
+    const onAgain = { ...off, printSender: true };
+    expect(getSenderMode(off)).toBe('none');
+    expect(getSenderMode(onAgain)).toBe('frontCorner');
+    expect(onAgain.cornerSide).toBe('left');
   });
 });
