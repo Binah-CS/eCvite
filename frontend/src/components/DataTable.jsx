@@ -20,6 +20,7 @@ import FilterBuilder, { valueLabel, newCondition } from './FilterBuilder';
 import { ColumnFilterContext, ColumnFilterButton, ColumnFilterMenu } from './ColumnValueFilter';
 import { applyColumnFilters, collectColumnValues, conditionsToFilters, withoutColumnFilter } from '../utils/columnFilters';
 import { VisibleRowsContext } from '../utils/visibleRowsContext';
+import { loadTablePreferences, saveTablePreferences } from '../utils/tablePreferences';
 
 // מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
 const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
@@ -64,27 +65,24 @@ const TOOLBAR_BUTTON_SX = {
   '&:hover': { bgcolor: '#eff6ff', borderColor: '#60a5fa' },
 };
 
-// "שורות בעמוד" (25/50/100) נשמר בדפדפן (localStorage, לכל מחשב/דפדפן בנפרד) - בלי
-// זה הטבלה חזרה ל-25 בכל רענון או מעבר להגדרות וחזרה. try/catch - localStorage
-// יכול לזרוק (חלון גלישה פרטית, חסימת אחסון), ואז פשוט נשארים עם ברירת המחדל
+// "שורות בעמוד" (25/50/100) נשמר אצל המשתמשת בשרת, עם שאר העדפות הטבלה שלה - לא
+// בדפדפן: בכל מחשב, בכל כניסה חדשה ובחזרה לטבלה היא מקבלת את מה שבחרה (#90)
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const PAGE_SIZE_STORAGE_KEY = 'recipientsTable.pageSize';
 
 function readSavedPageSize() {
+  // שארית מהגרסה הקודמת, שבה הבחירה נשמרה בדפדפן - כבר לא בשימוש, מנקים אותה
   try {
-    const saved = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY));
-    return PAGE_SIZE_OPTIONS.includes(saved) ? saved : PAGE_SIZE_OPTIONS[0];
+    localStorage.removeItem(PAGE_SIZE_STORAGE_KEY);
   } catch {
-    return PAGE_SIZE_OPTIONS[0];
+    // לא קריטי - הערך הישן פשוט לא נקרא יותר
   }
+  const saved = Number(loadTablePreferences().pageSize);
+  return PAGE_SIZE_OPTIONS.includes(saved) ? saved : PAGE_SIZE_OPTIONS[0];
 }
 
 function savePageSize(pageSize) {
-  try {
-    localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize));
-  } catch {
-    // לא קריטי - הבחירה פשוט לא תיזכר בפעם הבאה
-  }
+  saveTablePreferences({ pageSize });
 }
 
 // תרגום סוג הפעולה מטבלת recipients_history (נקבע ע"י ה-trigger בבסיס הנתונים,

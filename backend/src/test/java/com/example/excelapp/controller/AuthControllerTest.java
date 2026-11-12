@@ -190,6 +190,63 @@ class AuthControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    // ---------- PUT /api/auth/table-preferences ----------
+
+    @Test
+    void updateTablePreferences_savesPerUser_andComesBackOnLogin() throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(buildValidUser("0505454545"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(buildValidUser("0505555555"))))
+                .andExpect(status().isOk());
+
+        String preferences = "{\"pageSize\":100}";
+        mockMvc.perform(put("/api/auth/table-preferences")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0505454545", "tablePreferences", preferences))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tablePreferences").value(preferences));
+
+        assertThat(userRepository.findByPhone("0505454545").getTablePreferences()).isEqualTo(preferences);
+        assertThat(userRepository.findByPhone("0505555555").getTablePreferences()).isNull();
+
+        // כניסה חדשה (מחשב אחר / סשן נקי) מקבלת את הבחירה מהשרת
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of("name", "יוסי", "phone", "0505454545"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tablePreferences").value(preferences));
+    }
+
+    @Test
+    void updateTablePreferences_tooLong_returns400() throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(buildValidUser("0505656565"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/auth/table-preferences")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0505656565", "tablePreferences", "x".repeat(1001)))))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userRepository.findByPhone("0505656565").getTablePreferences()).isNull();
+    }
+
+    @Test
+    void updateTablePreferences_unknownPhone_returns404() throws Exception {
+        mockMvc.perform(put("/api/auth/table-preferences")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0590000004", "tablePreferences", "{}"))))
+                .andExpect(status().isNotFound());
+    }
+
     @Test
     void updateColumnPreferences_unknownPhone_returns404() throws Exception {
         mockMvc.perform(put("/api/auth/column-preferences")

@@ -58,6 +58,11 @@ public class User {
     @Column(name = "label_print_settings", length = 1000)
     private String labelPrintSettings;
 
+    // העדפות התצוגה של הטבלה (JSON, כרגע רק pageSize - "שורות בעמוד") - נשמרות אצל
+    // המשתמשת ולא בדפדפן, כך שבכל מחשב ובכל כניסה חדשה הטבלה נפתחת עם מה שבחרה (#90)
+    @Column(name = "table_preferences", length = 1000)
+    private String tablePreferences;
+
     @PrePersist
     public void onCreate() {
         createdAt = LocalDateTime.now();
