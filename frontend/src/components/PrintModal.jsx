@@ -7,10 +7,16 @@ import { useNavigate } from 'react-router-dom';
 import { loadLabelPrintSettings, saveLabelPrintSettings } from '../utils/labelPrintSettings';
 import { orderLikeTable } from '../utils/printOrder';
 import EnvelopeSettingsStep from './EnvelopeSettingsStep';
-import { resolveEnvelopeDimensions } from '../utils/envelopeFormats';
 import EnvelopePreview from './EnvelopePreview';
-import { createPrintFlagGetter } from './EnvelopeSheet';
-import { buildEnvelopeLayout, clampEnvelopeFontScale, getMaxEnvelopeFontScale, isEnvelopeSettingsReady } from '../utils/envelopeLayout';
+import { countRecipientLines, createPrintFlagGetter } from './EnvelopeSheet';
+import { detectPrintLanguage } from '../pages/PrintPreviewPage';
+import {
+  buildEnvelopeLayout,
+  getEffectiveEnvelopeFontScale,
+  getEnvelopeFontScaleLimit,
+  isEnvelopeSettingsReady,
+  normalizeEnvelopeFontScale,
+} from '../utils/envelopeLayout';
 import { SAVED_ENVELOPE_SETTINGS_KEY, loadInitialEnvelopeSettings, saveSenders } from '../utils/envelopePrintSettings';
 import {
   DEFAULT_CUSTOM_LABEL_FORMAT,
@@ -193,7 +199,6 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const [envelopeSettings, setEnvelopeSettings] = useState(
     () => loadInitialEnvelopeSettings({ returning: returningToEnvelopes }),
   );
-  const envelopeDimensions = resolveEnvelopeDimensions(envelopeSettings);
 
   // ערך התחלתי לכל בחירה: קודם מה שנשמר בחזרה מהתצוגה המקדימה ("שינוי הגדרות
   // הדפסה"), אחר כך הבחירה השמורה של המשתמשת, ורק אז ברירת המחדל. ערך לא תקין
@@ -276,11 +281,12 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const [greetingAlign, setGreetingAlign] = useState(() =>
     initialChoice('savedGreetingAlign', 'greetingAlign', (v) => GREETING_ALIGNMENTS.includes(v), 'center'));
 
-  // גודל הכתב ההתחלתי מוגבל לפי גודל המדבקה. בחזרה ממעטפות מחזירים את הגודל שנבחר שם
+  // גודל הכתב ההתחלתי מוגבל לפי גודל המדבקה. בחזרה ממעטפות מחזירים את הגודל שנבחר שם -
+  // הבחירה עצמה, בלי התקרה של המעטפה (היא מוחלת רק בחישוב, ר' getEffectiveEnvelopeFontScale)
   useEffect(() => {
     const savedFontScale = sessionStorage.getItem('savedFontScale');
     if (returningToEnvelopes && savedFontScale !== null) {
-      setFontScale(clampEnvelopeFontScale(savedFontScale, envelopeDimensions));
+      setFontScale(normalizeEnvelopeFontScale(savedFontScale));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -317,26 +323,41 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const [notification, setNotification] = useState('');
 
   // גודל הכתב משותף לשני סוגי ההדפסה, אבל התקרה שלו נגזרת ממה שמדפיסים עליו
+  // המעטפות: אותן שורות נמענים ואותן אפשרויות טקסט כמו בעמוד ההדפסה, כך שהתקרה כאן ושם
+  // זהה. בלי נמענים התצוגה מראה נמען לדוגמה, והתקרה לפיו
+  const envelopeTextOptions = { englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
+  const envelopePrintFlag = createPrintFlagGetter();
+  const envelopeRows = rowsToPrint.length > 0 ? rowsToPrint : [ENVELOPE_PREVIEW_SAMPLE_ROW];
+  const envelopeRecipientLines = isEnvelopes ? countRecipientLines(envelopeRows, envelopePrintFlag, envelopeTextOptions) : null;
+  const envelopeFontLimit = isEnvelopes ? getEnvelopeFontScaleLimit(envelopeSettings, envelopeRecipientLines) : null;
+
   const clampCurrentFontScale = (scale) => (isEnvelopes
-    ? clampEnvelopeFontScale(scale, envelopeDimensions)
+    ? Math.min(Math.max(scale, FONT_SCALE_MIN), envelopeFontLimit)
     : clampFontScale(scale, labelSize, labelSize === 'custom' ? customLayout?.height : undefined));
   const maxCurrentFontScale = isEnvelopes
-    ? getMaxEnvelopeFontScale(envelopeDimensions)
+    ? envelopeFontLimit
     : getMaxFontScale(labelSize, labelSize === 'custom' ? customLayout?.height : undefined);
+  // במעטפות fontScale הוא הבחירה, והמונה מציג את מה שבאמת מודפס: הבחירה עד התקרה של
+  // המעטפה הנוכחית. כשהתקרה עולה שוב, הכתב חוזר לבחירה. במדבקות שני הערכים זהים
+  const displayedFontScale = isEnvelopes
+    ? getEffectiveEnvelopeFontScale(fontScale, envelopeSettings, envelopeRecipientLines)
+    : fontScale;
+  const decreaseFontScale = () => setFontScale((s) => (isEnvelopes
+    ? Math.max(FONT_SCALE_MIN, getEffectiveEnvelopeFontScale(s, envelopeSettings, envelopeRecipientLines) - FONT_SCALE_STEP)
+    : clampCurrentFontScale(s - FONT_SCALE_STEP)));
 
   const printDisabled = isEnvelopes
     ? !isEnvelopeSettingsReady(envelopeSettings)
     : labelSize === 'large' || (labelSize === 'custom' && !customFormatValid);
 
-  // מעבר למעטפה קטנה יותר מוריד גודל כתב שכבר לא נכנס בה
+  // שינוי מידות או מצב שולח לא נוגע בבחירת הכתב. מעטפה קטנה יותר מקטינה רק את הכתב בפועל,
+  // וכך ערכים זמניים בזמן הקלדת המידות (למשל גובה 1) לא מאבדים את הבחירה
   const handleEnvelopeSettingsChange = (next) => {
     if (next.senders !== envelopeSettings.senders) saveSenders(next.senders);
     setEnvelopeSettings(next);
-    setFontScale((current) => clampEnvelopeFontScale(current, resolveEnvelopeDimensions(next)));
   };
 
   const enterEnvelopeSettings = () => {
-    setFontScale((current) => clampEnvelopeFontScale(current, envelopeDimensions));
     setStep(2);
   };
 
@@ -472,18 +493,18 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <IconButton
                     size="small"
-                    onClick={() => setFontScale((s) => clampCurrentFontScale(s - FONT_SCALE_STEP))}
-                    disabled={fontScale <= FONT_SCALE_MIN}
+                    onClick={decreaseFontScale}
+                    disabled={displayedFontScale <= FONT_SCALE_MIN}
                   >
                     <RemoveIcon fontSize="small" />
                   </IconButton>
                   <Typography sx={{ minWidth: 48, textAlign: 'center', fontWeight: 600 }}>
-                    {fontScale}%
+                    {displayedFontScale}%
                   </Typography>
                   <IconButton
                     size="small"
                     onClick={() => setFontScale((s) => clampCurrentFontScale(s + FONT_SCALE_STEP))}
-                    disabled={fontScale >= maxCurrentFontScale}
+                    disabled={displayedFontScale >= maxCurrentFontScale}
                   >
                     <AddIcon fontSize="small" />
                   </IconButton>
@@ -656,16 +677,28 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
               <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
 
-              {isEnvelopes ? (
-                <EnvelopePreview
-                  width={ENVELOPE_PREVIEW_WIDTH}
-                  layout={buildEnvelopeLayout(envelopeSettings, { fontType, fontScale, fontWeight })}
-                  row={rowsToPrint[0] ?? ENVELOPE_PREVIEW_SAMPLE_ROW}
-                  senders={envelopeSettings.senders}
-                  textOptions={{ englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign }}
-                  getPrintFlag={createPrintFlagGetter()}
-                />
-              ) : (
+              {isEnvelopes ? (() => {
+                // הפריסה נבנית לפי הנמען שמוצג (צד השולח בפינה והמיקום שלו), והכתב לפי כל הנמענים
+                const previewRow = envelopeRows[0];
+                return (
+                  <EnvelopePreview
+                    width={ENVELOPE_PREVIEW_WIDTH}
+                    layout={buildEnvelopeLayout(
+                      envelopeSettings,
+                      { fontType, fontScale, fontWeight },
+                      {
+                        recipientLanguage: detectPrintLanguage(previewRow, envelopePrintFlag),
+                        recipientLines: countRecipientLines([previewRow], envelopePrintFlag, envelopeTextOptions),
+                        runRecipientLines: envelopeRecipientLines,
+                      },
+                    )}
+                    row={previewRow}
+                    senders={envelopeSettings.senders}
+                    textOptions={envelopeTextOptions}
+                    getPrintFlag={envelopePrintFlag}
+                  />
+                );
+              })() : (
                 <LabelSheetPreview labelSize={labelSize} customFormat={customFormat} />
               )}
             </Stack>

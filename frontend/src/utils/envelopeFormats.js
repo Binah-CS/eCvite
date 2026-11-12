@@ -18,6 +18,21 @@ const DEFAULT_CUSTOM_FLAP_DEPTH_MM = 40;
 
 export const MAX_SENDERS = 2;
 
+// מיקום השולח כשמדפיסים אותו. כל ערך כאן הוא גם מפתח ב-SENDER_MODES (envelopeLayout)
+export const SENDER_PLACEMENTS = ['openFlap', 'frontCorner'];
+export const DEFAULT_SENDER_PLACEMENT = 'openFlap';
+
+// הצד של השולח בפינה. auto = לפי שפת הנמען של כל מעטפה (ר' resolveCornerSide)
+export const CORNER_SIDES = ['auto', 'right', 'left'];
+export const DEFAULT_CORNER_SIDE = 'auto';
+
+// המקום היחיד שמתרגם את הבחירות בחלון למצב שולח. ביטול "הדפס גם את פרטי השולח" לא
+// נוגע במיקום, כך שסימון מחדש מחזיר את מה שנבחר קודם
+export function getSenderMode(settings) {
+  if (!settings?.printSender) return 'none';
+  return SENDER_PLACEMENTS.includes(settings.senderPlacement) ? settings.senderPlacement : DEFAULT_SENDER_PLACEMENT;
+}
+
 // אותם שמות שדות כמו אצל הנמען (street, houseNo, city, country). מיקוד קיים רק לשולח
 export const SENDER_REQUIRED_FIELDS = ['name', 'street', 'city'];
 export const SENDER_FIELDS = [...SENDER_REQUIRED_FIELDS, 'houseNo', 'zip', 'country'];
@@ -28,6 +43,10 @@ export function createEmptySender() {
 
 export function isSenderComplete(sender) {
   return SENDER_REQUIRED_FIELDS.every((field) => String(sender?.[field] ?? '').trim() !== '');
+}
+
+export function hasSenderDetails(sender) {
+  return SENDER_FIELDS.some((field) => String(sender?.[field] ?? '').trim() !== '');
 }
 
 export function isKnownEnvelopeSize(sizeId) {
@@ -44,7 +63,9 @@ export function createDefaultEnvelopeSettings() {
   return {
     sizeId,
     customSize: { ...DEFAULT_CUSTOM_ENVELOPE },
-    senderMode: 'none',
+    printSender: false,
+    senderPlacement: DEFAULT_SENDER_PLACEMENT,
+    cornerSide: DEFAULT_CORNER_SIDE,
     flapDepthMm: getDefaultFlapDepth(sizeId),
     flapShape: DEFAULT_FLAP_SHAPE,
     senders: [createEmptySender()],
@@ -59,14 +80,36 @@ function toPositiveNumber(value) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
-// מידות המעטפה בפועל, או null אם המידות המותאמות לא תקינות
+// טווח המידות המותאמות. המינימום מבטיח שהכתב המינימלי תמיד נכנס בגובה (גם עם שולח בפינה
+// והרבה שורות לנמען). המקסימום תופס בעיקר הקלדה שגויה (1840 במקום 184)
+export const MIN_ENVELOPE_WIDTH_MM = 110;
+export const MIN_ENVELOPE_HEIGHT_MM = 80;
+export const MAX_ENVELOPE_WIDTH_MM = 350;
+export const MAX_ENVELOPE_HEIGHT_MM = 260;
+
+function isInSizeRange(widthMm, heightMm) {
+  return widthMm >= MIN_ENVELOPE_WIDTH_MM && widthMm <= MAX_ENVELOPE_WIDTH_MM
+    && heightMm >= MIN_ENVELOPE_HEIGHT_MM && heightMm <= MAX_ENVELOPE_HEIGHT_MM;
+}
+
+// הסיבה שהמידות המותאמות לא תקינות, או null. הלשונית על הצלע הארוכה, ולכן הרוחב צריך
+// להיות לפחות הגובה. swapped: אחרי החלפת הרוחב והגובה המידות היו תקינות
+export function getCustomSizeError(customSize) {
+  const widthMm = toPositiveNumber(customSize?.widthMm);
+  const heightMm = toPositiveNumber(customSize?.heightMm);
+  if (!widthMm || !heightMm) return 'invalid';
+  if (heightMm > widthMm) return isInSizeRange(heightMm, widthMm) ? 'swapped' : 'portrait';
+  if (widthMm < MIN_ENVELOPE_WIDTH_MM || heightMm < MIN_ENVELOPE_HEIGHT_MM) return 'tooSmall';
+  if (widthMm > MAX_ENVELOPE_WIDTH_MM || heightMm > MAX_ENVELOPE_HEIGHT_MM) return 'tooLarge';
+  return null;
+}
+
+// מידות המעטפה בפועל, או null אם המידות המותאמות לא תקינות (ר' getCustomSizeError)
 export function resolveEnvelopeDimensions({ sizeId, customSize } = {}) {
   const size = ENVELOPE_SIZES.find((candidate) => candidate.id === sizeId);
   if (size) return { widthMm: size.widthMm, heightMm: size.heightMm };
-  if (sizeId !== CUSTOM_ENVELOPE_ID) return null;
-  const widthMm = toPositiveNumber(customSize?.widthMm);
-  const heightMm = toPositiveNumber(customSize?.heightMm);
-  return widthMm && heightMm ? { widthMm, heightMm } : null;
+  if (sizeId !== CUSTOM_ENVELOPE_ID || getCustomSizeError(customSize)) return null;
+  return { widthMm: Number(customSize.widthMm), heightMm: Number(customSize.heightMm) };
 }
 
 // הלשונית לא יכולה להיות עמוקה יותר מגובה המעטפה שעליה היא נסגרת

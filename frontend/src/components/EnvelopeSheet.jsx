@@ -8,6 +8,7 @@
 import { LABEL_LINE_HEIGHT } from '../utils/labelSheetLayout';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 import {
+  EXTRA_PRINT_FIELDS,
   buildAddressLine1,
   buildAddressLine2,
   buildCountryLine,
@@ -16,17 +17,53 @@ import {
   hasHebrewEnglishSalutation,
   splitHebrewGreeting,
 } from '../pages/PrintPreviewPage';
+import { REFERENCE_RECIPIENT_LINES } from '../utils/envelopeLayout';
 
-// אותה רשימה כמו EXTRA_PRINT_FIELDS ב-PrintPreviewPage (קבוע פרטי של קוד המדבקות)
-const EXTRA_PRINT_FIELDS = [
-  { field: 'phone', labels: { he: 'טלפון', en: 'Phone' } },
-  { field: 'mail', labels: { he: 'מייל', en: 'Email' } },
-  { field: 'fatherName', labels: { he: 'שם האב', en: "Father's name" } },
-  { field: 'motherName', labels: { he: 'שם האם', en: "Mother's name" } },
-  { field: 'belongsTo', labels: { he: 'שייך ל', en: 'Belongs to' } },
-  { field: 'addressNote', labels: { he: 'הערת כתובת', en: 'Address note' } },
-  { field: 'neighborhood', labels: { he: 'שכונה', en: 'Neighborhood' } },
-];
+// השורות של נמען, לפי הסדר שבו הן מודפסות. kind קובע את הגודל: salutation, greeting ו-name
+// בגודל שם, detail בגודל פרטים. המקום היחיד שמחליט אילו שורות יש - גם הרינדור וגם ספירת
+// השורות לתקרת הכתב (countRecipientLines) עוברים כאן
+export function getRecipientLines(row, getPrintFlag, textOptions) {
+  const { englishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine } = textOptions;
+  const printLanguage = detectPrintLanguage(row, getPrintFlag);
+  const fullNameLine = buildNameLine(row, getPrintFlag, printLanguage, englishSalutation);
+  const { greetingLine, nameLine } = splitHebrewGreeting(fullNameLine, printLanguage, greetingShow, greetingSeparateLine);
+  const addressLine = buildAddressLine1(row, getPrintFlag, printLanguage);
+  const cityLine = buildAddressLine2(row, getPrintFlag);
+  const countryLine = buildCountryLine(row, getPrintFlag);
+  const keepEmptyAddressLine = !addressLine && emptyLineWhenNoAddress
+    && (getPrintFlag('street') || getPrintFlag('houseNo')) && cityLine;
+
+  const lines = [];
+  if (printLanguage === 'en' && hasHebrewEnglishSalutation(englishSalutation) && fullNameLine) {
+    lines.push({ key: 'salutation', kind: 'salutation', text: englishSalutation });
+  }
+  if (greetingLine) lines.push({ key: 'greeting', kind: 'greeting', text: greetingLine });
+  if (nameLine) lines.push({ key: 'name', kind: 'name', text: nameLine });
+  // שורה ריקה עם רווח קשיח (NBSP) ולא רווח רגיל, כדי שתשמור את הגובה שלה
+  if (addressLine || keepEmptyAddressLine) lines.push({ key: 'address', kind: 'detail', text: addressLine || ' ' });
+  if (cityLine) lines.push({ key: 'city', kind: 'detail', text: cityLine });
+  if (countryLine) lines.push({ key: 'country', kind: 'detail', text: countryLine });
+  EXTRA_PRINT_FIELDS.forEach(({ field, labels }) => {
+    if (getPrintFlag(field) && row[field]) {
+      lines.push({ key: field, kind: 'detail', text: `${labels[printLanguage] ?? labels.he}: ${row[field]}` });
+    }
+  });
+  return { printLanguage, lines };
+}
+
+// כמה שורות בכל גודל יש לנמענים: המקסימום על פני כולם, כך שכתב אחד לכל ההדפסה נכנס
+// אצל כל אחד. בלי נמענים - ההנחה של envelopeLayout
+export function countRecipientLines(rows, getPrintFlag, textOptions) {
+  if (!rows?.length) return REFERENCE_RECIPIENT_LINES;
+  return rows.reduce((max, row) => {
+    const { lines } = getRecipientLines(row, getPrintFlag, textOptions);
+    const detailLines = lines.filter((line) => line.kind === 'detail').length;
+    return {
+      nameLines: Math.max(max.nameLines, lines.length - detailLines),
+      detailLines: Math.max(max.detailLines, detailLines),
+    };
+  }, { nameLines: 0, detailLines: 0 });
+}
 
 // "עמודות להדפסה" מ"ניהול עמודות" - אותו היגיון כמו בדף המדבקות
 export function createPrintFlagGetter() {
@@ -48,78 +85,75 @@ function boxStyle(rect) {
   return { position: 'absolute', left: mm(rect.x), top: mm(rect.y), width: mm(rect.width), height: mm(rect.height) };
 }
 
-function textLineStyle(fontSizePx, fontWeight, color) {
+function textLineStyle(fontSizePx, fontWeight, color, textAlign = 'center') {
   return {
     fontSize: `${fontSizePx}px`,
     fontWeight,
     color,
     lineHeight: LABEL_LINE_HEIGHT,
-    textAlign: 'center',
+    textAlign,
     unicodeBidi: 'plaintext',
   };
 }
 
-function RecipientText({ row, typography, textOptions, getPrintFlag }) {
-  const { englishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign } = textOptions;
-  const printLanguage = detectPrintLanguage(row, getPrintFlag);
-  const fullNameLine = buildNameLine(row, getPrintFlag, printLanguage, englishSalutation);
-  const { greetingLine, nameLine } = splitHebrewGreeting(fullNameLine, printLanguage, greetingShow, greetingSeparateLine);
-  const addressLine = buildAddressLine1(row, getPrintFlag, printLanguage);
-  const cityLine = buildAddressLine2(row, getPrintFlag);
-  const countryLine = buildCountryLine(row, getPrintFlag);
-  const keepEmptyAddressLine = !addressLine && emptyLineWhenNoAddress
-    && (getPrintFlag('street') || getPrintFlag('houseNo')) && cityLine;
+// התיבה והתוכן מסומנים ב-data-envelope-recipient-box/-content, כמו אצל השולח, כדי
+// שגלישה (בדרך כלל שורה ארוכה שנשברה) תימדד ב-DOM ותקבל אזהרה
+function RecipientText({ row, typography, textOptions, getPrintFlag, verticalAlign = 'center' }) {
+  const { printLanguage, lines } = getRecipientLines(row, getPrintFlag, textOptions);
+  const { greetingAlign } = textOptions;
 
   const nameStyle = { ...textLineStyle(typography.namePx, typography.fontWeight, '#000000'), marginBottom: 2 };
   const detailStyle = textLineStyle(typography.linePx, typography.fontWeight, '#333333');
-  const greetingStyle = {
-    ...nameStyle,
-    marginBottom: 0,
-    alignSelf: 'stretch',
-    textAlign: { right: 'start', left: 'end' }[greetingAlign] ?? 'center',
-    ...(greetingAlign === 'right' ? { marginInlineStart: '1mm' } : {}),
-    ...(greetingAlign === 'left' ? { marginInlineEnd: '1mm' } : {}),
+  const lineStyles = {
+    salutation: { ...nameStyle, marginBottom: 0 },
+    greeting: {
+      ...nameStyle,
+      marginBottom: 0,
+      alignSelf: 'stretch',
+      textAlign: { right: 'start', left: 'end' }[greetingAlign] ?? 'center',
+      ...(greetingAlign === 'right' ? { marginInlineStart: '1mm' } : {}),
+      ...(greetingAlign === 'left' ? { marginInlineEnd: '1mm' } : {}),
+    },
+    name: nameStyle,
+    detail: detailStyle,
   };
 
   return (
     <div
+      data-envelope-recipient-box=""
       style={{
         width: '100%',
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
+        justifyContent: verticalAlign === 'top' ? 'flex-start' : 'center',
         overflow: 'hidden',
         fontFamily: typography.fontFamily,
         direction: printLanguage === 'en' ? 'ltr' : 'rtl',
       }}
     >
-      {printLanguage === 'en' && hasHebrewEnglishSalutation(englishSalutation) && fullNameLine && (
-        <div style={{ ...nameStyle, marginBottom: 0 }}>{englishSalutation}</div>
-      )}
-      {greetingLine && <div style={greetingStyle}>{greetingLine}</div>}
-      {nameLine && <div style={nameStyle}>{nameLine}</div>}
-      {(addressLine || keepEmptyAddressLine) && <div style={detailStyle}>{addressLine || ' '}</div>}
-      {cityLine && <div style={detailStyle}>{cityLine}</div>}
-      {countryLine && <div style={detailStyle}>{countryLine}</div>}
-      {EXTRA_PRINT_FIELDS.map(({ field, labels }) => (getPrintFlag(field) && row[field] ? (
-        <div key={field} style={detailStyle}>{labels[printLanguage] ?? labels.he}: {row[field]}</div>
-      ) : null))}
+      <div
+        data-envelope-recipient-content=""
+        style={{ width: '100%', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+      >
+        {lines.map(({ key, kind, text }) => <div key={key} style={lineStyles[kind]}>{text}</div>)}
+      </div>
     </div>
   );
 }
 
 const printEverything = () => true;
 
-function SenderText({ sender, typography }) {
+// textAlign הוא צד פיזי (right/left) או center. בפינה הטקסט צמוד לקצה המעטפה, וכיוון
+// הכתיבה עדיין נקבע לפי שפת השולח עצמו
+function SenderText({ sender, typography, textAlign }) {
   // שם השולח ממופה ל-display כדי להשתמש באותו זיהוי שפה ובאותה בניית כתובת כמו בנמען
   const printLanguage = detectPrintLanguage({ ...sender, display: sender.name }, printEverything);
   const addressLine = buildAddressLine1(sender, printEverything, printLanguage);
   const cityLine = [sender.city, sender.zip].map((part) => String(part ?? '').trim()).filter(Boolean).join(' ');
   const countryLine = String(sender.country ?? '').trim();
-  const nameStyle = textLineStyle(typography.namePx, typography.fontWeight, '#000000');
-  const detailStyle = textLineStyle(typography.linePx, typography.fontWeight, '#333333');
+  const nameStyle = textLineStyle(typography.namePx, typography.fontWeight, '#000000', textAlign);
+  const detailStyle = textLineStyle(typography.linePx, typography.fontWeight, '#333333', textAlign);
 
   return (
     <div
@@ -143,13 +177,13 @@ function SendersBlock({ block, senders, typography }) {
         transformOrigin: 'center',
       }}
     >
-      {block.items.map(({ senderIndex, rect }) => (senders[senderIndex] ? (
+      {block.items.map(({ senderIndex, rect, textAlign = 'center' }) => (senders[senderIndex] ? (
         <div
           key={senderIndex}
           data-envelope-sender-box=""
           style={{ ...boxStyle(rect), display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
         >
-          <SenderText sender={senders[senderIndex]} typography={typography} />
+          <SenderText sender={senders[senderIndex]} typography={typography} textAlign={textAlign} />
         </div>
       ) : null))}
     </div>
@@ -200,7 +234,13 @@ export default function EnvelopeSheet({ surface, row, senders, typography, textO
         <SendersBlock key={block.role} block={block} senders={senders} typography={typography.sender} />
       ) : (
         <div key={block.role} style={boxStyle(block.rect)}>
-          <RecipientText row={row} typography={typography.recipient} textOptions={textOptions} getPrintFlag={getPrintFlag} />
+          <RecipientText
+            row={row}
+            typography={typography.recipient}
+            textOptions={textOptions}
+            getPrintFlag={getPrintFlag}
+            verticalAlign={block.verticalAlign}
+          />
         </div>
       )))}
     </div>

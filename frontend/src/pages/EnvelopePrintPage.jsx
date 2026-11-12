@@ -2,12 +2,13 @@
 import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Box, Button, Stack, Typography } from '@mui/material';
-import EnvelopePreview from '../components/EnvelopePreview';
-import EnvelopeSheet, { createPrintFlagGetter } from '../components/EnvelopeSheet';
+import EnvelopePreview, { EnvelopeNotices, useEnvelopeOverflow } from '../components/EnvelopePreview';
+import EnvelopeSheet, { countRecipientLines, createPrintFlagGetter } from '../components/EnvelopeSheet';
 import { buildEnvelopeLayout } from '../utils/envelopeLayout';
+import { getSenderMode } from '../utils/envelopeFormats';
 import { loadInitialEnvelopeSettings, saveEnvelopeSettingsForReturn } from '../utils/envelopePrintSettings';
 import { FONT_SCALE_DEFAULT } from '../utils/labelSheetLayout';
-import { getSavedSelectedRows, saveSelectedRows } from './PrintPreviewPage';
+import { detectPrintLanguage, getSavedSelectedRows, saveSelectedRows } from './PrintPreviewPage';
 import { MODAL_TEXTS } from './HardCodePage';
 
 const SHEET_CLASS = 'envelope-print-sheet';
@@ -47,11 +48,22 @@ export default function EnvelopePrintPage() {
 
   const rows = selectedItems.length > 0 ? selectedItems : getSavedSelectedRows();
   const settings = envelopeSettings ?? loadInitialEnvelopeSettings();
-  const layout = buildEnvelopeLayout(settings, { fontType, fontScale, fontWeight });
+  const textStyle = { fontType, fontScale, fontWeight };
   const textOptions = { englishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
   const getPrintFlag = createPrintFlagGetter();
+  // הכתב אחד לכל ההדפסה, לפי השורות של כל הנמענים. הפריסה של כל מעטפה נבנית לפי הנמען
+  // שלה: צד השולח בפינה לפי השפה, והמיקום של הנמען לפי השורות שלו. גודל הדף זהה בכולן
+  const runRecipientLines = countRecipientLines(rows, getPrintFlag, textOptions);
+  const layoutFor = (row) => buildEnvelopeLayout(settings, textStyle, {
+    recipientLanguage: detectPrintLanguage(row, getPrintFlag),
+    recipientLines: countRecipientLines([row], getPrintFlag, textOptions),
+    runRecipientLines,
+  });
+  const layout = rows.length > 0 ? layoutFor(rows[0]) : buildEnvelopeLayout(settings, textStyle);
   const canPrint = Boolean(layout) && rows.length > 0;
   const firstPass = layout?.passes[0];
+
+  const [sheetsRef, overflow] = useEnvelopeOverflow({ layout, senders: settings.senders, textOptions, content: rows });
 
   // ב-StrictMode בפיתוח אפקטים רצים פעמיים. בלי ה-ref חלון ההדפסה היה נפתח פעמיים
   const printStartedRef = useRef(false);
@@ -104,8 +116,14 @@ export default function EnvelopePrintPage() {
         </Box>
         {firstPass && (
           <Typography variant="body2" color="text.secondary" mb={2}>
-            {MODAL_TEXTS.ENVELOPE_PRINT_HINT(firstPass.pageWidthMm, firstPass.pageHeightMm, settings.senderMode === 'openFlap')}
+            {MODAL_TEXTS.ENVELOPE_PRINT_HINT(firstPass.pageWidthMm, firstPass.pageHeightMm, getSenderMode(settings))}
           </Typography>
+        )}
+        {/* ההערות בתוך ה-Box שמוסתר בהדפסה, כמו הכפתורים. גלישה לא חוסמת הדפסה */}
+        {canPrint && (overflow.sender || overflow.recipients > 0 || layout.omittedSenderCount > 0) && (
+          <Box mb={2}>
+            <EnvelopeNotices layout={layout} overflow={overflow} countRecipients />
+          </Box>
         )}
         {canPrint && layout.finishedViews && (
           <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
@@ -116,28 +134,35 @@ export default function EnvelopePrintPage() {
               senders={settings.senders}
               textOptions={textOptions}
               getPrintFlag={getPrintFlag}
+              showNotices={false}
             />
           </Box>
         )}
       </Box>
 
-      {!canPrint ? (
-        <Typography color="error">{MODAL_TEXTS.ENVELOPE_NOTHING_TO_PRINT}</Typography>
-      ) : (
-        rows.flatMap((row, rowIndex) => layout.passes.map((pass, passIndex) => (
-          <EnvelopeSheet
-            key={`${row.id ?? row.hashCode ?? rowIndex}-${pass.id}`}
-            className={SHEET_CLASS}
-            surface={pass}
-            row={row}
-            senders={settings.senders}
-            typography={layout.typography}
-            textOptions={textOptions}
-            getPrintFlag={getPrintFlag}
-            breakAfter={rowIndex < rows.length - 1 || passIndex < layout.passes.length - 1}
-          />
-        )))
-      )}
+      {/* הגלישה נמדדת על המעטפות עצמן: השולח זהה בכולן, והנמענים נספרים לפי מעטפה */}
+      <div ref={sheetsRef}>
+        {!canPrint ? (
+          <Typography color="error">{MODAL_TEXTS.ENVELOPE_NOTHING_TO_PRINT}</Typography>
+        ) : (
+          rows.flatMap((row, rowIndex) => {
+            const rowLayout = layoutFor(row);
+            return rowLayout.passes.map((pass, passIndex) => (
+              <EnvelopeSheet
+                key={`${row.id ?? row.hashCode ?? rowIndex}-${pass.id}`}
+                className={SHEET_CLASS}
+                surface={pass}
+                row={row}
+                senders={settings.senders}
+                typography={rowLayout.typography}
+                textOptions={textOptions}
+                getPrintFlag={getPrintFlag}
+                breakAfter={rowIndex < rows.length - 1 || passIndex < rowLayout.passes.length - 1}
+              />
+            ));
+          })
+        )}
+      </div>
     </Box>
   );
 }

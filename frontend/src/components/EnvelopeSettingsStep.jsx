@@ -6,13 +6,15 @@ import { MODAL_TEXTS } from '../pages/HardCodePage';
 import {
   CUSTOM_ENVELOPE_ID,
   ENVELOPE_SIZES,
-  MAX_SENDERS,
   createEmptySender,
+  getCustomSizeError,
   getDefaultFlapDepth,
+  getSenderMode,
   isSenderComplete,
   isValidFlapDepth,
   resolveEnvelopeDimensions,
 } from '../utils/envelopeFormats';
+import { SENDER_MODES } from '../utils/envelopeLayout';
 
 const numberFromInput = (value) => (value === '' ? '' : Number(value));
 
@@ -54,8 +56,14 @@ function SenderFields({ sender, index, canRemove, onChange, onRemove }) {
 export default function EnvelopeSettingsStep({ settings, onChange }) {
   const update = (patch) => onChange({ ...settings, ...patch });
   const dimensions = resolveEnvelopeDimensions(settings);
-  const printSender = settings.senderMode === 'openFlap';
+  const senderMode = getSenderMode(settings);
+  const { maxSenders } = SENDER_MODES[senderMode];
+  // שולחים מעבר למה שהמצב מדפיס לא מוצגים, אבל גם לא נמחקים - הם חוזרים במעבר ללשונית
+  const visibleSenders = settings.senders.slice(0, maxSenders);
   const isCustom = settings.sizeId === CUSTOM_ENVELOPE_ID;
+  // הסיבה המדויקת מוצגת מתחת לשדות. בכל סיבה resolveEnvelopeDimensions מחזיר null, ולכן
+  // התצוגה והכפתורים נחסמים בלי בדיקה נוספת כאן
+  const sizeError = isCustom ? getCustomSizeError(settings.customSize) : null;
 
   const updateCustomSize = (field, value) => update({
     customSize: { ...settings.customSize, [field]: numberFromInput(value) },
@@ -99,55 +107,97 @@ export default function EnvelopeSettingsStep({ settings, onChange }) {
               onChange={(event) => updateCustomSize(field, event.target.value)}
             />
           ))}
-          {!dimensions && <Typography variant="caption" color="error">{MODAL_TEXTS.ENVELOPE_SIZE_INVALID}</Typography>}
+          {sizeError && (
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="caption" color="error">{MODAL_TEXTS.ENVELOPE_SIZE_ERRORS[sizeError]}</Typography>
+              {sizeError === 'swapped' && (
+                <Button
+                  size="small"
+                  onClick={() => update({
+                    customSize: { ...settings.customSize, widthMm: settings.customSize.heightMm, heightMm: settings.customSize.widthMm },
+                  })}
+                >
+                  {MODAL_TEXTS.ENVELOPE_SWAP_SIZE}
+                </Button>
+              )}
+            </Stack>
+          )}
         </Stack>
       )}
 
       <FormControlLabel
         control={(
           <Checkbox
-            checked={printSender}
-            onChange={(event) => update({ senderMode: event.target.checked ? 'openFlap' : 'none' })}
+            checked={settings.printSender}
+            onChange={(event) => update({ printSender: event.target.checked })}
           />
         )}
         label={MODAL_TEXTS.ENVELOPE_PRINT_SENDER}
       />
 
-      {printSender && (
+      {settings.printSender && (
         <Stack spacing={2}>
-          <TextField
-            size="small"
-            type="number"
-            label={MODAL_TEXTS.ENVELOPE_FLAP_DEPTH}
-            inputProps={{ min: 0, step: 1 }}
-            value={settings.flapDepthMm}
-            error={Boolean(dimensions) && !isValidFlapDepth(settings.flapDepthMm, dimensions.heightMm)}
-            helperText={dimensions && !isValidFlapDepth(settings.flapDepthMm, dimensions.heightMm)
-              ? MODAL_TEXTS.ENVELOPE_FLAP_DEPTH_INVALID
-              : undefined}
-            onChange={(event) => update({ flapDepthMm: numberFromInput(event.target.value) })}
-          />
-
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>{MODAL_TEXTS.ENVELOPE_FLAP_SHAPE}</Typography>
-            <RadioGroup row value={settings.flapShape} onChange={(event) => update({ flapShape: event.target.value })}>
-              <FormControlLabel value="straight" control={<Radio size="small" />} label={MODAL_TEXTS.ENVELOPE_FLAP_STRAIGHT} />
-              <FormControlLabel value="triangular" control={<Radio size="small" />} label={MODAL_TEXTS.ENVELOPE_FLAP_TRIANGULAR} sx={{ mr: 0 }} />
+          <Box>
+            <Typography variant="body2" color="text.secondary">{MODAL_TEXTS.ENVELOPE_SENDER_PLACEMENT}</Typography>
+            <RadioGroup value={senderMode} onChange={(event) => update({ senderPlacement: event.target.value })}>
+              <FormControlLabel value="openFlap" control={<Radio size="small" />} label={MODAL_TEXTS.ENVELOPE_PLACEMENT_FLAP} />
+              <FormControlLabel value="frontCorner" control={<Radio size="small" />} label={MODAL_TEXTS.ENVELOPE_PLACEMENT_CORNER} />
             </RadioGroup>
-          </Stack>
+          </Box>
 
-          {settings.senders.map((sender, index) => (
+          {senderMode === 'frontCorner' && (
+            <Box>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>{MODAL_TEXTS.ENVELOPE_CORNER_SIDE}</Typography>
+                <RadioGroup row value={settings.cornerSide} onChange={(event) => update({ cornerSide: event.target.value })}>
+                  <FormControlLabel value="auto" control={<Radio size="small" />} label={MODAL_TEXTS.ENVELOPE_SIDE_AUTO} />
+                  <FormControlLabel value="right" control={<Radio size="small" />} label={MODAL_TEXTS.ENVELOPE_SIDE_RIGHT} />
+                  <FormControlLabel value="left" control={<Radio size="small" />} label={MODAL_TEXTS.ENVELOPE_SIDE_LEFT} sx={{ mr: 0 }} />
+                </RadioGroup>
+              </Stack>
+              {settings.cornerSide === 'auto' && (
+                <Typography variant="caption" color="text.secondary">{MODAL_TEXTS.ENVELOPE_SIDE_AUTO_NOTE}</Typography>
+              )}
+            </Box>
+          )}
+
+          {senderMode === 'openFlap' && (
+            <>
+              <TextField
+                size="small"
+                type="number"
+                label={MODAL_TEXTS.ENVELOPE_FLAP_DEPTH}
+                inputProps={{ min: 0, step: 1 }}
+                value={settings.flapDepthMm}
+                error={Boolean(dimensions) && !isValidFlapDepth(settings.flapDepthMm, dimensions.heightMm)}
+                helperText={dimensions && !isValidFlapDepth(settings.flapDepthMm, dimensions.heightMm)
+                  ? MODAL_TEXTS.ENVELOPE_FLAP_DEPTH_INVALID
+                  : undefined}
+                onChange={(event) => update({ flapDepthMm: numberFromInput(event.target.value) })}
+              />
+
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>{MODAL_TEXTS.ENVELOPE_FLAP_SHAPE}</Typography>
+                <RadioGroup row value={settings.flapShape} onChange={(event) => update({ flapShape: event.target.value })}>
+                  <FormControlLabel value="straight" control={<Radio size="small" />} label={MODAL_TEXTS.ENVELOPE_FLAP_STRAIGHT} />
+                  <FormControlLabel value="triangular" control={<Radio size="small" />} label={MODAL_TEXTS.ENVELOPE_FLAP_TRIANGULAR} sx={{ mr: 0 }} />
+                </RadioGroup>
+              </Stack>
+            </>
+          )}
+
+          {visibleSenders.map((sender, index) => (
             <SenderFields
               key={index}
               sender={sender}
               index={index}
-              canRemove={settings.senders.length > 1}
+              canRemove={visibleSenders.length > 1}
               onChange={(next) => updateSender(index, next)}
               onRemove={() => update({ senders: settings.senders.filter((_, i) => i !== index) })}
             />
           ))}
 
-          {settings.senders.length < MAX_SENDERS && (
+          {settings.senders.length < maxSenders && (
             <Button size="small" onClick={() => update({ senders: [...settings.senders, createEmptySender()] })}>
               {MODAL_TEXTS.ENVELOPE_ADD_SENDER}
             </Button>

@@ -9,7 +9,8 @@ import { createDefaultEnvelopeSettings, createEmptySender } from './envelopeForm
 
 const login = (phone) => sessionStorage.setItem('user', JSON.stringify({ phone }));
 const sender = { ...createEmptySender(), name: 'כהן', street: 'הרצל', city: 'ירושלים', zip: '9100001' };
-const chosen = { ...createDefaultEnvelopeSettings(), sizeId: 'c6', senderMode: 'openFlap', flapDepthMm: 33, flapShape: 'triangular' };
+const chosen = { ...createDefaultEnvelopeSettings(), sizeId: 'c6', printSender: true, senderPlacement: 'openFlap', flapDepthMm: 33, flapShape: 'triangular' };
+const corner = { ...createDefaultEnvelopeSettings(), printSender: true, senderPlacement: 'frontCorner', cornerSide: 'left' };
 
 describe('saved senders', () => {
   beforeEach(() => {
@@ -65,12 +66,26 @@ describe('initial envelope settings', () => {
 
   test('printing a sender is off by default even when senders are saved', () => {
     saveSenders([sender]);
-    expect(loadInitialEnvelopeSettings().senderMode).toBe('none');
+    expect(loadInitialEnvelopeSettings()).toMatchObject({ printSender: false, senderPlacement: 'openFlap', cornerSide: 'auto' });
   });
 
   test('the settings kept for the return are ignored on a new entry', () => {
     saveEnvelopeSettingsForReturn(chosen);
-    expect(loadInitialEnvelopeSettings()).toMatchObject({ sizeId: 'a7', senderMode: 'none', flapDepthMm: 40 });
+    expect(loadInitialEnvelopeSettings()).toMatchObject({ sizeId: 'a7', printSender: false, flapDepthMm: 40 });
+  });
+
+  test('the corner placement and side come back from the preview and reset on a new entry', () => {
+    saveSenders([sender]);
+    saveEnvelopeSettingsForReturn(corner);
+    expect(loadInitialEnvelopeSettings({ returning: true })).toEqual({ ...corner, senders: [sender] });
+    expect(loadInitialEnvelopeSettings()).toMatchObject({ printSender: false, senderPlacement: 'openFlap', cornerSide: 'auto' });
+  });
+
+  test('the placement is kept for the return also while printing a sender is off', () => {
+    saveEnvelopeSettingsForReturn({ ...corner, printSender: false });
+    expect(loadInitialEnvelopeSettings({ returning: true })).toMatchObject({
+      printSender: false, senderPlacement: 'frontCorner', cornerSide: 'left',
+    });
   });
 
   test('returning from the preview restores the chosen settings', () => {
@@ -90,8 +105,12 @@ describe('initial envelope settings', () => {
   });
 
   test('unknown or corrupt returned values fall back to the defaults', () => {
-    sessionStorage.setItem(SAVED_ENVELOPE_SETTINGS_KEY, JSON.stringify({ sizeId: 'b5', senderMode: 'constructor', flapShape: 'round' }));
-    expect(loadInitialEnvelopeSettings({ returning: true })).toMatchObject({ sizeId: 'a7', senderMode: 'none', flapShape: 'straight' });
+    sessionStorage.setItem(SAVED_ENVELOPE_SETTINGS_KEY, JSON.stringify({
+      sizeId: 'b5', printSender: 'yes', senderPlacement: 'constructor', cornerSide: 'top', flapShape: 'round',
+    }));
+    expect(loadInitialEnvelopeSettings({ returning: true })).toMatchObject({
+      sizeId: 'a7', printSender: false, senderPlacement: 'openFlap', cornerSide: 'auto', flapShape: 'straight',
+    });
     sessionStorage.setItem(SAVED_ENVELOPE_SETTINGS_KEY, '{not json');
     expect(loadInitialEnvelopeSettings({ returning: true }).sizeId).toBe('a7');
   });
