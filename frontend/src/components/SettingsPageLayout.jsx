@@ -1,13 +1,28 @@
 import { Box, Typography, IconButton, Button, CircularProgress, Snackbar, Alert } from '@mui/material';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 
-// מבנה משותף לעמודי ההגדרות שנפתחים מתפריט המשתמש: כותרת עם חץ חזרה, התוכן,
-// ואזור כפתורים (footer) שמודבק לתחתית המסך - תמיד גלוי, גם בזמן גלילה - בלי
-// רקע/מסגרת סביבו, ישר על המסך
+// רקע ה-body (index.css) - הכותרת הנעוצה צריכה רקע אטום, אחרת התוכן נראה מתחתיה בגלילה
+const PAGE_BACKGROUND = '#f7f8fc';
+
+// מבנה משותף לעמודי ההגדרות שנפתחים מתפריט המשתמש: כותרת עם חץ חזרה שנשארת נעוצה
+// בראש המסך בזמן גלילה, התוכן, ואזור כפתורים (footer) שמודבק לתחתית המסך - תמיד
+// גלוי, גם בזמן גלילה - בלי רקע/מסגרת סביבו, ישר על המסך
 export default function SettingsPageLayout({ title, onBack, footer, children }) {
   return (
     <Box sx={{ width: '100%', minHeight: '100vh', px: 3, py: 2 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+      <Box
+        sx={{
+          position: 'sticky',
+          top: 0,
+          zIndex: (theme) => theme.zIndex.appBar,
+          bgcolor: PAGE_BACKGROUND,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          py: 1,
+          mb: 2,
+        }}
+      >
         <IconButton onClick={onBack}>
           <ArrowForwardIcon />
         </IconButton>

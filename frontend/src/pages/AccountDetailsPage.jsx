@@ -13,12 +13,17 @@ import api from '../services/api';
 import { getChangedFields, getVisibleAccountFields, toFormValues, validateAccount } from '../utils/accountDetails';
 import {
   ENGLISH_SENDER_FIELDS,
+  ENGLISH_SENDER_PLACEHOLDERS,
   HEBREW_SENDER_FIELDS,
+  clearEnglishSender,
+  clearHebrewSender,
+  getHebrewSenderPlaceholders,
+  getRequiredSenderFields,
   getVisibleSenderFields,
   hasEnglishDetails,
+  hasHebrewSenderDetails,
   isSenderChanged,
   resolveSenderAddress,
-  resolveSenderDisplayName,
   toSenderFormValues,
   toSenderPayload,
   validateSender,
@@ -120,9 +125,11 @@ export default function AccountDetailsPage() {
   const isDirty = accountChanged || senderChanged;
   const { confirmLeave, dialogProps } = useUnsavedChangesGuard(isDirty);
 
-  // ה-fallback של השולח לפי מה שכרגע בטופס, כך שהרמז מתעדכן תוך כדי עריכת החשבון
-  const fallbackName = resolveSenderDisplayName(null, values);
+  // ה-fallback של השולח לפי מה שכרגע בטופס, כך שה-placeholder והרמז מתעדכנים תוך כדי
+  // עריכת פרטי החשבון
   const fallbackAddress = formatAddress(resolveSenderAddress(null, values));
+  const hebrewPlaceholders = getHebrewSenderPlaceholders(senderValues, values);
+  const requiredSenderFields = getRequiredSenderFields(senderValues);
 
   const handleChange = (name) => (event) => {
     const { value } = event.target;
@@ -137,11 +144,15 @@ export default function AccountDetailsPage() {
     setSenderErrors({});
   };
 
+  // ריקון שדות השולח בעברית - חוזרים ל-fallback של פרטי החשבון. שינוי רגיל בטופס:
+  // נשמר רק ב"שמור שינויים" ואפשר לבטל אותו ב"ביטול שינויים"
+  const handleUseAccountDetails = () => {
+    setSenderValues(clearHebrewSender);
+    setSenderErrors({});
+  };
+
   const handleRemoveEnglish = () => {
-    setSenderValues((prev) => ({
-      ...prev,
-      ...Object.fromEntries(englishSenderFields.map(({ name }) => [name, ''])),
-    }));
+    setSenderValues(clearEnglishSender);
     setSenderErrors({});
     setShowEnglish(false);
   };
@@ -208,23 +219,26 @@ export default function AccountDetailsPage() {
     );
   };
 
-  const senderHints = {
-    displayName: fallbackName ? `אם ריק: ${fallbackName}` : '',
-    country: 'אפשר להשאיר ריק אם בישראל',
+  // placeholder = ה-fallback (בעברית: פרטי החשבון וישראל; באנגלית: רק Israel בארץ).
+  // shrink כדי שה-placeholder ייראה גם בלי פוקוס - כך השדה "נראה מלא"
+  const renderSenderField = ({ name, label }, { ltr = false } = {}) => {
+    const placeholder = (ltr ? ENGLISH_SENDER_PLACEHOLDERS[name] : hebrewPlaceholders[name]) || '';
+    return (
+      <TextField
+        key={name}
+        label={label}
+        value={senderValues[name] ?? ''}
+        onChange={handleSenderChange(name)}
+        required={requiredSenderFields.includes(name)}
+        placeholder={placeholder}
+        InputLabelProps={placeholder ? { shrink: true } : undefined}
+        error={Boolean(senderErrors[name])}
+        helperText={senderErrors[name] || ''}
+        inputProps={ltr ? { dir: 'ltr' } : undefined}
+        fullWidth
+      />
+    );
   };
-
-  const renderSenderField = ({ name, label }, { ltr = false } = {}) => (
-    <TextField
-      key={name}
-      label={label}
-      value={senderValues[name] ?? ''}
-      onChange={handleSenderChange(name)}
-      error={Boolean(senderErrors[name])}
-      helperText={senderErrors[name] || (ltr ? '' : senderHints[name] || '')}
-      inputProps={ltr ? { dir: 'ltr' } : undefined}
-      fullWidth
-    />
-  );
 
   return (
     <SettingsPageLayout
@@ -267,6 +281,11 @@ export default function AccountDetailsPage() {
                 {fallbackAddress && ` אם הכתובת ריקה, תודפס כתובת החשבון: ${fallbackAddress}`}
               </Typography>
               {hebrewSenderFields.map((field) => renderSenderField(field))}
+              {hasHebrewSenderDetails(senderValues) && (
+                <Box>
+                  <Button onClick={handleUseAccountDetails}>שימוש בפרטי החשבון</Button>
+                </Box>
+              )}
             </>
           )}
 

@@ -282,6 +282,19 @@ class UserControllerTest {
     }
 
     @Test
+    void updateAccount_countryOnly_requiresStreetAndCityInThatLanguage() throws Exception {
+        // ארץ היא שדה כתובת רגיל בשתי השפות - לבד היא מחייבת רחוב ועיר
+        User user = registerUser("0503333337");
+
+        putAccount("0503333337", user.getHashCode(), null, Map.of("country", "צרפת", "countryEn", "France"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.senderErrors.street").exists())
+                .andExpect(jsonPath("$.senderErrors.city").exists())
+                .andExpect(jsonPath("$.senderErrors.streetEn").exists())
+                .andExpect(jsonPath("$.senderErrors.cityEn").exists());
+    }
+
+    @Test
     void updateAccount_invalidSender_returns400_andAccountIsNotSavedEither() throws Exception {
         User user = registerUser("0503333335");
         Map<String, String> sender = new HashMap<>();
