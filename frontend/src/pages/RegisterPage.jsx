@@ -26,8 +26,9 @@ export default function RegisterPage() {
     const [termsError, setTermsError] = useState("");
     const [submitError, setSubmitError] = useState(false);
     const [user, setUser] = useState({
-        firstNameMan: location.state?.name || "",
-        firstNameWoman: "",
+        firstNameMan: "",
+        // השם ממסך הכניסה ממלא מראש את "שם פרטי" הגלוי, כמו הטלפון
+        firstNameWoman: location.state?.name || "",
         lastName: "",
         phone: location.state?.phone || "",
         email: "",

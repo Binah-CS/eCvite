@@ -42,6 +42,16 @@ function getInitials(name) {
   return `${parts[0][0]}${parts[1][0]}`;
 }
 
+// השם הפרטי שמוצג בברכה ובאווטאר: קודם firstNameWoman (השדה שבטופס ההרשמה ובעמוד
+// פרטי החשבון), ואז firstNameMan - משתמשות ותיקות שהשם שלהן נשמר רק שם. ערך ריק
+// (משתמשת חדשה נשמרת עם firstNameMan = "") מדולג. זהה לסדר של "מי שינה" בהיסטוריה
+// (RecipientController.getRecipientHistory)
+function getDisplayFirstName(user) {
+  return [user?.firstNameWoman, user?.firstNameMan]
+    .map((name) => String(name ?? '').trim())
+    .find(Boolean) || 'משתמש';
+}
+
 // try/catch בקריאה ובכתיבה של העותק המקומי - localStorage יכול לזרוק (טבלה גדולה
 // מעבר למכסה, גלישה פרטית, חסימת אחסון). כשל כאן לא אמור להפיל טעינה או שמירה
 // שהצליחו מול השרת - רק העותק המקומי לא יתעדכן
@@ -577,7 +587,7 @@ export default function DashboardPage() {
     <Box sx={{ display: 'inline-flex' }}>
       <IconButton onClick={(e) => setProfileMenuAnchor(e.currentTarget)} size="small">
         <Avatar sx={{ width: 30, height: 30, bgcolor: '#1e3a8a', fontSize: '0.9rem' }}>
-          {getInitials(user?.firstNameMan || user?.firstNameWoman || 'משתמש')}
+          {getInitials(getDisplayFirstName(user))}
         </Avatar>
       </IconButton>
       <Menu
@@ -600,10 +610,10 @@ export default function DashboardPage() {
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pb: 2 }}>
           <Avatar sx={{ width: 72, height: 72, bgcolor: '#1e3a8a', fontSize: '2rem' }}>
-            {getInitials(user?.firstNameMan || user?.firstNameWoman || 'משתמש')}
+            {getInitials(getDisplayFirstName(user))}
           </Avatar>
           <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', mt: 1.5 }}>
-            {getGreeting()}, {user?.firstNameMan || user?.firstNameWoman || 'משתמש'}!
+            {getGreeting()}, {getDisplayFirstName(user)}!
           </Typography>
         </Box>
 

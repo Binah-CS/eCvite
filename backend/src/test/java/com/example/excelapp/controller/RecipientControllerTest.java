@@ -558,6 +558,54 @@ class RecipientControllerTest {
                 .andExpect(jsonPath("$[0].changedByName").value("עורכת"));
     }
 
+    private User seedUserWithNames(String phone, String firstNameMan, String firstNameWoman) {
+        User user = User.builder()
+                .firstNameMan(firstNameMan)
+                .firstNameWoman(firstNameWoman)
+                .lastName("בדיקה")
+                .phone(phone)
+                .build();
+        user.setHashCode(user.generateHashCode());
+        return userRepository.save(user);
+    }
+
+    @Test
+    void history_changedByName_newUserWithEmptyFirstNameMan_usesFirstNameWoman() throws Exception {
+        // משתמשת חדשה: השם ממסך הכניסה נשמר ב-firstNameWoman ו-firstNameMan = ""
+        User user = seedUserWithNames("0526666661", "", "רחל");
+        Recipients recipient = seedRecipientLinkedTo(user, "נערך", "0526666662");
+        insertHistoryRow(recipient.getHashCode(), user.getHashCode(), "UPDATE");
+
+        mockMvc.perform(get("/api/recipients/" + recipient.getHashCode() + "/history")
+                        .param("phone", user.getPhone()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].changedByName").value("רחל"));
+    }
+
+    @Test
+    void history_changedByName_prefersFirstNameWomanOverFirstNameMan() throws Exception {
+        User user = seedUserWithNames("0526666663", "יוסי", "רחל");
+        Recipients recipient = seedRecipientLinkedTo(user, "נערך", "0526666664");
+        insertHistoryRow(recipient.getHashCode(), user.getHashCode(), "UPDATE");
+
+        mockMvc.perform(get("/api/recipients/" + recipient.getHashCode() + "/history")
+                        .param("phone", user.getPhone()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].changedByName").value("רחל"));
+    }
+
+    @Test
+    void history_changedByName_bothNamesEmpty_usesFallback() throws Exception {
+        User user = seedUserWithNames("0526666665", "", "");
+        Recipients recipient = seedRecipientLinkedTo(user, "נערך", "0526666666");
+        insertHistoryRow(recipient.getHashCode(), user.getHashCode(), "UPDATE");
+
+        mockMvc.perform(get("/api/recipients/" + recipient.getHashCode() + "/history")
+                        .param("phone", user.getPhone()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].changedByName").value("משתמשת לא ידועה"));
+    }
+
     @Test
     void history_hiddenFromUserNotLinkedToTheRecipient() throws Exception {
         // בדיקת ההרשאה (ה-EXISTS בתוך ה-query, ר' ההערה ב-getRecipientHistory) -
