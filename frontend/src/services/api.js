@@ -111,6 +111,14 @@ const api = {
 
   getRecipientHistory: (hashCode, phone) =>
       apiClient.get(`/recipients/${encodeURIComponent(hashCode)}/history`, { params: { phone } }),
+
+  // עמוד "פרטי חשבון" - הזיהוי לפי טלפון + hashCode יחד (ר' UserService.findAccount).
+  // account = רק השדות שהשתנו
+  getAccount: (phone, hashCode) =>
+      apiClient.get('/user/account', { params: { phone, hashCode } }),
+
+  updateAccount: (phone, hashCode, account) =>
+      apiClient.put('/user/account', { phone, hashCode, account }),
 };
 
 export default api;

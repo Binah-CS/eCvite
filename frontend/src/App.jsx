@@ -5,7 +5,8 @@ import PrintPreviewPage from './pages/PrintPreviewPage'; // עמוד חדש שנ
 import RegisterPage from "./pages/RegisterPage";
 import Terms from "./pages/Terms";
 import ColumnManagementPage from './pages/ColumnManagementPage';
-import { COLUMN_MANAGEMENT_PAGE, DEFAULT_SETTINGS_PAGE } from './utils/settingsPages';
+import AccountDetailsPage from './pages/AccountDetailsPage';
+import { ACCOUNT_PAGE, COLUMN_MANAGEMENT_PAGE, DEFAULT_SETTINGS_PAGE } from './utils/settingsPages';
 function App() {
 
   // useLocation גורם ל-App להתעדכן בכל ניווט, כדי ש-loggedIn ייבדק מחדש אחרי login/logout
@@ -29,6 +30,10 @@ function App() {
         <Route
             path={COLUMN_MANAGEMENT_PAGE.path}
             element={loggedIn ? <ColumnManagementPage /> : <Navigate to="/login" replace />}
+        />
+        <Route
+            path={ACCOUNT_PAGE.path}
+            element={loggedIn ? <AccountDetailsPage /> : <Navigate to="/login" replace />}
         />
         {/* הנתיב הישן - קישורים קיימים (למשל מתוך הייבוא) ממשיכים לעבוד */}
         <Route

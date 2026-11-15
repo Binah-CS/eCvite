@@ -13,6 +13,8 @@ import {
 } from "@mui/material";
 import api from "../services/api";
 import { refreshExcelColumns } from '../services/excelColumnsCache';
+import { GMAIL_REGEX, PHONE_REGEX } from '../utils/validation';
+import { EVENT_TYPES } from '../utils/accountDetails';
 export default function RegisterPage() {
 
     const navigate = useNavigate();
@@ -35,7 +37,6 @@ export default function RegisterPage() {
         houseNumber: "",
     });
 
-    const phoneRegex = /^(05\d{8}|0[23489]\d{7})$/;
     const handleChange = (e) => {
         const { name, value } = e.target;
 
@@ -45,18 +46,17 @@ export default function RegisterPage() {
         });
 
         if (name === "email") {
-            const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
-            setEmailError(value !== "" && !gmailRegex.test(value));
+            setEmailError(value !== "" && !GMAIL_REGEX.test(value));
         }
         if (name === "phone") {
-            setPhoneError(value !== "" && !phoneRegex.test(value));
+            setPhoneError(value !== "" && !PHONE_REGEX.test(value));
         }
     };
 
     const handleRegister = async (e) => {
         e.preventDefault();
 
-        if (!phoneRegex.test(user.phone)) {
+        if (!PHONE_REGEX.test(user.phone)) {
             setPhoneError(true);
             return;
         }
@@ -67,9 +67,7 @@ export default function RegisterPage() {
 
         setTermsError("");
 
-        const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
-
-        if (!gmailRegex.test(user.email)) {
+        if (!GMAIL_REGEX.test(user.email)) {
             setEmailError(true);
             return;
         }
@@ -144,9 +142,9 @@ export default function RegisterPage() {
                         value={user.eventType}
                         onChange={handleChange}
                     >
-                        <MenuItem value="חתונה">חתונה</MenuItem>
-                        <MenuItem value="בר מצווה">בר מצווה</MenuItem>
-                        <MenuItem value="אחר">אחר</MenuItem>
+                        {EVENT_TYPES.map((type) => (
+                            <MenuItem key={type} value={type}>{type}</MenuItem>
+                        ))}
                     </TextField>
 
                     <TextField

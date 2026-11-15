@@ -7,11 +7,8 @@ import {
   ListItemButton,
   ListItemText,
   Checkbox,
-  Button,
-  Snackbar,
-  Alert,
 } from '@mui/material';
-import SettingsPageLayout from '../components/SettingsPageLayout';
+import SettingsPageLayout, { SettingsSaveButton, SettingsSavedSnackbar } from '../components/SettingsPageLayout';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS, saveColumnPreferences } from '../utils/columnPreferences';
 import { COLUMN_MANAGEMENT_PAGE } from '../utils/settingsPages';
@@ -97,40 +94,14 @@ export default function ColumnManagementPage() {
     <SettingsPageLayout
       title={COLUMN_MANAGEMENT_PAGE.label}
       onBack={handleBack}
-      footer={
-        <Button
-          variant="outlined"
-          onClick={handleSave}
-          sx={{
-            bgcolor: '#dbeafe',
-            color: '#1e293b',
-            borderColor: '#60a5fa',
-            '&:hover': { bgcolor: '#bfdbfe', borderColor: '#60a5fa' },
-            py: 1,
-            px: 3,
-            fontSize: '0.95rem',
-            fontWeight: 700,
-          }}
-        >
-          שמור שינויים
-        </Button>
-      }
+      footer={<SettingsSaveButton onClick={handleSave} />}
     >
       <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         {columnList('show', 'עמודות להצגה')}
         {columnList('print', 'עמודות להדפסה')}
       </Box>
 
-      <Snackbar
-        open={savedOpen}
-        autoHideDuration={2500}
-        onClose={() => setSavedOpen(false)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert severity="success" icon={false} sx={{ bgcolor: '#60a5fa', color: '#fff' }}>
-          נשמר בהצלחה
-        </Alert>
-      </Snackbar>
+      <SettingsSavedSnackbar open={savedOpen} onClose={() => setSavedOpen(false)} />
     </SettingsPageLayout>
   );
 }
