@@ -17,7 +17,7 @@ export function parseColumnPreferences(raw) {
 }
 
 // שולחת את העדפות העמודות (JSON) לשרת ומעדכנת את sessionStorage - משותפת בין
-// גרירת סדר עמודות בטבלה (DashboardPage) לבין מסך ההגדרות (SettingsPage), ששתיהן
+// גרירת סדר עמודות בטבלה (DashboardPage) לבין עמוד ניהול העמודות (ColumnManagementPage), ששתיהן
 // שומרות את אותו מבנה preferences בדיוק
 export async function saveColumnPreferences(user, columnPreferences) {
   let updatedUser = { ...user, columnPreferences };

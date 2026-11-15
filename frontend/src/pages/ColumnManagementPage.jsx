@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
-  IconButton,
   List,
   ListItemButton,
   ListItemText,
@@ -12,26 +11,19 @@ import {
   Snackbar,
   Alert,
 } from '@mui/material';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined';
+import SettingsPageLayout from '../components/SettingsPageLayout';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS, saveColumnPreferences } from '../utils/columnPreferences';
+import { COLUMN_MANAGEMENT_PAGE } from '../utils/settingsPages';
 
 function getLoggedUser() {
   const raw = sessionStorage.getItem('user');
   return raw ? JSON.parse(raw) : null;
 }
 
-// כל קטגוריות ההגדרות - כרגע יש רק אחת (ניהול עמודות), אבל הרשימה בצד בנויה כך
-// שאפשר להוסיף עוד קטגוריות בעתיד בלי לשנות את מבנה העמוד
-const SETTINGS_CATEGORIES = [
-  { key: 'columns', label: 'ניהול עמודות', icon: ViewColumnOutlinedIcon },
-];
-
-export default function SettingsPage() {
+export default function ColumnManagementPage() {
   const navigate = useNavigate();
   const user = getLoggedUser();
-  const [selectedCategory, setSelectedCategory] = useState('columns');
   const [fieldDefs, setFieldDefs] = useState([]);
   const [prefs, setPrefs] = useState(() => parseColumnPreferences(user?.columnPreferences));
   const [savedOpen, setSavedOpen] = useState(false);
@@ -102,62 +94,10 @@ export default function SettingsPage() {
   };
 
   return (
-    <Box sx={{ width: '100%', minHeight: '100vh', px: 3, py: 2 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
-        <IconButton onClick={handleBack}>
-          <ArrowForwardIcon />
-        </IconButton>
-        <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a' }}>
-          הגדרות
-        </Typography>
-      </Box>
-
-      <Box sx={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
-        {/* רשימת הקטגוריות - נשארת קבועה בצד, לא נעלמת כשבוחרים קטגוריה */}
-        <List sx={{ width: 280, flexShrink: 0 }}>
-          {SETTINGS_CATEGORIES.map(({ key, label, icon: Icon }) => (
-            <ListItemButton
-              key={key}
-              selected={selectedCategory === key}
-              onClick={() => setSelectedCategory(key)}
-              sx={{
-                borderRadius: 2,
-                mb: 0.5,
-                gap: 1.5,
-                '&.Mui-selected': { bgcolor: '#eff6ff' },
-                '&.Mui-selected:hover': { bgcolor: '#eff6ff' },
-              }}
-            >
-              <Icon sx={{ color: '#475569' }} />
-              <ListItemText primary={label} />
-            </ListItemButton>
-          ))}
-        </List>
-
-        {/* תוכן הקטגוריה הנבחרת - מוצג באמצע, לצד הרשימה */}
-        <Box sx={{ flex: 1, pb: 10 }}>
-          {selectedCategory === 'columns' && (
-            <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {columnList('show', 'עמודות להצגה')}
-              {columnList('print', 'עמודות להדפסה')}
-            </Box>
-          )}
-        </Box>
-      </Box>
-
-      {/* כפתור השמירה מודבק לתחתית המסך - תמיד גלוי, גם בזמן גלילה - בלי רקע/מסגרת סביבו, ישר על המסך */}
-      <Box
-        sx={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          px: 3,
-          py: 1.5,
-          display: 'flex',
-          justifyContent: 'flex-end',
-        }}
-      >
+    <SettingsPageLayout
+      title={COLUMN_MANAGEMENT_PAGE.label}
+      onBack={handleBack}
+      footer={
         <Button
           variant="outlined"
           onClick={handleSave}
@@ -174,6 +114,11 @@ export default function SettingsPage() {
         >
           שמור שינויים
         </Button>
+      }
+    >
+      <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        {columnList('show', 'עמודות להצגה')}
+        {columnList('print', 'עמודות להדפסה')}
       </Box>
 
       <Snackbar
@@ -186,6 +131,6 @@ export default function SettingsPage() {
           נשמר בהצלחה
         </Alert>
       </Snackbar>
-    </Box>
+    </SettingsPageLayout>
   );
 }
