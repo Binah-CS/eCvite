@@ -10,3 +10,9 @@ export const GMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
 
 // מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
 export const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
+
+// מיקוד ישראלי - 7 ספרות
+export const ZIP_IL_REGEX = /^\d{7}$/;
+
+// מיקוד בחו"ל - 3 עד 10 תווים: אותיות/ספרות, ורווח או מקף באמצע (כמו "SW1A 1AA")
+export const ZIP_INTL_REGEX = /^[A-Za-z0-9][A-Za-z0-9 -]{1,8}[A-Za-z0-9]$/;

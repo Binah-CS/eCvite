@@ -11,7 +11,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 import java.util.Optional;
 
-// עמוד "פרטי חשבון" - קריאה ועדכון של הפרטים שהמשתמשת הזינה בהרשמה
+// עמוד "פרטי חשבון" - קריאה ועדכון של הפרטים שהמשתמשת הזינה בהרשמה ושל פרטי
+// השולח שלה למעטפות
 @RestController
 @RequestMapping("/api/user")
 public class UserController {
@@ -25,15 +26,16 @@ public class UserController {
     @GetMapping("/account")
     public ResponseEntity<AccountResponse> getAccount(@RequestParam String phone, @RequestParam String hashCode) {
         return userService.findAccount(phone, hashCode)
-                .map(user -> ResponseEntity.ok(AccountResponse.of(user)))
+                .map(user -> ResponseEntity.ok(toResponse(user)))
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    // מחזירה 400 עם { errors: { שדה: הודעה } } כשיש שדה לא תקין או שדה שאסור לעדכן -
-    // ובמקרה כזה שום שדה לא נשמר, גם לא התקינים
+    // מחזירה 400 עם { errors: { שדה: הודעה }, senderErrors: { שדה: הודעה } } כשיש שדה
+    // לא תקין או שדה שאסור לעדכן - ובמקרה כזה שום דבר לא נשמר, גם לא החלקים התקינים
     @PutMapping("/account")
     public ResponseEntity<?> updateAccount(@RequestBody UpdateAccountRequest request) {
-        if (request.getPhone() == null || request.getHashCode() == null || request.getAccount() == null) {
+        if (request.getPhone() == null || request.getHashCode() == null
+                || (request.getAccount() == null && request.getSender() == null)) {
             return ResponseEntity.badRequest().build();
         }
 
@@ -42,12 +44,20 @@ public class UserController {
             return ResponseEntity.notFound().build();
         }
 
-        Map<String, String> errors = AccountValidation.validateAccount(request.getAccount());
-        if (!errors.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("errors", errors));
+        Map<String, String> account = request.getAccount() == null ? Map.of() : request.getAccount();
+        Map<String, String> sender = request.getSender();
+
+        Map<String, String> errors = AccountValidation.validateAccount(account);
+        Map<String, String> senderErrors = sender == null ? Map.of() : AccountValidation.validateSender(sender);
+        if (!errors.isEmpty() || !senderErrors.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("errors", errors, "senderErrors", senderErrors));
         }
 
-        User saved = userService.updateAccount(user.get(), request.getAccount());
-        return ResponseEntity.ok(AccountResponse.of(saved));
+        User saved = userService.updateAccount(user.get(), account, sender);
+        return ResponseEntity.ok(toResponse(saved));
+    }
+
+    private AccountResponse toResponse(User user) {
+        return AccountResponse.of(user, userService.findOwnSender(user).orElse(null));
     }
 }

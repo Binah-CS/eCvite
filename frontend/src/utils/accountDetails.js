@@ -17,16 +17,29 @@ export const ACCOUNT_FIELDS = [
 ];
 
 // זהה ל-AccountValidation.MAX_LENGTH בשרת
-const MAX_LENGTH = 255;
+export const MAX_LENGTH = 255;
 
+// זהות להודעות ב-AccountValidation בשרת. משמשות גם לפרטי השולח (senderDetails.js)
 export const ACCOUNT_ERRORS = {
   required: 'שדה חובה',
   tooLong: 'הערך ארוך מדי',
   email: 'המייל שהוזן אינו תקין',
   houseNumber: 'מספר בית לא תקין',
+  zip: 'מיקוד לא תקין',
 };
 
-const normalize = (value) => String(value ?? '').trim();
+export const normalize = (value) => String(value ?? '').trim();
+
+// השם הפרטי של המשתמשת - בברכה ובאווטאר בתפריט (DashboardPage), וכ-fallback לשם
+// השולח. קודם firstNameWoman (השדה שבטופס ההרשמה ובעמוד פרטי החשבון), ואז
+// firstNameMan - משתמשות ותיקות שהשם שלהן נשמר רק שם. ערך ריק (משתמשת חדשה נשמרת
+// עם firstNameMan = "") מדולג. זהה לסדר של "מי שינה" בהיסטוריה
+// (RecipientController.getRecipientHistory)
+export function getDisplayFirstName(user, fallback = 'משתמש') {
+  return [user?.firstNameWoman, user?.firstNameMan]
+    .map((name) => String(name ?? '').trim())
+    .find(Boolean) || fallback;
+}
 
 // השדות להצגה לפי הרשימות מהשרת, בסדר של ACCOUNT_FIELDS. שדה חדש שהשרת מחזיר ועוד
 // אין לו תווית כאן מוצג בסוף עם השם הטכני שלו, כדי שלא ייעלם בשקט

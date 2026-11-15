@@ -1,6 +1,7 @@
 import {
   ACCOUNT_ERRORS,
   getChangedFields,
+  getDisplayFirstName,
   getVisibleAccountFields,
   toFormValues,
   validateAccount,
@@ -40,6 +41,15 @@ describe('getChangedFields', () => {
 
   test('clearing a field is a change to an empty value', () => {
     expect(getChangedFields(saved, { ...saved, city: '' }, ['city'])).toEqual({ city: '' });
+  });
+});
+
+describe('getDisplayFirstName', () => {
+  test('prefers firstNameWoman, then firstNameMan, skipping empty values', () => {
+    expect(getDisplayFirstName({ firstNameWoman: 'רחל', firstNameMan: 'יוסי' })).toBe('רחל');
+    expect(getDisplayFirstName({ firstNameWoman: '  ', firstNameMan: 'יוסי' })).toBe('יוסי');
+    expect(getDisplayFirstName({ firstNameWoman: null, firstNameMan: '' })).toBe('משתמש');
+    expect(getDisplayFirstName(null, '')).toBe('');
   });
 });
 

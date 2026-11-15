@@ -11,6 +11,11 @@ public class UpdateAccountRequest {
     private String phone;
     private String hashCode;
 
-    // רק השדות שהשתנו: שם שדה -> ערך חדש. מותרים רק שדות מ-AccountFields.EDITABLE
+    // רק השדות שהשתנו: שם שדה -> ערך חדש. מותרים רק שדות מ-AccountFields.EDITABLE.
+    // null = אין שינוי בפרטי החשבון
     private Map<String, String> account;
+
+    // פרטי השולח המלאים (כל השדות מ-SenderFields), כי יש כללי ולידציה בין שדות.
+    // null = אין שינוי בפרטי השולח
+    private Map<String, String> sender;
 }

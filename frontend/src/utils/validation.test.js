@@ -1,4 +1,4 @@
-import { GMAIL_REGEX, HOUSE_NO_PATTERN, PHONE_REGEX } from './validation';
+import { GMAIL_REGEX, HOUSE_NO_PATTERN, PHONE_REGEX, ZIP_IL_REGEX, ZIP_INTL_REGEX } from './validation';
 
 // הביטויים מוכפלים ב-AccountValidation בשרת (ר' UserControllerTest) - הדוגמאות כאן
 // מתעדות את ההתנהגות הצפויה בשני הצדדים
@@ -22,5 +22,20 @@ describe('validation regexes', () => {
     expect(HOUSE_NO_PATTERN.test('12b')).toBe(true);
     expect(HOUSE_NO_PATTERN.test('5ab')).toBe(false);
     expect(HOUSE_NO_PATTERN.test('א5')).toBe(false);
+  });
+
+  test('ZIP_IL_REGEX requires exactly 7 digits', () => {
+    expect(ZIP_IL_REGEX.test('1234567')).toBe(true);
+    expect(ZIP_IL_REGEX.test('123')).toBe(false);
+    expect(ZIP_IL_REGEX.test('12345678')).toBe(false);
+  });
+
+  test('ZIP_INTL_REGEX allows 3-10 letters/digits with inner space or dash', () => {
+    expect(ZIP_INTL_REGEX.test('SW1A 1AA')).toBe(true);
+    expect(ZIP_INTL_REGEX.test('10001')).toBe(true);
+    expect(ZIP_INTL_REGEX.test('12345-6789')).toBe(true);
+    expect(ZIP_INTL_REGEX.test('12')).toBe(false);
+    expect(ZIP_INTL_REGEX.test(' 123')).toBe(false);
+    expect(ZIP_INTL_REGEX.test('12345678901')).toBe(false);
   });
 });

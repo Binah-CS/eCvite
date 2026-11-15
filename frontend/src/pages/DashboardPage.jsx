@@ -10,6 +10,7 @@ import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdenti
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
 import { buildSavedSnapshot, selectRowsToSave } from '../utils/changedRows';
 import { SETTINGS_PAGES } from '../utils/settingsPages';
+import { getDisplayFirstName } from '../utils/accountDetails';
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
@@ -40,16 +41,6 @@ function getInitials(name) {
   if (parts.length === 0) return '';
   if (parts.length === 1) return parts[0][0];
   return `${parts[0][0]}${parts[1][0]}`;
-}
-
-// השם הפרטי שמוצג בברכה ובאווטאר: קודם firstNameWoman (השדה שבטופס ההרשמה ובעמוד
-// פרטי החשבון), ואז firstNameMan - משתמשות ותיקות שהשם שלהן נשמר רק שם. ערך ריק
-// (משתמשת חדשה נשמרת עם firstNameMan = "") מדולג. זהה לסדר של "מי שינה" בהיסטוריה
-// (RecipientController.getRecipientHistory)
-function getDisplayFirstName(user) {
-  return [user?.firstNameWoman, user?.firstNameMan]
-    .map((name) => String(name ?? '').trim())
-    .find(Boolean) || 'משתמש';
 }
 
 // try/catch בקריאה ובכתיבה של העותק המקומי - localStorage יכול לזרוק (טבלה גדולה
