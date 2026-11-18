@@ -438,7 +438,10 @@ public class RecipientController {
         // הרשאה אם ה-hashCode בכלל קיים
         List<Object[]> rows = entityManager.createNativeQuery(
                 "SELECT h.changed_by, h.change_date, h.operation, CAST(h.old_data AS text), " +
-                        "COALESCE(NULLIF(u.first_name_man, ''), NULLIF(u.first_name_woman, ''), 'משתמשת לא ידועה') AS changed_by_name " +
+                        // שם "מי שינה": קודם השם הפרטי שבטופס ההרשמה / פרטי החשבון, ואז
+                        // first_name_man למשתמשות ותיקות שהשם שלהן רק שם. NULLIF כי
+                        // משתמשת חדשה נשמרת עם first_name_man = '' (לא null)
+                        "COALESCE(NULLIF(u.first_name_woman, ''), NULLIF(u.first_name_man, ''), 'משתמשת לא ידועה') AS changed_by_name " +
                         "FROM recipients_history h " +
                         "LEFT JOIN users u ON u.hash_code = h.changed_by " +
                         "WHERE h.recipient_hash_code = :hashCode " +

@@ -20,9 +20,7 @@ import FilterBuilder, { valueLabel, newCondition } from './FilterBuilder';
 import { ColumnFilterContext, ColumnFilterButton, ColumnFilterMenu } from './ColumnValueFilter';
 import { applyColumnFilters, collectColumnValues, conditionsToFilters, withoutColumnFilter } from '../utils/columnFilters';
 import { VisibleRowsContext } from '../utils/visibleRowsContext';
-
-// מספר בית: ספרות, ואפשר אות אחת בסוף (כמו "12" או "12א")
-const HOUSE_NO_PATTERN = /^\d+[a-zA-Zא-ת]?$/;
+import { HOUSE_NO_PATTERN } from '../utils/validation';
 
 // שדות מערכת/ביקורת (לא "פרטי אורח") - לא מנוהלים דרך excel_columns, נשארים קבועים בקוד
 const systemColumns = [

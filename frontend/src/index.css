@@ -4,7 +4,9 @@
 
 html, body {
   margin: 0;
-  overflow-x: hidden;
+  /* clip ולא hidden: חותך גלישה אופקית באותה צורה, אבל לא הופך את ה-body למכל
+     גלילה - אחרת position: sticky (הכותרת בעמודי ההגדרות) לא נצמד לראש המסך */
+  overflow-x: clip;
 }
 
 body {

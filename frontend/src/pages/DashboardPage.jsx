@@ -1,7 +1,6 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Avatar, IconButton, Menu, MenuItem, Snackbar, Alert } from '@mui/material';
-import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import DataTable from '../components/DataTable';
 import api from '../services/api';
@@ -10,6 +9,8 @@ import PrintModal from '../components/PrintModal';
 import { buildIdentityKey, mergeBelongsToValues } from '../utils/recipientIdentity';
 import { parseColumnPreferences, saveColumnPreferences } from '../utils/columnPreferences';
 import { buildSavedSnapshot, selectRowsToSave } from '../utils/changedRows';
+import { SETTINGS_PAGES } from '../utils/settingsPages';
+import { getDisplayFirstName } from '../utils/accountDetails';
 
 const DB_KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const DASHBOARD_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
@@ -88,6 +89,19 @@ function setLocalInSync(phone, inSync) {
   } catch {
     // לא קריטי - בפעם הבאה פשוט נטען מה-DB כרגיל
   }
+}
+
+// פריט בתפריט הפרופיל - כל עמודי ההגדרות (ר' SETTINGS_PAGES) ו"יציאה" נראים אותו דבר
+function ProfileMenuItem({ icon: Icon, label, onClick }) {
+  return (
+    <MenuItem
+      onClick={onClick}
+      sx={{ borderRadius: 2.5, py: 1.25, px: 2, gap: 1.5, '&:hover': { bgcolor: '#eef2f7' } }}
+    >
+      <Icon fontSize="small" sx={{ color: '#475569' }} />
+      <Typography variant="body2" sx={{ fontWeight: 600, color: '#1e293b' }}>{label}</Typography>
+    </MenuItem>
+  );
 }
 
 export default function DashboardPage() {
@@ -564,7 +578,7 @@ export default function DashboardPage() {
     <Box sx={{ display: 'inline-flex' }}>
       <IconButton onClick={(e) => setProfileMenuAnchor(e.currentTarget)} size="small">
         <Avatar sx={{ width: 30, height: 30, bgcolor: '#1e3a8a', fontSize: '0.9rem' }}>
-          {getInitials(user?.firstNameMan || user?.firstNameWoman || 'משתמש')}
+          {getInitials(getDisplayFirstName(user))}
         </Avatar>
       </IconButton>
       <Menu
@@ -587,32 +601,27 @@ export default function DashboardPage() {
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pb: 2 }}>
           <Avatar sx={{ width: 72, height: 72, bgcolor: '#1e3a8a', fontSize: '2rem' }}>
-            {getInitials(user?.firstNameMan || user?.firstNameWoman || 'משתמש')}
+            {getInitials(getDisplayFirstName(user))}
           </Avatar>
           <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', mt: 1.5 }}>
-            {getGreeting()}, {user?.firstNameMan || user?.firstNameWoman || 'משתמש'}!
+            {getGreeting()}, {getDisplayFirstName(user)}!
           </Typography>
         </Box>
 
         <Box sx={{ bgcolor: '#f8fafc', borderRadius: 3, p: 0.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-          <MenuItem
-            onClick={async () => {
-              setProfileMenuAnchor(null);
-              await flushPendingRecipientSaves();
-              navigate('/settings');
-            }}
-            sx={{ borderRadius: 2.5, py: 1.25, px: 2, gap: 1.5, '&:hover': { bgcolor: '#eef2f7' } }}
-          >
-            <SettingsOutlinedIcon fontSize="small" sx={{ color: '#475569' }} />
-            <Typography variant="body2" sx={{ fontWeight: 600, color: '#1e293b' }}>הגדרות</Typography>
-          </MenuItem>
-          <MenuItem
-            onClick={handleLogout}
-            sx={{ borderRadius: 2.5, py: 1.25, px: 2, gap: 1.5, '&:hover': { bgcolor: '#eef2f7' } }}
-          >
-            <LogoutOutlinedIcon fontSize="small" sx={{ color: '#475569' }} />
-            <Typography variant="body2" sx={{ fontWeight: 600, color: '#1e293b' }}>יציאה</Typography>
-          </MenuItem>
+          {SETTINGS_PAGES.map(({ key, path, label, icon }) => (
+            <ProfileMenuItem
+              key={key}
+              icon={icon}
+              label={label}
+              onClick={async () => {
+                setProfileMenuAnchor(null);
+                await flushPendingRecipientSaves();
+                navigate(path);
+              }}
+            />
+          ))}
+          <ProfileMenuItem icon={LogoutOutlinedIcon} label="יציאה" onClick={handleLogout} />
         </Box>
       </Menu>
     </Box>
