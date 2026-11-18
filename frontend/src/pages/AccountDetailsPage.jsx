@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Alert, Box, Button, CircularProgress, MenuItem, Snackbar, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, CircularProgress, MenuItem, TextField, Typography } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import SettingsPageLayout, {
   SettingsSaveButton,
+  SAVE_FAILED_MESSAGE,
+  SettingsErrorSnackbar,
   SettingsSavedSnackbar,
   SettingsSecondaryButton,
 } from '../components/SettingsPageLayout';
@@ -35,7 +37,6 @@ function getLoggedUser() {
   return raw ? JSON.parse(raw) : null;
 }
 
-const SAVE_FAILED = 'השמירה נכשלה. נסי שוב.';
 const FIX_FIELDS = 'יש שדות שצריך לתקן';
 const READ_ONLY_HINT = 'משמש להתחברות ולא ניתן לשינוי';
 
@@ -190,7 +191,7 @@ export default function AccountDetailsPage() {
       const hasFieldErrors = Boolean(data?.errors || data?.senderErrors);
       if (data?.errors) setErrors(data.errors);
       if (data?.senderErrors) setSenderErrors(data.senderErrors);
-      setSaveError(hasFieldErrors ? FIX_FIELDS : SAVE_FAILED);
+      setSaveError(hasFieldErrors ? FIX_FIELDS : SAVE_FAILED_MESSAGE);
     } finally {
       setSaving(false);
     }
@@ -314,16 +315,7 @@ export default function AccountDetailsPage() {
 
       <SettingsSavedSnackbar open={savedOpen} onClose={() => setSavedOpen(false)} />
 
-      <Snackbar
-        open={Boolean(saveError)}
-        autoHideDuration={6000}
-        onClose={() => setSaveError('')}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert severity="error" variant="filled" onClose={() => setSaveError('')}>
-          {saveError}
-        </Alert>
-      </Snackbar>
+      <SettingsErrorSnackbar message={saveError} onClose={() => setSaveError('')} />
 
       <UnsavedChangesDialog {...dialogProps} />
     </SettingsPageLayout>

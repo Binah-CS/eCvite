@@ -97,6 +97,24 @@ export function SettingsSecondaryButton({ onClick, disabled = false, children })
   );
 }
 
+export const SAVE_FAILED_MESSAGE = 'השמירה נכשלה. נסי שוב.';
+
+// הודעת שגיאה בראש המסך (למשל כשהשמירה לשרת נכשלה). message ריק = סגורה
+export function SettingsErrorSnackbar({ message, onClose }) {
+  return (
+    <Snackbar
+      open={Boolean(message)}
+      autoHideDuration={6000}
+      onClose={onClose}
+      anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+    >
+      <Alert severity="error" variant="filled" onClose={onClose}>
+        {message}
+      </Alert>
+    </Snackbar>
+  );
+}
+
 // הודעת "נשמר בהצלחה" בראש המסך אחרי שמירה (נשארים באותו עמוד)
 export function SettingsSavedSnackbar({ open, onClose }) {
   return (
