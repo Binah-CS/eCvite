@@ -26,7 +26,6 @@ export const EXTRA_PRINT_FIELDS = [
   { field: 'fatherName', labels: { he: 'שם האב', en: "Father's name" } },
   { field: 'motherName', labels: { he: 'שם האם', en: "Mother's name" } },
   { field: 'belongsTo', labels: { he: 'שייך ל', en: 'Belongs to' } },
-  { field: 'addressNote', labels: { he: 'הערת כתובת', en: 'Address note' } },
   { field: 'neighborhood', labels: { he: 'שכונה', en: 'Neighborhood' } },
 ];
 
@@ -84,6 +83,13 @@ export function buildAddressLine1(row, getPrintFlag, printLanguage) {
 
 export function buildAddressLine2(row, getPrintFlag) {
   return getPrintFlag('city') && row.city ? row.city : '';
+}
+
+// הערת הכתובת כשורת כתובת נוספת (למשל בכתובות באנגליה) - בשורה משלה בין הרחוב
+// לעיר, בלי תווית. ערך של רווחים בלבד נחשב ריק, כדי שלא תיווצר שורה ריקה
+export function buildAddressNoteLine(row, getPrintFlag) {
+  const note = String(row.addressNote ?? '').trim();
+  return getPrintFlag('addressNote') && note ? note : '';
 }
 
 // ישראל היא ברירת המחדל (ייבוא אקסל ממלא "ישראל" לנמען בלי ארץ) - אין טעם להדפיס
@@ -381,16 +387,28 @@ export default function PrintPreviewPage() {
                     רחוב/מספר בית אבל יש עיר - משאירים במקומה שורה ריקה באותו גובה (רווח
                     קשיח, כדי שהשורה לא תתכווץ לאפס), כך שהעיר לא "קופצת" מיד מתחת לשם. בלי
                     עיר אין "בין השם לעיר", ולכן גם אין שורה ריקה. ורק אם רחוב/מספר בית בכלל
-                    מסומנים להדפסה ב"ניהול עמודות" - כתובת שהוסתרה בכוונה היא לא "חסרה" */}
+                    מסומנים להדפסה ב"ניהול עמודות" - כתובת שהוסתרה בכוונה היא לא "חסרה".
+                    אם יש הערת כתובת, היא תופסת את מקום השורה הריקה */}
                 {(buildAddressLine1(row, getPrintFlag, printLanguage)
                   || (emptyLineWhenNoAddress
                     && (getPrintFlag('street') || getPrintFlag('houseNo'))
+                    && !buildAddressNoteLine(row, getPrintFlag)
                     && buildAddressLine2(row, getPrintFlag))) && (
                   <Typography
                     variant={layout.addrVariant}
                     sx={detailLineSx}
                   >
                     {buildAddressLine1(row, getPrintFlag, printLanguage) || ' '}
+                  </Typography>
+                )}
+
+                {/* הערת הכתובת - שורת כתובת נוספת בין הרחוב לעיר, בלי תווית */}
+                {buildAddressNoteLine(row, getPrintFlag) && (
+                  <Typography
+                    variant={layout.addrVariant}
+                    sx={detailLineSx}
+                  >
+                    {buildAddressNoteLine(row, getPrintFlag)}
                   </Typography>
                 )}
 
