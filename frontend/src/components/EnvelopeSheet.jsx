@@ -11,6 +11,7 @@ import {
   EXTRA_PRINT_FIELDS,
   buildAddressLine1,
   buildAddressLine2,
+  buildAddressNoteLine,
   buildCountryLine,
   buildNameLine,
   detectPrintLanguage,
@@ -28,10 +29,12 @@ export function getRecipientLines(row, getPrintFlag, textOptions) {
   const fullNameLine = buildNameLine(row, getPrintFlag, printLanguage, englishSalutation);
   const { greetingLine, nameLine } = splitHebrewGreeting(fullNameLine, printLanguage, greetingShow, greetingSeparateLine);
   const addressLine = buildAddressLine1(row, getPrintFlag, printLanguage);
+  const noteLine = buildAddressNoteLine(row, getPrintFlag);
   const cityLine = buildAddressLine2(row, getPrintFlag);
   const countryLine = buildCountryLine(row, getPrintFlag);
+  // הערת כתובת תופסת את מקום השורה הריקה, כמו במדבקות
   const keepEmptyAddressLine = !addressLine && emptyLineWhenNoAddress
-    && (getPrintFlag('street') || getPrintFlag('houseNo')) && cityLine;
+    && (getPrintFlag('street') || getPrintFlag('houseNo')) && !noteLine && cityLine;
 
   const lines = [];
   if (printLanguage === 'en' && hasHebrewEnglishSalutation(englishSalutation) && fullNameLine) {
@@ -41,6 +44,7 @@ export function getRecipientLines(row, getPrintFlag, textOptions) {
   if (nameLine) lines.push({ key: 'name', kind: 'name', text: nameLine });
   // שורה ריקה עם רווח קשיח (NBSP) ולא רווח רגיל, כדי שתשמור את הגובה שלה
   if (addressLine || keepEmptyAddressLine) lines.push({ key: 'address', kind: 'detail', text: addressLine || ' ' });
+  if (noteLine) lines.push({ key: 'addressNote', kind: 'detail', text: noteLine });
   if (cityLine) lines.push({ key: 'city', kind: 'detail', text: cityLine });
   if (countryLine) lines.push({ key: 'country', kind: 'detail', text: countryLine });
   EXTRA_PRINT_FIELDS.forEach(({ field, labels }) => {
