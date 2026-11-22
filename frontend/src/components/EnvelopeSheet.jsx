@@ -19,7 +19,7 @@ import {
   splitHebrewGreeting,
 } from '../pages/PrintPreviewPage';
 import { REFERENCE_RECIPIENT_LINES } from '../utils/envelopeLayout';
-import { getAddressFontFamily } from '../fonts/fonts';
+import { getAddressFontFamily, getAddressTextStyle } from '../fonts/fonts';
 
 // השורות של נמען, לפי הסדר שבו הן מודפסות. kind קובע את הגודל: salutation, greeting ו-name
 // בגודל שם, detail בגודל פרטים. המקום היחיד שמחליט אילו שורות יש - גם הרינדור וגם ספירת
@@ -90,11 +90,12 @@ function boxStyle(rect) {
   return { position: 'absolute', left: mm(rect.x), top: mm(rect.y), width: mm(rect.width), height: mm(rect.height) };
 }
 
-function textLineStyle(fontSizePx, fontWeight, color, textAlign = 'center') {
+// צבע ו-font-synthesis משותפים לכל כתובת מודפסת (getAddressTextStyle ב-fonts.js)
+function textLineStyle(fontSizePx, fontWeight, textAlign = 'center') {
   return {
+    ...getAddressTextStyle(),
     fontSize: `${fontSizePx}px`,
     fontWeight,
-    color,
     lineHeight: LABEL_LINE_HEIGHT,
     textAlign,
     unicodeBidi: 'plaintext',
@@ -107,8 +108,8 @@ function RecipientText({ row, typography, textOptions, getPrintFlag, verticalAli
   const { printLanguage, lines } = getRecipientLines(row, getPrintFlag, textOptions);
   const { greetingAlign } = textOptions;
 
-  const nameStyle = { ...textLineStyle(typography.namePx, typography.fontWeight, '#000000'), marginBottom: 2 };
-  const detailStyle = textLineStyle(typography.linePx, typography.fontWeight, '#333333');
+  const nameStyle = { ...textLineStyle(typography.namePx, typography.fontWeight), marginBottom: 2 };
+  const detailStyle = textLineStyle(typography.linePx, typography.fontWeight);
   const lineStyles = {
     salutation: { ...nameStyle, marginBottom: 0 },
     greeting: {
@@ -157,8 +158,8 @@ function SenderText({ sender, typography, textAlign }) {
   const addressLine = buildAddressLine1(sender, printEverything, printLanguage);
   const cityLine = [sender.city, sender.zip].map((part) => String(part ?? '').trim()).filter(Boolean).join(' ');
   const countryLine = String(sender.country ?? '').trim();
-  const nameStyle = textLineStyle(typography.namePx, typography.fontWeight, '#000000', textAlign);
-  const detailStyle = textLineStyle(typography.linePx, typography.fontWeight, '#333333', textAlign);
+  const nameStyle = textLineStyle(typography.namePx, typography.fontWeight, textAlign);
+  const detailStyle = textLineStyle(typography.linePx, typography.fontWeight, textAlign);
 
   return (
     <div

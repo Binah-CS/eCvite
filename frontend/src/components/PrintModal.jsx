@@ -26,7 +26,7 @@ import {
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
 import { MODAL_TEXTS } from '../pages/HardCodePage';
 import FontSelect from './FontSelect';
-import { DEFAULT_FONT_ID, getFontScriptWarning, normalizeEnglishFontId, normalizeFontId, normalizeFontPair } from '../fonts/fonts';
+import { DEFAULT_FONT_ID, getFontScriptWarning, isFontWeight, normalizeEnglishFontId, normalizeFontId, normalizeFontPair, resolveFontWeight } from '../fonts/fonts';
 import { getSenderMode } from '../utils/envelopeFormats';
 import {
   getScaledLabelSizes,
@@ -258,9 +258,10 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     initialLabelSize === 'custom' ? getCustomLabelLayout(customFormat)?.height : undefined
   ));
 
-  // 6. עובי כתב לכל המדבקה, כולל השם - "רגיל" או "מודגש"
+  // 6. עובי כתב לכל הכתובת, כולל השם - "רגיל" או "מודגש". null = עוד לא נבחר ואין ערך שמור:
+  // אז העובי בפועל הוא ברירת המחדל של סוג ההדפסה (effectiveFontWeight, ר' resolveFontWeight)
   const [fontWeight, setFontWeight] = useState(() =>
-    initialChoice('savedFontWeight', 'fontWeight', (v) => v === 'regular' || v === 'bold', 'regular'));
+    initialChoice('savedFontWeight', 'fontWeight', isFontWeight, null));
 
   const [englishSalutation, setEnglishSalutation] = useState(() => {
     const saved = typeof window !== 'undefined' ? sessionStorage.getItem('savedEnglishSalutation') || '' : '';
@@ -313,6 +314,8 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
   // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
   // ייפתח אצלה עם הבחירות האלה. לא מחכים לתשובה - ההדפסה לא תלויה בשמירה
+  // fontWeight נשמר כפי שנבחר: null כשלא נבחר, כדי שמשתמשת שלא בחרה עובי תקבל גם בפעם
+  // הבאה את ברירת המחדל של סוג ההדפסה (ולא את 'regular' של המדבקות גם במעטפות)
   const rememberChoices = () => {
     saveLabelPrintSettings({ fontType, englishFontType, labelSize, customFormat, printer, deliveryMethod, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign });
   };
@@ -329,6 +332,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
   const [printType, setPrintType] = useState(returningToEnvelopes ? 'envelopes' : 'labels');
   const isEnvelopes = printType === 'envelopes';
+  const effectiveFontWeight = resolveFontWeight(fontWeight, printType);
   const [notification, setNotification] = useState('');
 
   // גודל הכתב משותף לשני סוגי ההדפסה, אבל התקרה שלו נגזרת ממה שמדפיסים עליו
@@ -384,10 +388,12 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const goToEnvelopes = (autoPrint) => {
     // בחירת המדפסת נזכרת כמו במדבקות. שאר הבחירות השמורות של המדבקות נשארות כמו שהן
     saveLabelPrintSettings({ ...loadLabelPrintSettings(), printer, deliveryMethod });
-    const textStyle = { fontType, englishFontType, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
+    const textStyle = { fontType, englishFontType, fontScale, fontWeight: effectiveFontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
     saveSelectedRows(rowsToPrint);
     navigate('/print-envelopes', {
-      state: { selectedItems: rowsToPrint, envelopeSettings, ...textStyle, printer, deliveryMethod, englishSalutation: selectedEnglishSalutation, autoPrint },
+      // fontWeightChoice: הבחירה עצמה (null = לא נבחר), כדי ש"שינוי הגדרות הדפסה" לא ישמור
+      // את ברירת המחדל כאילו נבחרה (ר' saveFontWeightForReturn)
+      state: { selectedItems: rowsToPrint, envelopeSettings, ...textStyle, fontWeightChoice: fontWeight, printer, deliveryMethod, englishSalutation: selectedEnglishSalutation, autoPrint },
     });
   };
 
@@ -419,7 +425,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     saveSelectedRows(rowsToPrint);
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, englishFontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, englishFontType, deliveryMethod, fontScale, fontWeight: effectiveFontWeight, fontWeightChoice: fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
@@ -450,7 +456,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     }
     rememberChoices();
     saveSelectedRows(rowsToPrint);
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, englishFontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign } });
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, englishFontType, deliveryMethod, fontScale, fontWeight: effectiveFontWeight, fontWeightChoice: fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign } });
   };
 
   return (
@@ -541,7 +547,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <RadioGroup
                     row
-                    value={fontWeight}
+                    value={effectiveFontWeight}
                     onChange={(e) => setFontWeight(e.target.value)}
                     sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
                   >
@@ -710,7 +716,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                     width={ENVELOPE_PREVIEW_WIDTH}
                     layout={buildEnvelopeLayout(
                       envelopeSettings,
-                      { fontType, englishFontType, fontScale, fontWeight },
+                      { fontType, englishFontType, fontScale, fontWeight: effectiveFontWeight },
                       {
                         recipientLanguage: detectPrintLanguage(previewRow, envelopePrintFlag),
                         recipientLines: countRecipientLines([previewRow], envelopePrintFlag, envelopeTextOptions),

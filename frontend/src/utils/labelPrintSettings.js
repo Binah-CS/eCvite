@@ -1,4 +1,15 @@
 import api from '../services/api';
+import { isFontWeight } from '../fonts/fonts';
+
+export const SAVED_FONT_WEIGHT_KEY = 'savedFontWeight';
+
+// "שינוי הגדרות הדפסה" (מדבקות ומעטפות): העובי נשמר לחזרה רק אם המשתמשת בחרה אותו במפורש.
+// בלי בחירה (null) לא נשמר כלום - כך החלון ממשיך לתת את ברירת המחדל של סוג ההדפסה (ר'
+// resolveFontWeight), גם אם עוברים בינתיים ממדבקות למעטפות או להפך
+export function saveFontWeightForReturn(choice) {
+  if (isFontWeight(choice)) sessionStorage.setItem(SAVED_FONT_WEIGHT_KEY, choice);
+  else sessionStorage.removeItem(SAVED_FONT_WEIGHT_KEY);
+}
 
 // הבחירות האחרונות של המשתמשת המחוברת בחלון "הדפסת מדבקות" (נשמרות בשרת אצלה,
 // User.labelPrintSettings - בדיוק כמו columnPreferences לתצוגת הטבלה). אובייקט ריק

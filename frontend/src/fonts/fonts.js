@@ -90,6 +90,33 @@ export function getAddressFontFamily(language, primaryId, englishId = '') {
     : `${primary.family}, ${english.family}, ${primary.fallback}`;
 }
 
+// עובי הכתב שנבחר בחלון ההדפסה. בלי בחירה (ואין ערך שמור) - ברירת המחדל לפי סוג ההדפסה:
+// מעטפות מודגש, כדי שהכתובת תבלוט על המעטפה. מדבקות נשארות רגיל
+export const FONT_WEIGHTS = ['regular', 'bold'];
+const DEFAULT_FONT_WEIGHT_BY_PRINT_TYPE = { envelopes: 'bold' };
+
+export function isFontWeight(value) {
+  return FONT_WEIGHTS.includes(value);
+}
+
+export function getDefaultFontWeight(printType) {
+  return DEFAULT_FONT_WEIGHT_BY_PRINT_TYPE[printType] ?? 'regular';
+}
+
+// הבחירה אם יש (גם 'regular' שנשמר בעבר נשאר), ואחרת ברירת המחדל של סוג ההדפסה
+export function resolveFontWeight(chosen, printType) {
+  return isFontWeight(chosen) ? chosen : getDefaultFontWeight(printType);
+}
+
+// הסגנון המשותף לכל שורה של כתובת מודפסת (נמען ושולח, מעטפות ומדבקות), מעבר לגודל ולעובי.
+// שחור מלא - אפור יוצא במדפסת דיו כנקודות צבע וחיוור. font-synthesis: none - כתב בלי משקל 700
+// (Suez One, Secular One, Parisienne, גברת לוין) מודפס במשקל שלו ולא בהדגשה מלאכותית של הדפדפן
+export const ADDRESS_TEXT_COLOR = '#000000';
+
+export function getAddressTextStyle() {
+  return { color: ADDRESS_TEXT_COLOR, fontSynthesis: 'none' };
+}
+
 const SCRIPT_WARNINGS = {
   he: 'יש כתובות בעברית, ואף אחד מהכתבים שנבחרו לא תומך בעברית - הן יודפסו בכתב ברירת מחדל.',
   en: 'יש כתובות באנגלית, ואף אחד מהכתבים שנבחרו לא תומך באנגלית - הן יודפסו בכתב ברירת מחדל. אפשר לבחור "כתב לאנגלית".',
@@ -111,7 +138,7 @@ const FONT_LOAD_TIMEOUT_MS = 3000;
 
 // פותח את חלון ההדפסה רק אחרי שהכתבים של ההדפסה ירדו - אחרת הדפסה ישירה (autoPrint)
 // יוצאת בכתב ברירת מחדל. אם הטעינה נתקעת, מדפיסים בכל זאת אחרי FONT_LOAD_TIMEOUT_MS
-export function printWhenFontsReady({ fontType, englishFontType = '', fontWeight = 'regular' } = {}) {
+export function printWhenFontsReady({ fontType, englishFontType = '', fontWeight } = {}) {
   const fontSet = typeof document !== 'undefined' ? document.fonts : null;
   if (!fontSet) {
     window.print();

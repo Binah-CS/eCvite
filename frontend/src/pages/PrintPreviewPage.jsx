@@ -12,7 +12,8 @@ import {
 } from '../utils/labelSheetLayout';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 import { getCustomLabelLayout } from '../utils/labelFormats';
-import { getAddressFontFamily, normalizeFontPair, printWhenFontsReady } from '../fonts/fonts';
+import { saveFontWeightForReturn } from '../utils/labelPrintSettings';
+import { getAddressFontFamily, getAddressTextStyle, normalizeFontPair, printWhenFontsReady } from '../fonts/fonts';
 
 function getLoggedUser() {
   const raw = sessionStorage.getItem('user');
@@ -159,7 +160,7 @@ export default function PrintPreviewPage() {
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-  const { selectedRows = [], selectedItems = [], labelSize = 'standard', customFormat, printer = '', fontType: receivedFontType, englishFontType: receivedEnglishFontType, deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', autoPrint = false } = location.state || {};
+  const { selectedRows = [], selectedItems = [], labelSize = 'standard', customFormat, printer = '', fontType: receivedFontType, englishFontType: receivedEnglishFontType, deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', fontWeightChoice = null, englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', autoPrint = false } = location.state || {};
   // ids מ-fonts.js: כתב לעברית וכתב לאנגלית. ערך ישן או חסר מתורגם (ר' normalizeFontPair)
   const { fontType, englishFontType } = normalizeFontPair(receivedFontType, receivedEnglishFontType);
   const printLabels = () => printWhenFontsReady({ fontType, englishFontType, fontWeight });
@@ -191,12 +192,15 @@ export default function PrintPreviewPage() {
     : greetingAlign === 'left'
       ? { marginInlineEnd: '1mm' }
       : {};
+  // צבע ו-font-synthesis משותפים לכל כתובת מודפסת (getAddressTextStyle ב-fonts.js)
   const nameLineSx = {
-    fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
+    ...getAddressTextStyle(),
+    fontWeight: labelFontWeight, mb: 0.25, textAlign: 'center', fontFamily: 'inherit',
     lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
   };
   const detailLineSx = {
-    color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: LABEL_LINE_HEIGHT,
+    ...getAddressTextStyle(),
+    textAlign: 'center', fontFamily: 'inherit', lineHeight: LABEL_LINE_HEIGHT,
     fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
   };
 
@@ -281,7 +285,8 @@ export default function PrintPreviewPage() {
                sessionStorage.setItem('savedEnglishFontType', englishFontType);
                sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
                sessionStorage.setItem('savedFontScale', String(fontScale));
-               sessionStorage.setItem('savedFontWeight', fontWeight);
+               // רק עובי שנבחר במפורש, ולא ברירת המחדל שהודפסה (ר' saveFontWeightForReturn)
+               saveFontWeightForReturn(fontWeightChoice);
                sessionStorage.setItem('savedEnglishSalutation', englishSalutation);
                sessionStorage.setItem('savedEmptyLineWhenNoAddress', String(emptyLineWhenNoAddress));
                sessionStorage.setItem('savedGreetingShow', String(greetingShow));

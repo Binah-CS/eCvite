@@ -8,7 +8,40 @@ import {
   normalizeEnglishFontId,
   normalizeFontId,
   normalizeFontPair,
+  getAddressTextStyle,
+  getDefaultFontWeight,
+  resolveFontWeight,
 } from './fonts';
+
+describe('font weight', () => {
+  test('envelopes default to bold and labels stay regular', () => {
+    expect(getDefaultFontWeight('envelopes')).toBe('bold');
+    expect(getDefaultFontWeight('labels')).toBe('regular');
+    expect(getDefaultFontWeight(undefined)).toBe('regular');
+  });
+
+  test('without a choice the default of the print type is used', () => {
+    expect(resolveFontWeight(null, 'envelopes')).toBe('bold');
+    expect(resolveFontWeight(undefined, 'envelopes')).toBe('bold');
+    expect(resolveFontWeight(null, 'labels')).toBe('regular');
+  });
+
+  test('a saved or chosen weight is kept, including regular on envelopes', () => {
+    expect(resolveFontWeight('regular', 'envelopes')).toBe('regular');
+    expect(resolveFontWeight('bold', 'labels')).toBe('bold');
+  });
+
+  test('an unknown value falls back to the default', () => {
+    expect(resolveFontWeight('heavy', 'envelopes')).toBe('bold');
+    expect(resolveFontWeight('', 'labels')).toBe('regular');
+  });
+});
+
+describe('getAddressTextStyle', () => {
+  test('prints in solid black without synthetic bold', () => {
+    expect(getAddressTextStyle()).toEqual({ color: '#000000', fontSynthesis: 'none' });
+  });
+});
 
 describe('the font list', () => {
   test('every font has a unique id, a known category and at least one script', () => {
