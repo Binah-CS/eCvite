@@ -7,6 +7,7 @@ import {
   getFontScriptWarning,
   normalizeEnglishFontId,
   normalizeFontId,
+  normalizeFontPair,
 } from './fonts';
 
 describe('the font list', () => {
@@ -57,6 +58,11 @@ describe('normalizeFontId', () => {
     expect(normalizeEnglishFontId('nope')).toBe('');
     expect(normalizeEnglishFontId('parisienne')).toBe('parisienne');
   });
+
+  test('a font without English letters is not a valid English font', () => {
+    expect(normalizeEnglishFontId('gveret-levin')).toBe('');
+    expect(normalizeEnglishFontId('David, serif')).toBe('david');
+  });
 });
 
 describe('getAddressFontFamily', () => {
@@ -94,12 +100,42 @@ describe('getFontScriptWarning', () => {
     expect(getFontScriptWarning('gveret-levin')).toMatch('אנגלית');
   });
 
-  test('English-only with an English-only English font warns about Hebrew', () => {
-    expect(getFontScriptWarning('parisienne', 'dancing-script')).toMatch('עברית');
+  test('an old English-only primary font is moved to the English field, so Hebrew has a font', () => {
+    expect(getFontScriptWarning('parisienne')).toBeNull();
+    expect(getFontScriptWarning('parisienne', 'dancing-script')).toBeNull();
   });
 
   test('a combination that covers both scripts needs no warning', () => {
     expect(getFontScriptWarning('gveret-levin', 'parisienne')).toBeNull();
     expect(getFontScriptWarning('parisienne', 'heebo')).toBeNull();
+  });
+
+  test('only languages that actually have addresses are checked', () => {
+    expect(getFontScriptWarning('gveret-levin', '', ['he'])).toBeNull();
+    expect(getFontScriptWarning('gveret-levin', '', ['he', 'en'])).toMatch('אנגלית');
+    expect(getFontScriptWarning('noto-rashi-hebrew', 'parisienne', ['he', 'en'])).toBeNull();
+    expect(getFontScriptWarning('gveret-levin', '', [])).toBeNull();
+  });
+});
+
+describe('normalizeFontPair', () => {
+  test('a valid Hebrew font and English font stay as they are', () => {
+    expect(normalizeFontPair('gveret-levin', 'parisienne')).toEqual({ fontType: 'gveret-levin', englishFontType: 'parisienne' });
+    expect(normalizeFontPair('heebo', '')).toEqual({ fontType: 'heebo', englishFontType: '' });
+  });
+
+  test('a saved primary font without Hebrew moves to an empty English field', () => {
+    expect(normalizeFontPair('parisienne', '')).toEqual({ fontType: DEFAULT_FONT_ID, englishFontType: 'parisienne' });
+    expect(normalizeFontPair('dancing-script', undefined)).toEqual({ fontType: DEFAULT_FONT_ID, englishFontType: 'dancing-script' });
+  });
+
+  test('an English font that was already chosen is kept', () => {
+    expect(normalizeFontPair('parisienne', 'heebo')).toEqual({ fontType: DEFAULT_FONT_ID, englishFontType: 'heebo' });
+  });
+
+  test('old saved values and unknown values', () => {
+    expect(normalizeFontPair('David, serif', '')).toEqual({ fontType: 'david', englishFontType: '' });
+    expect(normalizeFontPair('"Courier New", monospace', 'nope')).toEqual({ fontType: 'courier-new', englishFontType: '' });
+    expect(normalizeFontPair(undefined, 'gveret-levin')).toEqual({ fontType: DEFAULT_FONT_ID, englishFontType: '' });
   });
 });

@@ -10,7 +10,7 @@ import { loadInitialEnvelopeSettings, saveEnvelopeSettingsForReturn } from '../u
 import { FONT_SCALE_DEFAULT } from '../utils/labelSheetLayout';
 import { detectPrintLanguage, getSavedSelectedRows, saveSelectedRows } from './PrintPreviewPage';
 import { MODAL_TEXTS } from './HardCodePage';
-import { normalizeFontId, printWhenFontsReady } from '../fonts/fonts';
+import { normalizeFontPair, printWhenFontsReady } from '../fonts/fonts';
 
 const SHEET_CLASS = 'envelope-print-sheet';
 const PREVIEW_WIDTH = 640;
@@ -35,6 +35,7 @@ export default function EnvelopePrintPage() {
     selectedItems = [],
     envelopeSettings,
     fontType: receivedFontType,
+    englishFontType: receivedEnglishFontType,
     fontScale = FONT_SCALE_DEFAULT,
     fontWeight = 'regular',
     englishSalutation = '',
@@ -46,12 +47,12 @@ export default function EnvelopePrintPage() {
     deliveryMethod = 'courier',
     autoPrint = false,
   } = location.state || {};
-  // id מ-fonts.js. ערך ישן או חסר מתורגם (ברירת המחדל - Arial)
-  const fontType = normalizeFontId(receivedFontType);
+  // ids מ-fonts.js: כתב לעברית וכתב לאנגלית. ערך ישן או חסר מתורגם (ר' normalizeFontPair)
+  const { fontType, englishFontType } = normalizeFontPair(receivedFontType, receivedEnglishFontType);
 
   const rows = selectedItems.length > 0 ? selectedItems : getSavedSelectedRows();
   const settings = envelopeSettings ?? loadInitialEnvelopeSettings();
-  const textStyle = { fontType, fontScale, fontWeight };
+  const textStyle = { fontType, englishFontType, fontScale, fontWeight };
   const textOptions = { englishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
   const getPrintFlag = createPrintFlagGetter();
   // הכתב אחד לכל ההדפסה, לפי השורות של כל הנמענים. הפריסה של כל מעטפה נבנית לפי הנמען
@@ -92,6 +93,7 @@ export default function EnvelopePrintPage() {
     sessionStorage.setItem('savedPrinter', printer);
     sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
     sessionStorage.setItem('savedFontType', fontType);
+    sessionStorage.setItem('savedEnglishFontType', englishFontType);
     sessionStorage.setItem('savedFontScale', String(fontScale));
     sessionStorage.setItem('savedFontWeight', fontWeight);
     sessionStorage.setItem('savedEnglishSalutation', englishSalutation);

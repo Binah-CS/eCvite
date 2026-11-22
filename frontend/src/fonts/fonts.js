@@ -59,9 +59,23 @@ export function normalizeFontId(value, fallback = DEFAULT_FONT_ID) {
   return legacy ? legacy.id : fallback;
 }
 
-// הכתב לאנגלית הוא אופציונלי: '' (או ערך לא מוכר) = "כמו הכתב הראשי"
+// הכתב לאנגלית הוא אופציונלי: '' (או ערך לא מוכר, או כתב בלי אנגלית) = "כמו הכתב הראשי"
 export function normalizeEnglishFontId(value) {
-  return normalizeFontId(value, '');
+  const id = normalizeFontId(value, '');
+  return supportsScript(getFont(id), 'en') ? id : '';
+}
+
+// שני השדות לפי שפה: fontType הוא הכתב לעברית (חייב לתמוך בעברית), englishFontType הכתב
+// לאנגלית ('' = כמו העברית). תאימות: כתב בלי עברית שנשמר פעם כראשי עובר לשדה האנגלית (אם
+// הוא ריק), והשדה הראשי חוזר לברירת המחדל
+export function normalizeFontPair(primaryValue, englishValue) {
+  let fontType = normalizeFontId(primaryValue);
+  let englishFontType = normalizeEnglishFontId(englishValue);
+  if (!supportsScript(getFont(fontType), 'he')) {
+    if (englishFontType === '') englishFontType = normalizeEnglishFontId(fontType);
+    fontType = DEFAULT_FONT_ID;
+  }
+  return { fontType, englishFontType };
 }
 
 // ה-font-family של כתובת אחת לפי השפה שלה (detectPrintLanguage). הכתב של השפה השנייה הוא
@@ -77,14 +91,17 @@ export function getAddressFontFamily(language, primaryId, englishId = '') {
 }
 
 const SCRIPT_WARNINGS = {
-  he: 'אף אחד מהכתבים שנבחרו לא תומך בעברית - עברית תודפס בכתב ברירת מחדל.',
-  en: 'אף אחד מהכתבים שנבחרו לא תומך באנגלית - אנגלית תודפס בכתב ברירת מחדל. אפשר לבחור "כתב לאנגלית".',
+  he: 'יש כתובות בעברית, ואף אחד מהכתבים שנבחרו לא תומך בעברית - הן יודפסו בכתב ברירת מחדל.',
+  en: 'יש כתובות באנגלית, ואף אחד מהכתבים שנבחרו לא תומך באנגלית - הן יודפסו בכתב ברירת מחדל. אפשר לבחור "כתב לאנגלית".',
 };
 
-// אזהרה לכל שפה שאף אחד מהכתבים שנבחרו לא תומך בה, או null
-export function getFontScriptWarning(primaryId, englishId = '') {
-  const chosen = [getFont(normalizeFontId(primaryId)), getFont(normalizeEnglishFontId(englishId))].filter(Boolean);
-  const missing = Object.keys(SCRIPT_WARNINGS).filter((script) => !chosen.some((font) => supportsScript(font, script)));
+// אזהרה לכל שפה שיש בה כתובות להדפסה (languages, לפי detectPrintLanguage) ואף אחד
+// מהכתבים שנבחרו לא תומך בה, או null. בלי languages - בודקים את שתי השפות
+export function getFontScriptWarning(primaryId, englishId = '', languages = Object.keys(SCRIPT_WARNINGS)) {
+  const { fontType, englishFontType } = normalizeFontPair(primaryId, englishId);
+  const chosen = [getFont(fontType), getFont(englishFontType)].filter(Boolean);
+  const missing = Object.keys(SCRIPT_WARNINGS).filter((script) => languages.includes(script)
+    && !chosen.some((font) => supportsScript(font, script)));
   return missing.length ? missing.map((script) => SCRIPT_WARNINGS[script]).join(' ') : null;
 }
 

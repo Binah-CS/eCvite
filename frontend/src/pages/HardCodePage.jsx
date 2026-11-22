@@ -16,7 +16,9 @@ export const MODAL_TEXTS = {
   LISTS_OPTION: "רשימות",
   
   STEP_2_TITLE: "הגדרות הדפסה (מדבקות)",
-  FONT_INPUT_LABEL: "בחירת כתב",
+  FONT_INPUT_LABEL: "כתב לעברית",
+  FONT_ENGLISH_INPUT_LABEL: "כתב לאנגלית",
+  FONT_ENGLISH_SAME_AS_PRIMARY: "כמו העברית",
   FONT_SIZE_INPUT_LABEL: "גודל כתב",
   FONT_WEIGHT_INPUT_LABEL: "עובי כתב",
   FONT_WEIGHT_REGULAR: "רגיל",
