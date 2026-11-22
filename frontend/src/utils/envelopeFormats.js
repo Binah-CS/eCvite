@@ -80,8 +80,9 @@ function toPositiveNumber(value) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
-// טווח המידות המותאמות. המינימום מבטיח שהכתב המינימלי תמיד נכנס בגובה (גם עם שולח בפינה
-// והרבה שורות לנמען). המקסימום תופס בעיקר הקלדה שגויה (1840 במקום 184)
+// טווח המידות המותאמות. במינימום, כתובת רגילה (עד שם + 4 שורות) נכנסת בגודל הכתב המינימלי
+// גם עם שולח בפינה; נמען עם הרבה עמודות נוספות יכול לגלוש, ואז יש אזהרה (ר'
+// getEnvelopeFontScaleRange). המקסימום תופס בעיקר הקלדה שגויה (1840 במקום 184)
 export const MIN_ENVELOPE_WIDTH_MM = 110;
 export const MIN_ENVELOPE_HEIGHT_MM = 80;
 export const MAX_ENVELOPE_WIDTH_MM = 350;

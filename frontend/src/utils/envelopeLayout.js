@@ -3,7 +3,7 @@
 //
 // התוצאה היא רשימת "מעברים" (passes): כל מעבר הוא דף אחד שעובר במדפסת לכל נמען.
 // none, openFlap ו-frontCorner צריכים מעבר אחד; הדפסה בשני מעברים (twoPass) תחזיר שניים.
-import { LABEL_LINE_HEIGHT, FONT_SCALE_MIN, FONT_SCALE_DEFAULT, FONT_SCALE_STEP } from './labelSheetLayout';
+import { FONT_SCALE_MIN, FONT_SCALE_DEFAULT, FONT_SCALE_STEP } from './labelSheetLayout';
 import {
   FLAP_SHAPES,
   MAX_SENDERS,
@@ -21,15 +21,23 @@ const FOLD_GAP_MM = 3; // מרחק הטקסט מקו הקיפול
 const SENDER_COLUMN_GAP_MM = 4;
 const TRIANGLE_SIDE_INSET_MM = 2;
 
+// גודל הכתב. הבסיס (100%) נקבע ב-pt למעטפה בגובה REFERENCE_HEIGHT_MM, ומשתנה עם גובה
+// המעטפה. מעליו הבחירה של המשתמשת, בתוך גבולות מוחלטים ב-pt (ר' getEnvelopeFontScaleRange)
+const PX_PER_PT = 96 / 72;
+const pt = (value) => value * PX_PER_PT;
 const REFERENCE_HEIGHT_MM = 133; // גובה המעטפה הסטנדרטית, שלפיו נקבע גודל הכתב הבסיסי
-const BASE_NAME_PX = 18;
-const BASE_LINE_PX = 15;
+const BASE_NAME_PX = pt(14);
+const BASE_LINE_PX = pt(12);
 const MIN_FONT_RATIO = 0.6;
 const MAX_FONT_RATIO = 1.4;
+export const RECIPIENT_MIN_LINE_PX = pt(10); // שורות הכתובת של הנמען לא קטנות מזה
+export const RECIPIENT_MAX_NAME_PX = pt(18); // שם הנמען לא גדל מעבר לזה
+export const SENDER_MIN_LINE_PX = pt(8); // שורות השולח לא קטנות מזה, גם כשהוא לא נכנס (אז יש אזהרה)
+// ריווח השורות במעטפה. נפרד מהמדבקות (LABEL_LINE_HEIGHT), כדי ששינוי כאן לא יזיז אותן
+export const ENVELOPE_LINE_HEIGHT = 1.25;
 const NAME_LINE_MARGIN_PX = 2;
-const ENVELOPE_FONT_SCALE_MAX = 200; // התקרה לפי גובה לא מתחשבת ברוחב השורה
+const ENVELOPE_FONT_SCALE_MAX = 200; // גבול לבחירה השמורה. הגבול בפועל הוא ב-pt
 const SENDER_EXTRA_MM = 1; // תוספת ביטחון לגובה השולח
-const SENDER_LIMIT_RECIPIENT_SCALE = 140; // השולח לא גדל מעבר לגודל שלו כשהנמען ב-140%
 
 // כמה שורות יש בבלוק: בגודל שם (שם, "לכבוד" בשורה נפרדת, פנייה באנגלית) ובגודל פרטים.
 // לנמען זה נספר מהנמענים בפועל (countRecipientLines ב-EnvelopeSheet), ובלעדיהם זו ההנחה
@@ -41,8 +49,6 @@ const CORNER_WIDTH_RATIO = 0.45; // החלק מרוחב החזית שהשולח 
 export const CORNER_MIN_SENDER_WIDTH_MM = 60; // במעטפה צרה, כדי ששורות השולח לא יישברו
 export const CORNER_STAMP_MIN_MM = 25; // המקום שתמיד נשאר לבול בפינה הנגדית
 const CORNER_BOTTOM_GAP_RATIO = 0.1;
-
-export const SENDER_FONT_FACTOR = 0.8;
 
 export function getEnvelopeMargin({ widthMm, heightMm }) {
   return Math.max(MIN_MARGIN_MM, Math.min(widthMm, heightMm) * MARGIN_RATIO);
@@ -58,23 +64,15 @@ function getEnvelopeFontBase(heightMm) {
   return { name: BASE_NAME_PX * ratio, line: BASE_LINE_PX * ratio };
 }
 
-// הגודל המקסימלי של כתב השולח, כגודל שהוא מקבל כשהנמען ב-X% באותה מעטפה. X הוא לכל היותר
-// SENDER_LIMIT_RECIPIENT_SCALE, כך שנמען גדול מאוד לא מגדיל את השולח מעבר למה שסביר.
-// על הלשונית (flapDepthMm) השולח צריך גם להיכנס בעומק שלה: הלשונית נפרדת מהחזית, ולכן היא
-// מגבילה רק את השולח ולא את הנמען. X יורד בצעדים של המונה עד שהשולח נכנס, אבל לא מתחת
-// למינימום - שם הגלישה מקבלת אזהרה
+// הגודל המקסימלי של כתב השולח על הלשונית: הגדול ביותר שבו 4 השורות שלו נכנסות בעומק
+// הלשונית. הלשונית נפרדת מהחזית, ולכן היא מגבילה רק את השולח ולא את הנמען. הגובה ליניארי
+// בגודל, ולכן זה חישוב ישיר. null כשהשולח לא על הלשונית (אז רק היחס של המצב קובע)
 export function getSenderTypographyLimit(dimensions, flapDepthMm = null) {
+  if (flapDepthMm === null) return null;
   const base = getEnvelopeFontBase(dimensions.heightMm);
-  const senderAt = (scale) => {
-    const factor = (scale / 100) * SENDER_FONT_FACTOR;
-    return { namePx: base.name * factor, linePx: base.line * factor };
-  };
-  if (flapDepthMm === null) return senderAt(SENDER_LIMIT_RECIPIENT_SCALE);
-  const space = getFlapSenderSpaceMm(dimensions, flapDepthMm);
-  for (let scale = SENDER_LIMIT_RECIPIENT_SCALE; scale > FONT_SCALE_MIN; scale -= FONT_SCALE_STEP) {
-    if (estimateSenderHeightMm(senderAt(scale)) <= space) return senderAt(scale);
-  }
-  return senderAt(FONT_SCALE_MIN);
+  const heightPerUnitMm = estimateTextHeightMm({ namePx: base.name, linePx: base.line }, SENDER_LINES);
+  const factor = Math.max(0, getFlapSenderSpaceMm(dimensions, flapDepthMm) - SENDER_EXTRA_MM) / heightPerUnitMm;
+  return { namePx: base.name * factor, linePx: base.line * factor };
 }
 
 // הכתבים נשמרים כ-id (fonts.js). ה-font-family עצמו תלוי בשפת הכתובת, ולכן הוא נקבע
@@ -90,33 +88,42 @@ function getRecipientTypography(dimensions, { fontType, englishFontType = '', fo
   };
 }
 
-// המקום היחיד שקובע את כתב השולח. היום: הכתב של הנמען בהקטנה קבועה, עד limit
-// (getSenderTypographyLimit), ולכן תמיד קטן מהנמען. הגופן והעובי מהנמען. הגדרות נפרדות
+// המקום היחיד שקובע את כתב השולח: הכתב של הנמען כפול היחס של מצב השולח (senderFontFactor
+// ב-SENDER_MODES), ולא יותר מ-limit (הלשונית, getSenderTypographyLimit). אחר כך שורות השולח
+// לא קטנות מ-SENDER_MIN_LINE_PX - גם אם אז הוא לא נכנס, ואז יש אזהרה - והשולח לא גדול
+// מהנמען. השם והשורות גדלים יחד, כך שהיחס ביניהם נשמר. הגופן והעובי מהנמען. הגדרות נפרדות
 // לשולח בעתיד יגיעו דרך override (settings.senderTypography) בלי לשנות שום מקום אחר
-export function resolveSenderTypography(recipientTypography, override = null, limit = null) {
-  const scaled = (px, max) => Math.min(px * SENDER_FONT_FACTOR, max ?? Infinity);
+export function resolveSenderTypography(recipientTypography, { factor = 1, limit = null, override = null } = {}) {
+  const { namePx, linePx } = recipientTypography;
+  let scale = factor;
+  if (limit) scale = Math.min(scale, limit.namePx / namePx, limit.linePx / linePx);
+  scale = Math.min(1, Math.max(scale, SENDER_MIN_LINE_PX / linePx));
   return {
     ...recipientTypography,
-    namePx: scaled(recipientTypography.namePx, limit?.namePx),
-    linePx: scaled(recipientTypography.linePx, limit?.linePx),
+    namePx: namePx * scale,
+    linePx: linePx * scale,
     ...(override || {}),
   };
 }
 
 // הכתב של שני הבלוקים בגודל נתון. גם הפריסה וגם התקרה עוברות כאן, כך שהתקרה בודקת
 // בדיוק את מה שיודפס. flapDepthMm רק כשהשולח על הלשונית
-function getTypographyAt(dimensions, textStyle, scale, { senderOverride = null, flapDepthMm = null } = {}) {
+function getTypographyAt(dimensions, textStyle, scale, { senderMode, senderOverride = null, flapDepthMm = null }) {
   const recipient = getRecipientTypography(dimensions, textStyle, scale);
   return {
     recipient,
-    sender: resolveSenderTypography(recipient, senderOverride, getSenderTypographyLimit(dimensions, flapDepthMm)),
+    sender: resolveSenderTypography(recipient, {
+      factor: SENDER_MODES[senderMode]?.senderFontFactor ?? 1,
+      limit: getSenderTypographyLimit(dimensions, flapDepthMm),
+      override: senderOverride,
+    }),
   };
 }
 
 // הערכת הגובה של בלוק טקסט לפי מספר השורות בכל גודל. שבירת שורות ארוכות לא נספרת -
 // גלישה כזאת מתגלה ב-DOM ומקבלת אזהרה (ר' measureEnvelopeOverflow)
 export function estimateTextHeightMm(typography, { nameLines, detailLines }, extraMm = 0) {
-  return (LABEL_LINE_HEIGHT * (nameLines * typography.namePx + detailLines * typography.linePx)) / MM_TO_PX + extraMm;
+  return (ENVELOPE_LINE_HEIGHT * (nameLines * typography.namePx + detailLines * typography.linePx)) / MM_TO_PX + extraMm;
 }
 
 export function estimateSenderHeightMm(typography) {
@@ -137,7 +144,7 @@ function getFlapSenderSpaceMm(dimensions, flapDepthMm) {
 // יחד מעל הרווח מהתחתית. בלי שולח ובלשונית יש בחזית רק את הנמען, בין השוליים - השולח
 // על הלשונית מוגבל בנפרד, בכתב שלו (getSenderTypographyLimit)
 function fitsAtScale(settings, dimensions, senderMode, recipientLines, scale) {
-  const { recipient, sender } = getTypographyAt(dimensions, {}, scale, { senderOverride: settings.senderTypography });
+  const { recipient, sender } = getTypographyAt(dimensions, {}, scale, { senderMode, senderOverride: settings.senderTypography });
   const margin = getEnvelopeMargin(dimensions);
   const recipientHeight = estimateRecipientHeightMm(recipient, recipientLines);
   if (senderMode === 'frontCorner') {
@@ -147,17 +154,26 @@ function fitsAtScale(settings, dimensions, senderMode, recipientLines, scale) {
   return recipientHeight <= dimensions.heightMm - 2 * margin;
 }
 
-// התקרה של גודל הכתב: הגודל הגדול ביותר (בצעדים של המונה) שבו כל התוכן של החזית נכנס
-// בגובה, לפי השורות של הנמענים בהדפסה. לא יורדת מתחת למינימום, ובטווח המידות המותרות
-// הנמען (והשולח בפינה) תמיד נכנסים במינימום
-export function getEnvelopeFontScaleLimit(settings, recipientLines = REFERENCE_RECIPIENT_LINES) {
+const ceilToStep = (scale) => Math.ceil(scale / FONT_SCALE_STEP - 1e-9) * FONT_SCALE_STEP;
+const floorToStep = (scale) => Math.floor(scale / FONT_SCALE_STEP + 1e-9) * FONT_SCALE_STEP;
+
+// הטווח של גודל הכתב במעטפה הזאת (בצעדים של המונה):
+// min - הגודל הקטן ביותר שבו שורות הנמען לפחות RECIPIENT_MIN_LINE_PX.
+// max - הגדול ביותר שבו שם הנמען עד RECIPIENT_MAX_NAME_PX וכל התוכן של החזית נכנס בגובה,
+//       לפי השורות של הנמענים בהדפסה.
+// כשגם ב-min התוכן לא נכנס (מעטפה נמוכה עם הרבה שורות), max = min: לא מקטינים מתחת למינימום,
+// והגלישה נמדדת ב-DOM ומקבלת אזהרה. בלי מידות תקינות - עד 100%
+export function getEnvelopeFontScaleRange(settings, recipientLines = REFERENCE_RECIPIENT_LINES) {
   const dimensions = resolveEnvelopeDimensions(settings);
-  if (!dimensions) return FONT_SCALE_DEFAULT;
+  if (!dimensions) return { min: FONT_SCALE_MIN, max: FONT_SCALE_DEFAULT };
+  const base = getEnvelopeFontBase(dimensions.heightMm);
+  const min = Math.max(FONT_SCALE_MIN, ceilToStep((100 * RECIPIENT_MIN_LINE_PX) / base.line));
+  const top = Math.min(ENVELOPE_FONT_SCALE_MAX, floorToStep((100 * RECIPIENT_MAX_NAME_PX) / base.name));
   const senderMode = getSenderMode(settings);
-  for (let scale = ENVELOPE_FONT_SCALE_MAX; scale > FONT_SCALE_MIN; scale -= FONT_SCALE_STEP) {
-    if (fitsAtScale(settings, dimensions, senderMode, recipientLines, scale)) return scale;
+  for (let scale = top; scale > min; scale -= FONT_SCALE_STEP) {
+    if (fitsAtScale(settings, dimensions, senderMode, recipientLines, scale)) return { min, max: scale };
   }
-  return FONT_SCALE_MIN;
+  return { min, max: min };
 }
 
 // הבחירה של המשתמשת בלי תלות במידות - לשמירה. התקרה לפי המעטפה מוחלת רק בחישוב
@@ -168,9 +184,10 @@ export function normalizeEnvelopeFontScale(scale) {
   return Math.min(Math.max(value, FONT_SCALE_MIN), ENVELOPE_FONT_SCALE_MAX);
 }
 
-// הכתב שבאמת מודפס: הבחירה, אבל לא מעבר למה שנכנס במעטפה, במצב השולח ובשורות הנמענים
+// הכתב שבאמת מודפס: הבחירה, בתוך הטווח של המעטפה, מצב השולח ושורות הנמענים
 export function getEffectiveEnvelopeFontScale(chosenScale, settings, recipientLines = REFERENCE_RECIPIENT_LINES) {
-  return Math.min(normalizeEnvelopeFontScale(chosenScale), getEnvelopeFontScaleLimit(settings, recipientLines));
+  const { min, max } = getEnvelopeFontScaleRange(settings, recipientLines);
+  return Math.min(Math.max(normalizeEnvelopeFontScale(chosenScale), min), max);
 }
 
 function rectanglePoints(x, y, width, height) {
@@ -309,7 +326,8 @@ export function resolveCornerSide(cornerSide, recipientLanguage) {
 // במרכז כמו בלי שולח, ויורד רק כשהוא היה מגיע לשולח - בדיוק עד CORNER_GAP_MM מתחתיו.
 // אז הוא צמוד לראש המלבן (verticalAlign: 'top'), כך ששורות מעבר להערכה ממשיכות למטה.
 // ההחלטה לפי השורות של הנמען הזה, כך שנמען קצר נשאר במרכז גם כשלאחרים יש יותר שורות.
-// התקרה (getEnvelopeFontScaleLimit) כבר הבטיחה שהשולח והנמען נכנסים יחד בגובה
+// התקרה (getEnvelopeFontScaleRange) כבר הבטיחה שהשולח והנמען נכנסים יחד בגובה, חוץ ממקרה
+// שבו גם בגודל המינימלי הם לא נכנסים - אז התיבה של הנמען נגמרת בשוליים והגלישה מקבלת אזהרה
 function layoutFrontCorner({ dimensions, recipientTypography, senderTypography, recipientLines, side }) {
   const { widthMm, heightMm } = dimensions;
   const margin = getEnvelopeMargin(dimensions);
@@ -350,11 +368,13 @@ function layoutFrontCorner({ dimensions, recipientTypography, senderTypography, 
 }
 
 // מצבי השולח. מצב חדש הוא רשומה חדשה כאן עם פונקציית פריסה משלה. maxSenders הוא מספר
-// השולחים שהמצב מדפיס - שולחים נוספים נשמרים, אבל לא נפרסים ולא נבדקים
+// השולחים שהמצב מדפיס - שולחים נוספים נשמרים, אבל לא נפרסים ולא נבדקים.
+// senderFontFactor - גודל השולח ביחס לנמען. על הלשונית השולח לבד בצד, ולכן קרוב לנמען;
+// בפינה הוא חולק את החזית עם הנמען, שצריך לבלוט יותר (ר' resolveSenderTypography)
 export const SENDER_MODES = {
-  none: { usesFlap: false, maxSenders: 0, buildLayout: layoutRecipientOnly },
-  openFlap: { usesFlap: true, maxSenders: MAX_SENDERS, buildLayout: layoutOpenFlap },
-  frontCorner: { usesFlap: false, maxSenders: 1, buildLayout: layoutFrontCorner },
+  none: { usesFlap: false, maxSenders: 0, senderFontFactor: null, buildLayout: layoutRecipientOnly },
+  openFlap: { usesFlap: true, maxSenders: MAX_SENDERS, senderFontFactor: 0.9, buildLayout: layoutOpenFlap },
+  frontCorner: { usesFlap: false, maxSenders: 1, senderFontFactor: 0.8, buildLayout: layoutFrontCorner },
 };
 
 export function isEnvelopeSettingsReady(settings) {
@@ -391,7 +411,7 @@ export function buildEnvelopeLayout(settings, textStyle, { recipientLanguage, re
     dimensions,
     textStyle,
     scale,
-    { senderOverride: settings.senderTypography, flapDepthMm: mode.usesFlap ? settings.flapDepthMm : null },
+    { senderMode, senderOverride: settings.senderTypography, flapDepthMm: mode.usesFlap ? settings.flapDepthMm : null },
   );
   const layout = mode.buildLayout({
     dimensions,

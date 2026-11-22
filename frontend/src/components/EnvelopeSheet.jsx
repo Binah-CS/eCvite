@@ -5,7 +5,6 @@
 // כל הקואורדינטות כאן ב-style רגיל ולא ב-sx בכוונה: מטמון ה-RTL של MUI (rtl.js) הופך
 // left/right ו-translate ב-sx, אבל לא נוגע ב-style של האלמנט. הסיבוב ב-180° הוא על
 // המיכל של השולחים ולא על כל שורה, ולכן סדר התווים והכיווניות נשמרים.
-import { LABEL_LINE_HEIGHT } from '../utils/labelSheetLayout';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 import {
   EXTRA_PRINT_FIELDS,
@@ -18,7 +17,7 @@ import {
   hasHebrewEnglishSalutation,
   splitHebrewGreeting,
 } from '../pages/PrintPreviewPage';
-import { REFERENCE_RECIPIENT_LINES } from '../utils/envelopeLayout';
+import { ENVELOPE_LINE_HEIGHT, REFERENCE_RECIPIENT_LINES } from '../utils/envelopeLayout';
 import { getAddressFontFamily, getAddressTextStyle } from '../fonts/fonts';
 
 // השורות של נמען, לפי הסדר שבו הן מודפסות. kind קובע את הגודל: salutation, greeting ו-name
@@ -96,7 +95,7 @@ function textLineStyle(fontSizePx, fontWeight, textAlign = 'center') {
     ...getAddressTextStyle(),
     fontSize: `${fontSizePx}px`,
     fontWeight,
-    lineHeight: LABEL_LINE_HEIGHT,
+    lineHeight: ENVELOPE_LINE_HEIGHT,
     textAlign,
     unicodeBidi: 'plaintext',
   };

@@ -13,7 +13,7 @@ import { detectPrintLanguage } from '../pages/PrintPreviewPage';
 import {
   buildEnvelopeLayout,
   getEffectiveEnvelopeFontScale,
-  getEnvelopeFontScaleLimit,
+  getEnvelopeFontScaleRange,
   isEnvelopeSettingsReady,
   normalizeEnvelopeFontScale,
 } from '../utils/envelopeLayout';
@@ -342,7 +342,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const envelopePrintFlag = createPrintFlagGetter();
   const envelopeRows = rowsToPrint.length > 0 ? rowsToPrint : [ENVELOPE_PREVIEW_SAMPLE_ROW];
   const envelopeRecipientLines = isEnvelopes ? countRecipientLines(envelopeRows, envelopePrintFlag, envelopeTextOptions) : null;
-  const envelopeFontLimit = isEnvelopes ? getEnvelopeFontScaleLimit(envelopeSettings, envelopeRecipientLines) : null;
+  const envelopeFontRange = isEnvelopes ? getEnvelopeFontScaleRange(envelopeSettings, envelopeRecipientLines) : null;
 
   // אזהרה על הכתבים רק לפי השפות של הכתובות שבאמת יודפסו (detectPrintLanguage): הנמענים,
   // ובמעטפות עם שולח - גם השולחים (כמו ב-SenderText). בלי נמענים אין אזהרה
@@ -354,20 +354,23 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   }
   const fontScriptWarning = getFontScriptWarning(fontType, englishFontType, [...printedLanguages]);
 
-  const clampCurrentFontScale = (scale) => (isEnvelopes
-    ? Math.min(Math.max(scale, FONT_SCALE_MIN), envelopeFontLimit)
-    : clampFontScale(scale, labelSize, labelSize === 'custom' ? customLayout?.height : undefined));
+  const clampLabelFontScale = (scale) => clampFontScale(scale, labelSize, labelSize === 'custom' ? customLayout?.height : undefined);
+  const minCurrentFontScale = isEnvelopes ? envelopeFontRange.min : FONT_SCALE_MIN;
   const maxCurrentFontScale = isEnvelopes
-    ? envelopeFontLimit
+    ? envelopeFontRange.max
     : getMaxFontScale(labelSize, labelSize === 'custom' ? customLayout?.height : undefined);
-  // במעטפות fontScale הוא הבחירה, והמונה מציג את מה שבאמת מודפס: הבחירה עד התקרה של
-  // המעטפה הנוכחית. כשהתקרה עולה שוב, הכתב חוזר לבחירה. במדבקות שני הערכים זהים
+  // במעטפות fontScale הוא הבחירה, והמונה מציג את מה שבאמת מודפס: הבחירה בתוך הטווח של
+  // המעטפה הנוכחית (גבולות ב-pt ומה שנכנס). כשהטווח משתנה, הכתב חוזר לבחירה. +/- זזים
+  // מהגודל המוצג, כך שבחירה שמורה מתחת למינימום (למשל 70%) עולה כבר בלחיצה הראשונה.
+  // במדבקות שני הערכים זהים
   const displayedFontScale = isEnvelopes
     ? getEffectiveEnvelopeFontScale(fontScale, envelopeSettings, envelopeRecipientLines)
     : fontScale;
-  const decreaseFontScale = () => setFontScale((s) => (isEnvelopes
-    ? Math.max(FONT_SCALE_MIN, getEffectiveEnvelopeFontScale(s, envelopeSettings, envelopeRecipientLines) - FONT_SCALE_STEP)
-    : clampCurrentFontScale(s - FONT_SCALE_STEP)));
+  const stepFontScale = (delta) => setFontScale((s) => {
+    if (!isEnvelopes) return clampLabelFontScale(s + delta);
+    const next = getEffectiveEnvelopeFontScale(s, envelopeSettings, envelopeRecipientLines) + delta;
+    return Math.min(Math.max(next, envelopeFontRange.min), envelopeFontRange.max);
+  });
 
   const printDisabled = isEnvelopes
     ? !isEnvelopeSettingsReady(envelopeSettings)
@@ -524,8 +527,8 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <IconButton
                     size="small"
-                    onClick={decreaseFontScale}
-                    disabled={displayedFontScale <= FONT_SCALE_MIN}
+                    onClick={() => stepFontScale(-FONT_SCALE_STEP)}
+                    disabled={displayedFontScale <= minCurrentFontScale}
                   >
                     <RemoveIcon fontSize="small" />
                   </IconButton>
@@ -534,7 +537,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <IconButton
                     size="small"
-                    onClick={() => setFontScale((s) => clampCurrentFontScale(s + FONT_SCALE_STEP))}
+                    onClick={() => stepFontScale(FONT_SCALE_STEP)}
                     disabled={displayedFontScale >= maxCurrentFontScale}
                   >
                     <AddIcon fontSize="small" />
