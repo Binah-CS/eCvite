@@ -23,6 +23,10 @@ export const MODAL_TEXTS = {
   FONT_WEIGHT_INPUT_LABEL: "עובי כתב",
   FONT_WEIGHT_REGULAR: "רגיל",
   FONT_WEIGHT_BOLD: "מודגש",
+  LETTER_SPACING_INPUT_LABEL: "ריווח אותיות",
+  LETTER_SPACING_OPTIONS: { normal: "רגיל", wide: "מרווח", wider: "מרווח מאוד" },
+  LETTER_SPACING_UNAVAILABLE: "לא זמין בכתב יד מחובר",
+  LETTER_SPACING_NOT_FOR: { he: "לא יחול על כתובות בעברית (כתב יד מחובר)", en: "לא יחול על כתובות באנגלית (כתב יד מחובר)" },
   SIZE_INPUT_LABEL: "בחירת גודל מדבקה",
   PRINTER_INPUT_LABEL: "בחירת מדפסת",
   

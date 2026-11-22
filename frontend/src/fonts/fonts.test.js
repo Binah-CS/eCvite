@@ -9,7 +9,11 @@ import {
   normalizeFontId,
   normalizeFontPair,
   getAddressTextStyle,
+  getAddressLetterSpacing,
   getDefaultFontWeight,
+  getLetterSpacingAvailability,
+  isConnectedFont,
+  normalizeLetterSpacing,
   resolveFontWeight,
 } from './fonts';
 
@@ -38,8 +42,56 @@ describe('font weight', () => {
 });
 
 describe('getAddressTextStyle', () => {
-  test('prints in solid black without synthetic bold', () => {
+  test('prints in solid black without synthetic bold, and without spacing when no level is given (labels)', () => {
     expect(getAddressTextStyle()).toEqual({ color: '#000000', fontSynthesis: 'none' });
+  });
+
+  test('with a level, the spacing of the address language is added', () => {
+    expect(getAddressTextStyle({ language: 'he', fontType: 'heebo', englishFontType: 'parisienne', letterSpacing: 'wider' }))
+      .toEqual({ color: '#000000', fontSynthesis: 'none', letterSpacing: '0.08em' });
+    expect(getAddressTextStyle({ language: 'en', fontType: 'heebo', englishFontType: 'parisienne', letterSpacing: 'wider' }))
+      .toEqual({ color: '#000000', fontSynthesis: 'none', letterSpacing: 'normal' });
+  });
+});
+
+describe('letter spacing', () => {
+  test('only the connected handwriting fonts are marked, and the behavior comes from the field', () => {
+    expect(FONTS.filter(isConnectedFont).map((font) => font.id)).toEqual(['parisienne', 'dancing-script']);
+    // כתב יד עברי - האותיות לא מתחברות, ולכן הריווח חל עליו
+    expect(isConnectedFont(getFont('gveret-levin'))).toBe(false);
+  });
+
+  test.each([['normal', 'normal'], ['wide', '0.04em'], ['wider', '0.08em']])(
+    'level %s on a regular font is %s',
+    (level, expected) => {
+      expect(getAddressLetterSpacing('he', 'heebo', '', level)).toBe(expected);
+      expect(getAddressLetterSpacing('en', 'heebo', '', level)).toBe(expected);
+    },
+  );
+
+  test('an unknown or missing level means no spacing', () => {
+    expect(getAddressLetterSpacing('he', 'heebo', '', 'huge')).toBe('normal');
+    expect(getAddressLetterSpacing('he', 'heebo')).toBe('normal');
+    expect(normalizeLetterSpacing(undefined)).toBe('normal');
+    expect(normalizeLetterSpacing('wide')).toBe('wide');
+  });
+
+  // כל כתובת לפי הכתב של השפה שלה: כתב מחובר רק לאנגלית לא מבטל ריווח בעברית
+  test('only the connected English font: Hebrew addresses get spacing and English ones do not', () => {
+    expect(getAddressLetterSpacing('he', 'heebo', 'dancing-script', 'wide')).toBe('0.04em');
+    expect(getAddressLetterSpacing('en', 'heebo', 'dancing-script', 'wide')).toBe('normal');
+    expect(getLetterSpacingAvailability('heebo', 'dancing-script')).toEqual({ he: true, en: false });
+  });
+
+  test('without an English font, English addresses follow the Hebrew font', () => {
+    expect(getAddressLetterSpacing('en', 'gveret-levin', '', 'wide')).toBe('0.04em');
+    expect(getLetterSpacingAvailability('heebo', '')).toEqual({ he: true, en: true });
+  });
+
+  // היום אין כתב עברי מחובר, ולכן זה קורה רק כשכל הכתבים שנבחרו הם כתבי יד לטיניים מחוברים
+  test('when every chosen font is connected, no language gets spacing', () => {
+    expect(getLetterSpacingAvailability('parisienne', 'dancing-script')).toEqual({ he: false, en: false });
+    expect(getAddressLetterSpacing('he', 'parisienne', 'dancing-script', 'wider')).toBe('normal');
   });
 });
 

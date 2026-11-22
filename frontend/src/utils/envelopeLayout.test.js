@@ -527,6 +527,14 @@ describe('typography', () => {
     expect(typography.sender.linePx).toBeCloseTo(typography.recipient.linePx * factor);
   });
 
+  test('the chosen letter spacing level is passed to the recipient and the sender, and a bad value is normal', () => {
+    const spaced = buildEnvelopeLayout(openFlap(), { ...textStyle, letterSpacing: 'wide' }).typography;
+    expect(spaced.recipient.letterSpacing).toBe('wide');
+    expect(spaced.sender.letterSpacing).toBe('wide');
+    expect(buildEnvelopeLayout(openFlap(), { ...textStyle, letterSpacing: 'huge' }).typography.recipient.letterSpacing).toBe('normal');
+    expect(buildEnvelopeLayout(openFlap(), textStyle).typography.recipient.letterSpacing).toBe('normal');
+  });
+
   test('a future sender override replaces only what it sets', () => {
     const recipient = { fontFamily: 'Arial', fontWeight: 'normal', namePx: 20, linePx: 15 };
     expect(resolveSenderTypography(recipient, { factor: 0.8, override: { fontFamily: 'David' } })).toEqual({

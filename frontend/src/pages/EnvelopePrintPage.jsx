@@ -11,7 +11,7 @@ import { FONT_SCALE_DEFAULT } from '../utils/labelSheetLayout';
 import { saveFontWeightForReturn } from '../utils/labelPrintSettings';
 import { detectPrintLanguage, getSavedSelectedRows, saveSelectedRows } from './PrintPreviewPage';
 import { MODAL_TEXTS } from './HardCodePage';
-import { normalizeFontPair, printWhenFontsReady, resolveFontWeight } from '../fonts/fonts';
+import { normalizeFontPair, normalizeLetterSpacing, printWhenFontsReady, resolveFontWeight } from '../fonts/fonts';
 
 const SHEET_CLASS = 'envelope-print-sheet';
 const PREVIEW_WIDTH = 640;
@@ -40,6 +40,7 @@ export default function EnvelopePrintPage() {
     fontScale = FONT_SCALE_DEFAULT,
     fontWeight: receivedFontWeight,
     fontWeightChoice = null,
+    letterSpacing: receivedLetterSpacing,
     englishSalutation = '',
     emptyLineWhenNoAddress = true,
     greetingShow = true,
@@ -56,7 +57,8 @@ export default function EnvelopePrintPage() {
 
   const rows = selectedItems.length > 0 ? selectedItems : getSavedSelectedRows();
   const settings = envelopeSettings ?? loadInitialEnvelopeSettings();
-  const textStyle = { fontType, englishFontType, fontScale, fontWeight };
+  const letterSpacing = normalizeLetterSpacing(receivedLetterSpacing);
+  const textStyle = { fontType, englishFontType, fontScale, fontWeight, letterSpacing };
   const textOptions = { englishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
   const getPrintFlag = createPrintFlagGetter();
   // הכתב אחד לכל ההדפסה, לפי השורות של כל הנמענים. הפריסה של כל מעטפה נבנית לפי הנמען
@@ -101,6 +103,7 @@ export default function EnvelopePrintPage() {
     sessionStorage.setItem('savedFontScale', String(fontScale));
     // רק עובי שנבחר במפורש, ולא ברירת המחדל שהודפסה (ר' saveFontWeightForReturn)
     saveFontWeightForReturn(fontWeightChoice);
+    sessionStorage.setItem('savedLetterSpacing', letterSpacing);
     sessionStorage.setItem('savedEnglishSalutation', englishSalutation);
     sessionStorage.setItem('savedEmptyLineWhenNoAddress', String(emptyLineWhenNoAddress));
     sessionStorage.setItem('savedGreetingShow', String(greetingShow));

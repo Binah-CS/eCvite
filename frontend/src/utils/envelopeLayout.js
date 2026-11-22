@@ -4,6 +4,7 @@
 // התוצאה היא רשימת "מעברים" (passes): כל מעבר הוא דף אחד שעובר במדפסת לכל נמען.
 // none, openFlap ו-frontCorner צריכים מעבר אחד; הדפסה בשני מעברים (twoPass) תחזיר שניים.
 import { FONT_SCALE_MIN, FONT_SCALE_DEFAULT, FONT_SCALE_STEP } from './labelSheetLayout';
+import { normalizeLetterSpacing } from '../fonts/fonts';
 import {
   FLAP_SHAPES,
   MAX_SENDERS,
@@ -75,14 +76,15 @@ export function getSenderTypographyLimit(dimensions, flapDepthMm = null) {
   return { namePx: base.name * factor, linePx: base.line * factor };
 }
 
-// הכתבים נשמרים כ-id (fonts.js). ה-font-family עצמו תלוי בשפת הכתובת, ולכן הוא נקבע
-// בציור (EnvelopeSheet, דרך getAddressFontFamily) ולא כאן
-function getRecipientTypography(dimensions, { fontType, englishFontType = '', fontWeight } = {}, scale) {
+// הכתבים נשמרים כ-id (fonts.js). ה-font-family והריווח בפועל תלויים בשפת הכתובת, ולכן הם
+// נקבעים בציור (EnvelopeSheet, דרך getAddressTextStyle) ולא כאן. letterSpacing היא הרמה שנבחרה
+function getRecipientTypography(dimensions, { fontType, englishFontType = '', fontWeight, letterSpacing } = {}, scale) {
   const base = getEnvelopeFontBase(dimensions.heightMm);
   return {
     fontType,
     englishFontType,
     fontWeight: fontWeight === 'bold' ? 'bold' : 'normal',
+    letterSpacing: normalizeLetterSpacing(letterSpacing),
     namePx: (base.name * scale) / 100,
     linePx: (base.line * scale) / 100,
   };
