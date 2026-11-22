@@ -50,8 +50,8 @@ function overflows(box, contentSelector) {
 }
 
 // השולח זהה בכל המעטפות, ולכן מספיק לדעת אם הוא גולש. אצל הנמען סופרים את התיבות שגולשות:
-// בעמוד ההדפסה יש תיבת נמען אחת לכל מעטפה, ולכן זה מספר המעטפות
-function measureEnvelopeOverflow(container) {
+// בעמוד ההדפסה יש תיבת נמען אחת לכל מעטפה, ולכן זה מספר המעטפות. מיוצא לטסטים
+export function measureEnvelopeOverflow(container) {
   const boxes = (role) => Array.from(container.querySelectorAll(`[data-envelope-${role}-box]`));
   return {
     sender: boxes('sender').some((box) => overflows(box, '[data-envelope-sender-content]')),
