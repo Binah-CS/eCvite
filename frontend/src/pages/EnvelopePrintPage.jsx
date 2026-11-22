@@ -10,6 +10,7 @@ import { loadInitialEnvelopeSettings, saveEnvelopeSettingsForReturn } from '../u
 import { FONT_SCALE_DEFAULT } from '../utils/labelSheetLayout';
 import { detectPrintLanguage, getSavedSelectedRows, saveSelectedRows } from './PrintPreviewPage';
 import { MODAL_TEXTS } from './HardCodePage';
+import { normalizeFontPair, printWhenFontsReady } from '../fonts/fonts';
 
 const SHEET_CLASS = 'envelope-print-sheet';
 const PREVIEW_WIDTH = 640;
@@ -33,7 +34,8 @@ export default function EnvelopePrintPage() {
   const {
     selectedItems = [],
     envelopeSettings,
-    fontType = 'Arial, sans-serif',
+    fontType: receivedFontType,
+    englishFontType: receivedEnglishFontType,
     fontScale = FONT_SCALE_DEFAULT,
     fontWeight = 'regular',
     englishSalutation = '',
@@ -45,10 +47,12 @@ export default function EnvelopePrintPage() {
     deliveryMethod = 'courier',
     autoPrint = false,
   } = location.state || {};
+  // ids מ-fonts.js: כתב לעברית וכתב לאנגלית. ערך ישן או חסר מתורגם (ר' normalizeFontPair)
+  const { fontType, englishFontType } = normalizeFontPair(receivedFontType, receivedEnglishFontType);
 
   const rows = selectedItems.length > 0 ? selectedItems : getSavedSelectedRows();
   const settings = envelopeSettings ?? loadInitialEnvelopeSettings();
-  const textStyle = { fontType, fontScale, fontWeight };
+  const textStyle = { fontType, englishFontType, fontScale, fontWeight };
   const textOptions = { englishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
   const getPrintFlag = createPrintFlagGetter();
   // הכתב אחד לכל ההדפסה, לפי השורות של כל הנמענים. הפריסה של כל מעטפה נבנית לפי הנמען
@@ -70,7 +74,7 @@ export default function EnvelopePrintPage() {
   useEffect(() => {
     if (autoPrint && canPrint && !printStartedRef.current) {
       printStartedRef.current = true;
-      window.print();
+      printWhenFontsReady(textStyle);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -89,6 +93,7 @@ export default function EnvelopePrintPage() {
     sessionStorage.setItem('savedPrinter', printer);
     sessionStorage.setItem('savedDeliveryMethod', deliveryMethod);
     sessionStorage.setItem('savedFontType', fontType);
+    sessionStorage.setItem('savedEnglishFontType', englishFontType);
     sessionStorage.setItem('savedFontScale', String(fontScale));
     sessionStorage.setItem('savedFontWeight', fontWeight);
     sessionStorage.setItem('savedEnglishSalutation', englishSalutation);
@@ -108,7 +113,7 @@ export default function EnvelopePrintPage() {
           <Typography variant="h5" fontWeight="bold">תצוגה מקדימה</Typography>
           <Stack direction="row" spacing={2}>
             <Button variant="outlined" onClick={backToSettings}>שינוי הגדרות הדפסה</Button>
-            <Button variant="contained" color="success" onClick={() => window.print()} disabled={!canPrint} sx={{ fontWeight: 'bold' }}>
+            <Button variant="contained" color="success" onClick={() => printWhenFontsReady(textStyle)} disabled={!canPrint} sx={{ fontWeight: 'bold' }}>
               {MODAL_TEXTS.ENVELOPE_PRINT_BUTTON}
             </Button>
             <Button variant="text" onClick={backToDashboard}>ביטול וחזרה</Button>

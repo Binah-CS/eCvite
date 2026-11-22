@@ -1,0 +1,80 @@
+/* הכתבים להדפסה, מותקנים מקומית (npm, @fontsource) ולא מ-Google Fonts, כדי שההדפסה תיראה
+   זהה אצל כל המשתמשים. הרשימה עצמה ב-fonts.js - כתב חדש הוא שורה שם ו-import כאן.
+
+   קובצי המשקל (400.css) כוללים unicode-range לכל subset, כך שהדפדפן מוריד רק את ה-subset
+   של התווים שבאמת מופיעים (עברית / לטינית). קובצי ה-subset הבודדים (hebrew-400.css) בגרסה
+   הזו בלי unicode-range, ולכן לא משתמשים בהם. משקל 700 רק בכתבים שיש להם - בשאר "מודגש"
+   הוא הדגשה של הדפדפן */
+
+/* עברית ואנגלית */
+@import '@fontsource/heebo/400.css';
+@import '@fontsource/heebo/700.css';
+@import '@fontsource/rubik/400.css';
+@import '@fontsource/rubik/700.css';
+@import '@fontsource/frank-ruhl-libre/400.css';
+@import '@fontsource/frank-ruhl-libre/700.css';
+@import '@fontsource/david-libre/400.css';
+@import '@fontsource/david-libre/700.css';
+@import '@fontsource/suez-one/400.css';
+@import '@fontsource/secular-one/400.css';
+@import '@fontsource/playpen-sans-hebrew/400.css';
+@import '@fontsource/playpen-sans-hebrew/700.css';
+
+/* אנגלית בלבד */
+@import '@fontsource/parisienne/400.css';
+@import '@fontsource/dancing-script/400.css';
+@import '@fontsource/dancing-script/700.css';
+@import '@fontsource/playfair-display/400.css';
+@import '@fontsource/playfair-display/700.css';
+
+/* עברית בלבד: האותיות העבריות, ומהקובץ הלטיני רק ספרות וסימני פיסוק (כולל רווח קשיח).
+   כך מספרים בכתובת עברית מודפסים בכתב העברי, ואותיות לטיניות עוברות לכתב הבא בשרשרת
+   (הכתב לאנגלית, ר' getAddressFontFamily) במקום לאותיות הלטיניות של הכתב הזה */
+@font-face {
+  font-family: 'Gveret Levin';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('@fontsource/gveret-levin/files/gveret-levin-hebrew-400-normal.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'Gveret Levin';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('@fontsource/gveret-levin/files/gveret-levin-latin-400-normal.woff2') format('woff2');
+  unicode-range: U+0020-0040, U+005B-0060, U+007B-007E, U+00A0;
+}
+@font-face {
+  font-family: 'Noto Rashi Hebrew';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('@fontsource/noto-rashi-hebrew/files/noto-rashi-hebrew-hebrew-400-normal.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'Noto Rashi Hebrew';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('@fontsource/noto-rashi-hebrew/files/noto-rashi-hebrew-latin-400-normal.woff2') format('woff2');
+  unicode-range: U+0020-0040, U+005B-0060, U+007B-007E, U+00A0;
+}
+@font-face {
+  font-family: 'Noto Rashi Hebrew';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('@fontsource/noto-rashi-hebrew/files/noto-rashi-hebrew-hebrew-700-normal.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'Noto Rashi Hebrew';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('@fontsource/noto-rashi-hebrew/files/noto-rashi-hebrew-latin-700-normal.woff2') format('woff2');
+  unicode-range: U+0020-0040, U+005B-0060, U+007B-007E, U+00A0;
+}

@@ -19,6 +19,7 @@ import {
   splitHebrewGreeting,
 } from '../pages/PrintPreviewPage';
 import { REFERENCE_RECIPIENT_LINES } from '../utils/envelopeLayout';
+import { getAddressFontFamily } from '../fonts/fonts';
 
 // השורות של נמען, לפי הסדר שבו הן מודפסות. kind קובע את הגודל: salutation, greeting ו-name
 // בגודל שם, detail בגודל פרטים. המקום היחיד שמחליט אילו שורות יש - גם הרינדור וגם ספירת
@@ -132,7 +133,7 @@ function RecipientText({ row, typography, textOptions, getPrintFlag, verticalAli
         flexDirection: 'column',
         justifyContent: verticalAlign === 'top' ? 'flex-start' : 'center',
         overflow: 'hidden',
-        fontFamily: typography.fontFamily,
+        fontFamily: getAddressFontFamily(printLanguage, typography.fontType, typography.englishFontType),
         direction: printLanguage === 'en' ? 'ltr' : 'rtl',
       }}
     >
@@ -162,7 +163,7 @@ function SenderText({ sender, typography, textAlign }) {
   return (
     <div
       data-envelope-sender-content=""
-      style={{ width: '100%', fontFamily: typography.fontFamily, direction: printLanguage === 'en' ? 'ltr' : 'rtl' }}
+      style={{ width: '100%', fontFamily: getAddressFontFamily(printLanguage, typography.fontType, typography.englishFontType), direction: printLanguage === 'en' ? 'ltr' : 'rtl' }}
     >
       {sender.name && <div style={nameStyle}>{sender.name}</div>}
       {addressLine && <div style={detailStyle}>{addressLine}</div>}

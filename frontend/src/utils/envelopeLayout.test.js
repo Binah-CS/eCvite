@@ -21,7 +21,7 @@ import {
 import { createDefaultEnvelopeSettings, createEmptySender } from './envelopeFormats';
 import { countRecipientLines } from '../components/EnvelopeSheet';
 
-const textStyle = { fontType: 'Arial, sans-serif', fontScale: 100, fontWeight: 'regular' };
+const textStyle = { fontType: 'heebo', englishFontType: 'dancing-script', fontScale: 100, fontWeight: 'regular' };
 const sender = { ...createEmptySender(), name: 'כהן', street: 'הרצל', houseNo: '12', city: 'ירושלים' };
 const fullSender = { ...sender, zip: '9100001', country: 'ישראל' };
 const settings = (overrides = {}) => ({ ...createDefaultEnvelopeSettings(), ...overrides });
@@ -485,7 +485,8 @@ describe('front corner', () => {
 describe('typography', () => {
   test('the sender uses the recipient font at 80%', () => {
     const { typography } = buildEnvelopeLayout(openFlap(), { ...textStyle, fontWeight: 'bold' });
-    expect(typography.sender.fontFamily).toBe(textStyle.fontType);
+    expect(typography.sender.fontType).toBe(textStyle.fontType);
+    expect(typography.sender.englishFontType).toBe(textStyle.englishFontType);
     expect(typography.sender.fontWeight).toBe('bold');
     expect(typography.sender.namePx).toBeCloseTo(typography.recipient.namePx * SENDER_FONT_FACTOR);
     expect(typography.sender.linePx).toBeCloseTo(typography.recipient.linePx * SENDER_FONT_FACTOR);
@@ -523,7 +524,7 @@ describe('typography', () => {
       expect(layout.typography.recipient.namePx).toBeGreaterThan(limit.namePx / SENDER_FONT_FACTOR);
       expect(layout.typography.sender.namePx).toBeCloseTo(limit.namePx);
       expect(layout.typography.sender.linePx).toBeCloseTo(limit.linePx);
-      expect(layout.typography.sender.fontFamily).toBe(textStyle.fontType);
+      expect(layout.typography.sender.fontType).toBe(textStyle.fontType);
     },
   );
 
