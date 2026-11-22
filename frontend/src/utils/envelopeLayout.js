@@ -77,10 +77,13 @@ export function getSenderTypographyLimit(dimensions, flapDepthMm = null) {
   return senderAt(FONT_SCALE_MIN);
 }
 
-function getRecipientTypography(dimensions, { fontType, fontWeight } = {}, scale) {
+// הכתבים נשמרים כ-id (fonts.js). ה-font-family עצמו תלוי בשפת הכתובת, ולכן הוא נקבע
+// בציור (EnvelopeSheet, דרך getAddressFontFamily) ולא כאן
+function getRecipientTypography(dimensions, { fontType, englishFontType = '', fontWeight } = {}, scale) {
   const base = getEnvelopeFontBase(dimensions.heightMm);
   return {
-    fontFamily: fontType,
+    fontType,
+    englishFontType,
     fontWeight: fontWeight === 'bold' ? 'bold' : 'normal',
     namePx: (base.name * scale) / 100,
     linePx: (base.line * scale) / 100,

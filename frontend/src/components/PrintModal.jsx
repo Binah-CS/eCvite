@@ -24,7 +24,9 @@ import {
   isValidCustomLabelFormat,
 } from '../utils/labelFormats';
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
-import { MODAL_TEXTS, FONT_OPTIONS } from '../pages/HardCodePage';
+import { MODAL_TEXTS } from '../pages/HardCodePage';
+import FontSelect from './FontSelect';
+import { DEFAULT_FONT_ID, normalizeFontId } from '../fonts/fonts';
 import {
   getScaledLabelSizes,
   getColumns,
@@ -237,9 +239,9 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const [deliveryMethod, setDeliveryMethod] = useState(() =>
     initialChoice('savedDeliveryMethod', 'deliveryMethod', (v) => v === 'courier' || v === 'pickup', 'courier'));
 
-  // 4. סוג הכתב
-  const [fontType, setFontType] = useState(() =>
-    initialChoice('savedFontType', 'fontType', (v) => FONT_OPTIONS.some((f) => f.value === v), FONT_OPTIONS[0].value));
+  // 4. סוג הכתב - id מ-fonts.js. ערך ישן (מחרוזת CSS מהרשימה הקודמת) מתורגם ל-id שלו
+  const [fontType, setFontType] = useState(() => normalizeFontId(
+    initialChoice('savedFontType', 'fontType', (v) => normalizeFontId(v, null) !== null, DEFAULT_FONT_ID)));
 
   // 5. גודל כתב (אחוז מהגודל הרגיל, 100 = כמו היום) - חופשי, אבל רק עד המקסימום
   // שנכנס בגודל המדבקה שנבחר (ר' getMaxFontScale)
@@ -467,21 +469,12 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                 (שיושבת מעל המסגרת שלו) לא תיחתך בראש אזור הגלילה */}
             <Stack direction="row" spacing={3} alignItems="stretch" sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pt: 1 }}>
               <Stack spacing={2} sx={{ flex: 1 }}>
-                <FormControl fullWidth>
-                  <InputLabel id="font-label">{MODAL_TEXTS.FONT_INPUT_LABEL}</InputLabel>
-                  <Select
-                    labelId="font-label"
-                    value={fontType}
-                    label={MODAL_TEXTS.FONT_INPUT_LABEL}
-                    onChange={(e) => setFontType(e.target.value)}
-                  >
-                    {FONT_OPTIONS.map((font) => (
-                      <MenuItem key={font.value} value={font.value} style={{ fontFamily: font.value }}>
-                        {font.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <FontSelect
+                  id="font"
+                  label={MODAL_TEXTS.FONT_INPUT_LABEL}
+                  value={fontType}
+                  onChange={setFontType}
+                />
 
                 {/* גודל ועובי כתב - מתחת לבחירת הכתב. ה-+ נעצר (מושבת) במקסימום שנכנס
                     בגודל המדבקה שנבחר, כך שאי אפשר לבחור גודל שנחתך */}

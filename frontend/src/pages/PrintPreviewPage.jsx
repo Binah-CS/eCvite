@@ -12,6 +12,7 @@ import {
 } from '../utils/labelSheetLayout';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 import { getCustomLabelLayout } from '../utils/labelFormats';
+import { getAddressFontFamily, normalizeFontId, printWhenFontsReady } from '../fonts/fonts';
 
 function getLoggedUser() {
   const raw = sessionStorage.getItem('user');
@@ -158,7 +159,10 @@ export default function PrintPreviewPage() {
   const navigate = useNavigate();
   
   // חילוץ הנתונים עם תמיכה מלאה גם ב-selectedRows וגם ב-selectedItems של ראש הצוות
-  const { selectedRows = [], selectedItems = [], labelSize = 'standard', customFormat, printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', autoPrint = false } = location.state || {};
+  const { selectedRows = [], selectedItems = [], labelSize = 'standard', customFormat, printer = '', fontType: receivedFontType, deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', autoPrint = false } = location.state || {};
+  // id מ-fonts.js. ערך ישן או חסר מתורגם (ברירת המחדל - Arial)
+  const fontType = normalizeFontId(receivedFontType);
+  const printLabels = () => printWhenFontsReady({ fontType, fontWeight });
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
   const savedSelectedRows = getSavedSelectedRows();
@@ -230,7 +234,7 @@ export default function PrintPreviewPage() {
 
   useEffect(() => {
     if (autoPrint && rowsToDisplay.length > 0) {
-      window.print();
+      printLabels();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -292,7 +296,7 @@ export default function PrintPreviewPage() {
             <Button 
               variant="contained" 
               color="success" 
-              onClick={() => window.print()} 
+              onClick={printLabels}
               sx={{ fontWeight: 'bold' }}
             >
               הדפס מדבקות
@@ -348,7 +352,7 @@ export default function PrintPreviewPage() {
                   p: 0.5,
                   backgroundColor: '#ffffff',
                   pageBreakInside: 'avoid',
-                  fontFamily: fontType,
+                  fontFamily: getAddressFontFamily(printLanguage, fontType),
                   direction: printLanguage === 'en' ? 'ltr' : 'rtl',
                 }}
               >

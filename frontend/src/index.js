@@ -6,6 +6,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import App from './App';
 import ErrorBoundary from './ErrorBoundary';
 import './index.css';
+import './fonts/fonts.css';
 import { rtlCache } from './rtl';
 
 // תופסות שגיאות JavaScript שלא קשורות לקריאת רשת בכלל (לא עוברות דרך ה-
