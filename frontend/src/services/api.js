@@ -86,6 +86,15 @@ const api = {
   importRecipients: (phone, recipients) =>
       apiClient.post('/recipients/import', { phone, recipients }),
 
+  // כמו saveRecords, וגם עם סדר הטבלה - ר' buildOrderToSave ב-changedRows.js (null = בלי סדר)
+  saveRecordsInOrder: (phone, rows, hashCodesToDelete, order) =>
+      apiClient.post('/recipients/save', {
+        phone,
+        recipients: rows,
+        hashCodesToDelete,
+        ...(order ? { order } : {}),
+      }),
+
   getRecipientColumns: () =>
 
       apiClient.get('/recipient-columns'),
