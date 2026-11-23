@@ -52,18 +52,18 @@ const GRID_PADDING_PX = 16; // padding של 1 (8px) מכל צד
 const PAGE_CONTENT_WIDTH = PREVIEW_PANEL_WIDTH - GRID_PADDING_PX;
 const PAGE_CONTENT_HEIGHT = PAGE_BOX_HEIGHT - GRID_PADDING_PX;
 const { gap: MOCK_GAP_PX, sizes: MOCK_LABEL_SIZES } = getScaledLabelSizes(PAGE_CONTENT_WIDTH);
-const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
-const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+// השורות שנשלחות לתצוגה המקדימה - במפתח נפרד מהשורות שסומנו בטבלה (dashboardSelectedRows).
+// אם הן נשמרות כ"מסומנות", אחרי "ביטול וחזרה" הטבלה מסמנת אותן, וההדפסה הבאה מדפיסה
+// אותן שוב במקום את הסינון החדש (#118). הסימון האמיתי נשמר בדשבורד בכל שינוי בחירה
+const PRINT_PREVIEW_ROWS_STORAGE_KEY = 'printPreviewRows';
 const CUSTOM_ENGLISH_SALUTATION = '__custom__';
 const PRESET_ENGLISH_SALUTATIONS = ['', 'To:', 'Dear'];
 const GREETING_ALIGNMENTS = ['right', 'center', 'left'];
 
+// השם נשאר saveSelectedRows (מההתנהגות הקודמת) כדי לא לשנות את שורות הקריאה, שגם PR פתוח
+// אחר (#136) עורך - אבל היא שומרת את השורות שנשלחות לתצוגה המקדימה, לא את השורות שסומנו
 function saveSelectedRows(rows) {
-  sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
-  sessionStorage.setItem(
-    SELECTED_ROW_IDS_STORAGE_KEY,
-    JSON.stringify(rows.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
-  );
+  sessionStorage.setItem(PRINT_PREVIEW_ROWS_STORAGE_KEY, JSON.stringify(rows));
 }
 
 // מדבקה "ריקה" - ריבוע עם פסים במקום טקסט אמיתי, בדיוק כמו שהדבר נראה בתבניות מדבקות של Word

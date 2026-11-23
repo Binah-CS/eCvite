@@ -188,6 +188,12 @@ public class RecipientController {
         // המשותף - כך שמשתמשת אחת שמורידה את הווי לא מורידה אותו גם לאחרות
         updateLinkPrintFlags(userHashCode, savedRecipients);
 
+        // הסדר של הטבלה אצל המשתמשת - כדי ששורה שנוספה באמצע לא "תקפוץ" לסוף בטעינה הבאה
+        // מהשרת. אחרי הקישור, כי מעדכנים את sort_order בשורות הקישור עצמן
+        if (request.getOrder() != null && !request.getOrder().isEmpty()) {
+            updateLinkSortOrder(userHashCode, resolveOrder(request.getOrder(), incoming));
+        }
+
         // save()/saveAll() על ישות עם @Id שכבר מוגדר (המצב תמיד כאן - ה-hash מחושב
         // מראש) מבצע merge(), לא persist() - וה-merge מחזיר אובייקט "רענן" שכולל רק
         // שדות ממופים ל-DB. duplicateSalt הוא @Transient (לא שדה DB בכלל) ולכן נשמט
@@ -408,6 +414,52 @@ public class RecipientController {
                 );
             });
         }
+    }
+
+    // הופכת את הסדר שנשלח לרשימת hash-ים: "#3" = השורה במקום 3 ב-recipients של הבקשה
+    // (שורה חדשה - ה-hash שלה חושב רק עכשיו, למעלה). hash שמופיע פעמיים (שורה חדשה
+    // שהתאחדה עם נמען קיים) - נספר רק במקום הראשון. מקום לא תקין - מדולג
+    private List<String> resolveOrder(List<String> order, List<Recipients> incoming) {
+        Set<String> ordered = new LinkedHashSet<>();
+        for (String entry : order) {
+            if (entry == null || entry.isEmpty()) continue;
+            if (entry.startsWith("#")) {
+                try {
+                    int index = Integer.parseInt(entry.substring(1));
+                    if (index >= 0 && index < incoming.size() && incoming.get(index).getHashCode() != null) {
+                        ordered.add(incoming.get(index).getHashCode());
+                    }
+                } catch (NumberFormatException ignored) {
+                    // לא מקום תקין - מדלגים
+                }
+            } else {
+                ordered.add(entry);
+            }
+        }
+        return new ArrayList<>(ordered);
+    }
+
+    // כותבת לכל קישור של המשתמשת את המקום שלו בטבלה - פקודת UPDATE אחת לכל 1,000 שורות
+    // (CASE לפי recipient_id), לא פקודה לכל שורה
+    private void updateLinkSortOrder(String userHashCode, List<String> orderedHashCodes) {
+        int[] offset = { 0 };
+        forEachChunk(orderedHashCodes, (chunk, placeholders) -> {
+            StringBuilder cases = new StringBuilder();
+            List<Object> params = new ArrayList<>(chunk.size() * 3 + 1);
+            for (int i = 0; i < chunk.size(); i++) {
+                cases.append(" WHEN ? THEN ?");
+                params.add(chunk.get(i));
+                params.add(offset[0] + i);
+            }
+            params.add(userHashCode);
+            params.addAll(chunk);
+            jdbcTemplate.update(
+                    "UPDATE user_recipients SET sort_order = CASE recipient_id" + cases + " END "
+                            + "WHERE user_id = ? AND recipient_id IN (" + placeholders + ")",
+                    params.toArray()
+            );
+            offset[0] += chunk.size();
+        });
     }
 
     // מריצה פעולה על הרשימה בחלקים של עד 1,000 (עם "?,?,..." מוכן לכל חלק) - כדי
