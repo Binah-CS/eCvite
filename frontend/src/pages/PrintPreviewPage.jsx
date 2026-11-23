@@ -126,12 +126,14 @@ const LABEL_LAYOUT = {
   large: { ...REAL_LABEL_SIZES.large, columns: getRealColumns('large'), nameVariant: 'h4', addrVariant: 'h5' },
 };
 
-const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
-const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
+// השורות שבתצוגה המקדימה - במפתח משלהן (ר' PrintModal), כדי שרענון של הדף יציג אותן
+// שוב. בכוונה לא dashboardSelectedRows: אחרת "ביטול וחזרה" הופך אותן לשורות מסומנות
+// בטבלה, וההדפסה הבאה מתעלמת מהסינון החדש (#118)
+const PRINT_PREVIEW_ROWS_STORAGE_KEY = 'printPreviewRows';
 
-function getSavedSelectedRows() {
+function getSavedPrintPreviewRows() {
   try {
-    const saved = sessionStorage.getItem(SELECTED_ROWS_STORAGE_KEY);
+    const saved = sessionStorage.getItem(PRINT_PREVIEW_ROWS_STORAGE_KEY);
     const rows = saved ? JSON.parse(saved) : [];
     return Array.isArray(rows) ? rows : [];
   } catch {
@@ -139,12 +141,10 @@ function getSavedSelectedRows() {
   }
 }
 
+// השם נשאר saveSelectedRows (מההתנהגות הקודמת) כדי לא לשנות את שורות הקריאה, שגם PR פתוח
+// אחר (#136) עורך - אבל היא שומרת את השורות שבתצוגה המקדימה, לא את השורות שסומנו בטבלה
 function saveSelectedRows(rows) {
-  sessionStorage.setItem(SELECTED_ROWS_STORAGE_KEY, JSON.stringify(rows));
-  sessionStorage.setItem(
-    SELECTED_ROW_IDS_STORAGE_KEY,
-    JSON.stringify(rows.map((row) => row.id).filter((id) => id !== undefined && id !== null)),
-  );
+  sessionStorage.setItem(PRINT_PREVIEW_ROWS_STORAGE_KEY, JSON.stringify(rows));
 }
 
 export default function PrintPreviewPage() {
@@ -155,12 +155,12 @@ export default function PrintPreviewPage() {
   const { selectedRows = [], selectedItems = [], labelSize = 'standard', customFormat, printer = '', fontType = 'Arial, sans-serif', deliveryMethod = 'courier', fontScale = FONT_SCALE_DEFAULT, fontWeight = 'regular', englishSalutation = '', emptyLineWhenNoAddress = true, greetingShow = true, greetingSeparateLine = true, greetingAlign = 'center', autoPrint = false } = location.state || {};
 
   // קביעת הרשומות להצגה לפי מה שהתקבל
-  const savedSelectedRows = getSavedSelectedRows();
+  const savedPrintPreviewRows = getSavedPrintPreviewRows();
   const actualRows = selectedRows.length > 0
     ? selectedRows
     : selectedItems.length > 0
       ? selectedItems
-      : savedSelectedRows;
+      : savedPrintPreviewRows;
   const rowsToDisplay = actualRows;
   const customLayout = labelSize === 'custom' ? getCustomLabelLayout(customFormat) : null;
   const layout = customLayout
