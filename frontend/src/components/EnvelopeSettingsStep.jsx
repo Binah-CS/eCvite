@@ -14,7 +14,7 @@ import {
   isValidFlapDepth,
   resolveEnvelopeDimensions,
 } from '../utils/envelopeFormats';
-import { SENDER_MODES } from '../utils/envelopeLayout';
+import { getMaxSenders } from '../utils/envelopeLayout';
 
 const numberFromInput = (value) => (value === '' ? '' : Number(value));
 
@@ -57,8 +57,9 @@ export default function EnvelopeSettingsStep({ settings, onChange }) {
   const update = (patch) => onChange({ ...settings, ...patch });
   const dimensions = resolveEnvelopeDimensions(settings);
   const senderMode = getSenderMode(settings);
-  const { maxSenders } = SENDER_MODES[senderMode];
-  // שולחים מעבר למה שהמצב מדפיס לא מוצגים, אבל גם לא נמחקים - הם חוזרים במעבר ללשונית
+  const maxSenders = getMaxSenders(settings);
+  // שולחים מעבר למה שהמצב (או צורת הלשונית) מדפיס לא מוצגים, אבל גם לא נמחקים - הם חוזרים
+  // במעבר ללשונית ישרה. ההודעה על כך מוצגת מתחת לתצוגה (EnvelopeNotices)
   const visibleSenders = settings.senders.slice(0, maxSenders);
   const isCustom = settings.sizeId === CUSTOM_ENVELOPE_ID;
   // הסיבה המדויקת מוצגת מתחת לשדות. בכל סיבה resolveEnvelopeDimensions מחזיר null, ולכן

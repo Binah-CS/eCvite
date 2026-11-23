@@ -12,6 +12,7 @@ import {
   getSenderMode,
   hasSenderDetails,
   isSenderComplete,
+  isFlapShape,
   isValidFlapDepth,
   resolveEnvelopeDimensions,
 } from './envelopeFormats';
@@ -379,6 +380,13 @@ export const SENDER_MODES = {
   frontCorner: { usesFlap: false, maxSenders: 1, senderFontFactor: 0.8, buildLayout: layoutFrontCorner },
 };
 
+// כמה שולחים מודפסים: לפי המצב, ועל הלשונית גם לפי הצורה שלה (FLAP_SHAPES)
+export function getMaxSenders(settings) {
+  const mode = SENDER_MODES[getSenderMode(settings)];
+  if (!mode) return 0;
+  return mode.usesFlap ? Math.min(mode.maxSenders, FLAP_SHAPES[settings.flapShape]?.maxSenders ?? mode.maxSenders) : mode.maxSenders;
+}
+
 export function isEnvelopeSettingsReady(settings) {
   const dimensions = resolveEnvelopeDimensions(settings);
   const mode = SENDER_MODES[getSenderMode(settings)];
@@ -386,12 +394,12 @@ export function isEnvelopeSettingsReady(settings) {
   if (mode.maxSenders === 0) return true;
   const senders = settings.senders ?? [];
   const flapReady = !mode.usesFlap || (
-    isValidFlapDepth(settings.flapDepthMm, dimensions.heightMm) && FLAP_SHAPES.includes(settings.flapShape)
+    isValidFlapDepth(settings.flapDepthMm, dimensions.heightMm) && isFlapShape(settings.flapShape)
   );
   return flapReady
     && senders.length >= 1
     && senders.length <= MAX_SENDERS
-    && senders.slice(0, mode.maxSenders).every(isSenderComplete);
+    && senders.slice(0, getMaxSenders(settings)).every(isSenderComplete);
 }
 
 // מחזירה null כשאי אפשר לפרוס (מידות לא תקינות). שולח שעוד לא מולא לא מונע פריסה -
@@ -409,6 +417,7 @@ export function buildEnvelopeLayout(settings, textStyle, { recipientLanguage, re
   const rowLines = recipientLines ?? runRecipientLines ?? REFERENCE_RECIPIENT_LINES;
   const scale = getEffectiveEnvelopeFontScale(textStyle?.fontScale, settings, runRecipientLines ?? rowLines);
   const senders = settings.senders ?? [];
+  const maxSenders = getMaxSenders(settings);
   const { recipient: recipientTypography, sender: senderTypography } = getTypographyAt(
     dimensions,
     textStyle,
@@ -419,7 +428,7 @@ export function buildEnvelopeLayout(settings, textStyle, { recipientLanguage, re
     dimensions,
     flapDepthMm: settings.flapDepthMm,
     flapShape: settings.flapShape,
-    senderCount: Math.min(senders.length, mode.maxSenders),
+    senderCount: Math.min(senders.length, maxSenders),
     recipientTypography,
     senderTypography,
     recipientLines: rowLines,
@@ -428,8 +437,8 @@ export function buildEnvelopeLayout(settings, textStyle, { recipientLanguage, re
   return {
     ...layout,
     senderMode,
-    // כשלא מדפיסים שולח בכלל אין מה להעיר. ההערה היא רק על שולח שהמצב משאיר בחוץ
-    omittedSenderCount: mode.maxSenders === 0 ? 0 : senders.slice(mode.maxSenders).filter(hasSenderDetails).length,
+    // כשלא מדפיסים שולח בכלל אין מה להעיר. ההערה היא רק על שולח שהמצב (או צורת הלשונית) משאיר בחוץ
+    omittedSenderCount: maxSenders === 0 ? 0 : senders.slice(maxSenders).filter(hasSenderDetails).length,
     typography: { recipient: recipientTypography, sender: senderTypography },
   };
 }

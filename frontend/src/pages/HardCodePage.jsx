@@ -99,6 +99,7 @@ export const MODAL_TEXTS = {
     return `${where} לא נכנסת במלואה, בדרך כלל בגלל שורה ארוכה שנשברה. כדאי להקטין את הכתב או לקצר את השורה. ההדפסה אפשרית גם כך.`;
   },
   ENVELOPE_ONE_SENDER_NOTE: "בפינה העליונה מודפס השולח הראשון בלבד. להדפסת שני השולחים, בחרו \"על הלשונית\".",
+  ENVELOPE_ONE_SENDER_TRIANGULAR_NOTE: "בלשונית משולשת מודפס השולח הראשון בלבד. להדפסת שני השולחים, בחרו לשונית ישרה.",
   ENVELOPE_PREVIEW_OPEN: "מעטפה פתוחה",
   ENVELOPE_PREVIEW_SINGLE: "מעטפה",
   ENVELOPE_PREVIEW_FRONT: "חזית",

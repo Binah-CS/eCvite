@@ -14,6 +14,7 @@ import {
   getEffectiveEnvelopeFontScale,
   getEnvelopeFontScaleRange,
   getEnvelopeMargin,
+  getMaxSenders,
   getSenderTypographyLimit,
   isEnvelopeSettingsReady,
   normalizeEnvelopeFontScale,
@@ -144,6 +145,27 @@ describe('open flap', () => {
     expect(triangular.width).toBeLessThan(straight.width);
     expect(triangular.x).toBeCloseTo(184 - triangular.x - triangular.width);
     expect(40 - (triangular.y + triangular.height)).toBeCloseTo(3);
+  });
+
+  // במשולשת הרוחב צר מדי לשתי עמודות: מודפס רק הראשון, ברוחב המלא, כמו בפינה
+  test('a triangular flap prints only the first sender, across the whole width, and reports the second', () => {
+    const two = [sender, { ...sender, name: 'לוי' }];
+    const layout = buildEnvelopeLayout(openFlap({ flapShape: 'triangular', senders: two }), textStyle);
+    const block = blockOf(layout.passes[0], 'senders');
+    expect(block.items.map((item) => item.senderIndex)).toEqual([0]);
+    expect(block.items[0].rect.width).toBeCloseTo(block.rect.width);
+    expect(layout.omittedSenderCount).toBe(1);
+    expect(getMaxSenders(openFlap({ flapShape: 'triangular' }))).toBe(1);
+
+    const straight = buildEnvelopeLayout(openFlap({ senders: two }), textStyle);
+    expect(blockOf(straight.passes[0], 'senders').items).toHaveLength(2);
+    expect(straight.omittedSenderCount).toBe(0);
+  });
+
+  test('on a triangular flap an incomplete second sender does not block printing', () => {
+    const partial = [sender, { ...createEmptySender(), name: 'חלקי' }];
+    expect(isEnvelopeSettingsReady(openFlap({ flapShape: 'triangular', senders: partial }))).toBe(true);
+    expect(isEnvelopeSettingsReady(openFlap({ senders: partial }))).toBe(false);
   });
 
   test('the fold line is a dashed guide at the flap depth', () => {

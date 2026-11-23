@@ -103,17 +103,23 @@ describe('measuring overflow on the drawn envelope', () => {
     expect(measureEnvelopeOverflow(container).sender).toBe(true);
   });
 
-  test.each([['straight'], ['triangular']])(
-    'two senders on a %s flap: each column is measured, and one overflowing column is enough',
-    (flapShape) => {
-      renderEnvelopes(twoOnFlap(flapShape));
-      fitAll();
-      const senderBoxes = boxes('sender');
-      expect(senderBoxes).toHaveLength(2);
-      setSize(contentOf(senderBoxes[1], 'sender'), { offsetHeight: 130 });
-      expect(measureEnvelopeOverflow(container)).toEqual({ sender: true, recipients: 0 });
-    },
-  );
+  test('two senders on a straight flap: each column is measured, and one overflowing column is enough', () => {
+    renderEnvelopes(twoOnFlap());
+    fitAll();
+    const senderBoxes = boxes('sender');
+    expect(senderBoxes).toHaveLength(2);
+    setSize(contentOf(senderBoxes[1], 'sender'), { offsetHeight: 130 });
+    expect(measureEnvelopeOverflow(container)).toEqual({ sender: true, recipients: 0 });
+  });
+
+  test('two senders on a triangular flap: only the first is drawn, so there is one box to measure', () => {
+    renderEnvelopes(twoOnFlap('triangular'));
+    fitAll();
+    const senderBoxes = boxes('sender');
+    expect(senderBoxes).toHaveLength(1);
+    setSize(contentOf(senderBoxes[0], 'sender'), { offsetHeight: 130 });
+    expect(measureEnvelopeOverflow(container)).toEqual({ sender: true, recipients: 0 });
+  });
 
   test('recipients are counted per envelope', () => {
     renderEnvelopes(corner(), 3);
@@ -140,6 +146,21 @@ describe('the overflow notices', () => {
   test('on the print page the recipient message says in how many envelopes', () => {
     render(<EnvelopeNotices layout={{ senderMode: 'none', omittedSenderCount: 0 }} overflow={{ sender: false, recipients: 3 }} countRecipients />);
     expect(textOf()).toContain(MODAL_TEXTS.ENVELOPE_RECIPIENT_OVERFLOW(3));
+  });
+
+  test('a sender left out gets the note of its reason: the corner, or a triangular flap', () => {
+    render(<EnvelopeNotices layout={buildEnvelopeLayout(corner(), textStyle)} />);
+    expect(textOf()).toBe('');
+
+    const two = [longSender, longSender];
+    render(<EnvelopeNotices layout={buildEnvelopeLayout({ ...corner(), senders: two }, textStyle)} />);
+    expect(textOf()).toBe(MODAL_TEXTS.ENVELOPE_ONE_SENDER_NOTE);
+
+    render(<EnvelopeNotices layout={buildEnvelopeLayout(twoOnFlap('triangular'), textStyle)} />);
+    expect(textOf()).toBe('בלשונית משולשת מודפס השולח הראשון בלבד. להדפסת שני השולחים, בחרו לשונית ישרה.');
+
+    render(<EnvelopeNotices layout={buildEnvelopeLayout(twoOnFlap(), textStyle)} />);
+    expect(textOf()).toBe('');
   });
 
   test('no overflow, no notices', () => {
