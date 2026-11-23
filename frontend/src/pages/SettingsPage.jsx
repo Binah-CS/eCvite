@@ -16,6 +16,8 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined';
 import { getExcelColumns } from '../services/excelColumnsCache';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS, saveColumnPreferences } from '../utils/columnPreferences';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import { moveColumn, resolveColumnOrder } from '../utils/columnOrder';
 
 function getLoggedUser() {
   const raw = sessionStorage.getItem('user');
@@ -67,18 +69,56 @@ export default function SettingsPage() {
     setSavedOpen(true);
   };
 
-  const columnList = (key, title) => (
+  // סדר העמודות בטבלה - גרירה ברשימת "עמודות להצגה" (#79). נשמר ב"שמור שינויים", באותו
+  // מקום שבו נשמרת גרירת העמודות בטבלה עצמה (__order), כך ששתי הדרכים משנות את אותו סדר.
+  // __order נכתב רק אחרי גרירה - בלי גרירה ממשיכים לקבל את ברירת המחדל מה-DB
+  const [draggedColumn, setDraggedColumn] = useState(null);
+  const columnOrder = resolveColumnOrder(prefs.__order, fieldDefs);
+  const dragOverColumn = (targetName) => {
+    if (!draggedColumn || draggedColumn === targetName) return;
+    setPrefs((prev) => ({
+      ...prev,
+      __order: moveColumn(resolveColumnOrder(prev.__order, fieldDefs), draggedColumn, targetName),
+    }));
+  };
+
+  // רשימת "עמודות להדפסה" נשארת בסדר הקבוע - סדר השורות במדבקה לא תלוי בסדר העמודות
+  const columnList = (key, title, { reorderable = false, hint } = {}) => (
     <Box sx={{ flex: 1, minWidth: 260 }}>
-      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1, color: '#1e293b' }}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: hint ? 0.25 : 1, color: '#1e293b' }}>
         {title}
       </Typography>
+      {hint && (
+        <Typography variant="body2" sx={{ mb: 1, color: '#64748b' }}>
+          {hint}
+        </Typography>
+      )}
       <List dense sx={{ bgcolor: '#f8fafc', borderRadius: 2, p: 0.5 }}>
-        {fieldDefs.filter((f) => f.technicalName !== 'print').map((f) => (
+        {(reorderable
+          ? columnOrder.map((name) => fieldDefs.find((f) => f.technicalName === name))
+          : fieldDefs
+        ).filter((f) => f.technicalName !== 'print').map((f) => (
           <ListItemButton
             key={f.technicalName}
             onClick={() => toggleFlag(f.technicalName, key)}
-            sx={{ borderRadius: 1.5 }}
+            {...(reorderable && {
+              draggable: true,
+              onDragStart: (event) => {
+                event.dataTransfer.effectAllowed = 'move';
+                setDraggedColumn(f.technicalName);
+              },
+              onDragEnter: () => dragOverColumn(f.technicalName),
+              onDragOver: (event) => event.preventDefault(),
+              onDrop: (event) => event.preventDefault(),
+              onDragEnd: () => setDraggedColumn(null),
+            })}
+            sx={{
+              borderRadius: 1.5,
+              ...(reorderable && { cursor: 'grab' }),
+              ...(reorderable && draggedColumn === f.technicalName && { opacity: 0.5, bgcolor: '#e0f2fe' }),
+            }}
           >
+            {reorderable && <DragIndicatorIcon fontSize="small" sx={{ color: '#94a3b8', mr: -0.5 }} />}
             <Checkbox
               checked={getFlag(f.technicalName, key)}
               tabIndex={-1}
@@ -138,7 +178,10 @@ export default function SettingsPage() {
         <Box sx={{ flex: 1, pb: 10 }}>
           {selectedCategory === 'columns' && (
             <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {columnList('show', 'עמודות להצגה')}
+              {columnList('show', 'עמודות להצגה', {
+                reorderable: true,
+                hint: 'אפשר לגרור עמודה למעלה או למטה כדי לשנות את המיקום שלה בטבלה',
+              })}
               {columnList('print', 'עמודות להדפסה')}
             </Box>
           )}
