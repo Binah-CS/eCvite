@@ -30,9 +30,16 @@ function getSampleValues(rows, header, limit = 5) {
   return Array.from(seen);
 }
 
+function isNumericOnlyColumn(rows, header) {
+  const values = rows
+    .map((row) => String(row[header] ?? '').trim())
+    .filter(Boolean);
+  return values.length > 0 && values.every((value) => /^\d+$/.test(value));
+}
+
 // מסך שמופיע כשיש עמודות בקובץ ה-Excel שלא זוהו אוטומטית - המשתמשת בוחרת ידנית
 // לאיזה שדה כל עמודה שייכת (או להתעלם ממנה), והבחירה נשמרת מיד כ"כינוי" חדש לפעם הבאה
-export default function ColumnMatchDialog({ open, unmatchedHeaders, headerLabels = {}, columns, rows, onConfirm, onCancel, onOpenColumnSettings }) {
+export default function ColumnMatchDialog({ open, unmatchedHeaders, headerLabels = {}, columns, rows, alreadyMappedTechnicalNames = [], onConfirm, onCancel, onOpenColumnSettings }) {
   const [choices, setChoices] = useState({});
   const [expandedHeader, setExpandedHeader] = useState(null);
 
@@ -54,6 +61,13 @@ export default function ColumnMatchDialog({ open, unmatchedHeaders, headerLabels
         </Typography>
         {unmatchedHeaders.map((header) => {
           const isExpanded = expandedHeader === header;
+          const numericOnly = isNumericOnlyColumn(rows, header);
+          const selectedForOtherHeaders = new Set([
+            ...alreadyMappedTechnicalNames,
+            ...Object.entries(choices)
+              .filter(([otherHeader]) => otherHeader !== header)
+              .map(([, technicalName]) => technicalName),
+          ]);
           return (
             <Box key={header} mb={1}>
               <Box display="flex" alignItems="center" gap={1}>
@@ -73,7 +87,14 @@ export default function ColumnMatchDialog({ open, unmatchedHeaders, headerLabels
                 >
                   <MenuItem value={IGNORE_VALUE}>להתעלם מהעמודה הזו</MenuItem>
                   {columns.map((column) => (
-                    <MenuItem key={column.technicalName} value={column.technicalName}>
+                    <MenuItem
+                      key={column.technicalName}
+                      value={column.technicalName}
+                      disabled={
+                        selectedForOtherHeaders.has(column.technicalName)
+                        || (numericOnly && column.technicalName === 'belongsTo')
+                      }
+                    >
                       {column.displayName}
                     </MenuItem>
                   ))}

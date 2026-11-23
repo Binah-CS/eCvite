@@ -93,6 +93,9 @@ function setLocalInSync(phone, inSync) {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [records, setRecords] = useState([]);
+  // ייבוא קובץ מסתיים באופן אסינכרוני. שומרים גם ref כדי שייבוא שמסתיים מאוחר
+  // ימזג מול הרשומות המעודכנות, ולא מול snapshot ישן מהזמן שבו התחיל.
+  const recordsRef = useRef([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const user = getLoggedUser();
@@ -184,6 +187,10 @@ export default function DashboardPage() {
   useEffect(() => {
     loadRecords();
   }, [loadRecords]);
+
+  useEffect(() => {
+    recordsRef.current = records;
+  }, [records]);
 
   // 🌟 פותח את המודאל אוטומטית אם המשתמש לחץ על "שינוי הגדרות" בתצוגה המקדימה
   useEffect(() => {
@@ -279,6 +286,7 @@ export default function DashboardPage() {
   // ה-columns שלו וקלטי העריכה מאבדים פוקוס אחרי כל אות (בדיוק הבאג שנתקלנו בו)
   const handleAutoSaveLocal = useCallback((updatedRows) => {
     if (!user?.phone) return;
+    recordsRef.current = updatedRows;
     saveLocalRecords(user.phone, updatedRows);
     setLocalInSync(user.phone, false); // יש עכשיו בעותק המקומי שינוי שעוד לא נשמר ב-DB
     setRecords(updatedRows);
@@ -517,7 +525,8 @@ export default function DashboardPage() {
       importedByIdentity.set(key, row);
     });
 
-    const mergedRecords = records.map((row) => {
+    const currentRecords = recordsRef.current;
+    const mergedRecords = currentRecords.map((row) => {
       const key = buildIdentityKey(row);
       const importedMatch = key.replace(/\|/g, '') !== '' ? importedByIdentity.get(key) : null;
       if (!importedMatch) return row;
@@ -533,7 +542,7 @@ export default function DashboardPage() {
 
     // אותה שיטת מזהה זמני כמו "הוסף שורה" בטבלה - שורות שבאמת חדשות (לא התמזגו לתוך
     // שורה קיימת למעלה) עוד לא נשמרו בשרת, אז אין להן hashCode
-    const numericIds = records.map((r) => Number(r.id)).filter((n) => Number.isFinite(n));
+    const numericIds = currentRecords.map((r) => Number(r.id)).filter((n) => Number.isFinite(n));
     let nextId = numericIds.length ? Math.max(...numericIds) + 1 : 1;
     const blankIdentityRows = importedRows.filter((row) => buildIdentityKey(row).replace(/\|/g, '') === '');
     const trulyNewRows = [...importedByIdentity.values(), ...blankIdentityRows];
