@@ -1,5 +1,5 @@
 // src/pages/PrintPreviewPage.jsx
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Box, Container, Typography, Button, Paper, Stack } from '@mui/material';
 import {
@@ -12,6 +12,7 @@ import {
 } from '../utils/labelSheetLayout';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 import { getCustomLabelLayout } from '../utils/labelFormats';
+import { fitLabelText, fittedFontSize } from '../utils/labelFit';
 
 function getLoggedUser() {
   const raw = sessionStorage.getItem('user');
@@ -181,13 +182,17 @@ export default function PrintPreviewPage() {
     : greetingAlign === 'left'
       ? { marginInlineEnd: '1mm' }
       : {};
+  // שורה ארוכה מהמדבקה יורדת שורה - גם מילה ארוכה בלי רווחים (overflowWrap), כדי שלא
+  // תיחתך בגבול המדבקה. ואם גם כך הטקסט לא נכנס - הכתב קטן (fittedFontSize, #140)
   const nameLineSx = {
     fontWeight: labelFontWeight, mb: 0.25, color: '#000000', textAlign: 'center', fontFamily: 'inherit',
-    lineHeight: LABEL_LINE_HEIGHT, fontSize: `${fontBase.name * fontFactor}px`, unicodeBidi: 'plaintext',
+    lineHeight: LABEL_LINE_HEIGHT, fontSize: fittedFontSize(fontBase.name * fontFactor), unicodeBidi: 'plaintext',
+    overflowWrap: 'anywhere', maxWidth: '100%',
   };
   const detailLineSx = {
     color: '#333333', textAlign: 'center', fontFamily: 'inherit', lineHeight: LABEL_LINE_HEIGHT,
-    fontSize: `${fontBase.line * fontFactor}px`, fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
+    fontSize: fittedFontSize(fontBase.line * fontFactor), fontWeight: labelFontWeight, unicodeBidi: 'plaintext',
+    overflowWrap: 'anywhere', maxWidth: '100%',
   };
 
   // גודל ועובי הכתב מחלון ההדפסה. הגודל עובר שוב דרך המקסימום של גודל המדבקה - גם
@@ -221,6 +226,20 @@ export default function PrintPreviewPage() {
       saveSelectedRows(rowsToDisplay);
     }
   }, [rowsToDisplay]);
+
+  // מדבקה שהטקסט שלה לא נכנס גם אחרי ירידת שורה - הכתב שלה קטן עד שנכנס (#140).
+  // useLayoutEffect - לפני שהמסך מצויר ולפני ההדפסה האוטומטית (למטה), כדי שלא תודפס
+  // מדבקה חתוכה. ושוב אחרי שהגופן נטען - גופן אחר תופס רוחב אחר
+  const labelsGridRef = useRef(null);
+  useLayoutEffect(() => {
+    const fitAllLabels = () => {
+      [...(labelsGridRef.current?.children ?? [])].forEach(fitLabelText);
+    };
+    fitAllLabels();
+    let cancelled = false;
+    document.fonts?.ready.then(() => { if (!cancelled) fitAllLabels(); });
+    return () => { cancelled = true; };
+  });
 
   useEffect(() => {
     if (autoPrint && rowsToDisplay.length > 0) {
@@ -306,6 +325,7 @@ export default function PrintPreviewPage() {
           <Typography color="error">לא נבחרו שורות להדפסה. חזרי לטבלה וסמני רשומות.</Typography>
         ) : (
           <Box
+            ref={labelsGridRef}
             sx={{
               display: 'grid',
               gridTemplateColumns: `repeat(${layout.columns}, ${layout.width}px)`,
