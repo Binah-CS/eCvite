@@ -233,7 +233,7 @@ describe('the font size limit', () => {
   test.each([
     ['a7', { sizeId: 'a7' }, { none: [125, 125, 125], openFlap: [125, 125, 125], frontCorner: [125, 125, 125] }, 85],
     ['c6', { sizeId: 'c6' }, { none: [150, 150, 150], openFlap: [150, 150, 150], frontCorner: [150, 150, 125] }, 100],
-    ['110x80', custom(110, 80), { none: [200, 200, 175], openFlap: [200, 200, 175], frontCorner: [200, 200, 140] }, 140],
+    ['110x80', custom(110, 80), { none: [200, 200, 170], openFlap: [200, 200, 170], frontCorner: [200, 200, 140] }, 140],
     ['350x260', custom(350, 260), { none: [90, 90, 90], openFlap: [90, 90, 90], frontCorner: [90, 90, 90] }, 70],
   ])('%s: the range for each mode and recipient lines', (_, size, expectedMax, expectedMin) => {
     Object.entries(modes).forEach(([mode, build]) => {
@@ -244,9 +244,9 @@ describe('the font size limit', () => {
     });
   });
 
-  // הגבולות של הדרישה: נמען לפחות 10pt בשורות ועד 18pt בשם, שולח לפחות 8pt - בכל גודל שנבחר
+  // הגבולות של הדרישה: נמען לפחות 10pt בשורות ועד RECIPIENT_MAX_NAME_PX (כ-19.3pt) בשם, שולח לפחות 8pt - בכל גודל שנבחר
   test.each([['a7', { sizeId: 'a7' }], ['c6', { sizeId: 'c6' }], ['110x80', custom(110, 80)], ['350x260', custom(350, 260)]])(
-    '%s: at any chosen size the recipient stays between 10pt and 18pt and the sender is at least 8pt',
+    '%s: at any chosen size the recipient stays between 10pt and its name maximum and the sender is at least 8pt',
     (_, size) => {
       [1, 70, 100, 150, 5000].forEach((fontScale) => {
         [openFlap(size), frontCorner(size)].forEach((envelope) => {
@@ -259,14 +259,14 @@ describe('the font size limit', () => {
     },
   );
 
-  test('the standard envelope at 100%: recipient 14pt/12pt, sender 90% on the flap and 80% in the corner', () => {
+  test('the standard envelope at 100%: recipient 15pt/12pt, sender 90% on the flap and 80% in the corner', () => {
     const flap = buildEnvelopeLayout(openFlap(), textStyle).typography;
     const corner = buildEnvelopeLayout(frontCorner(), textStyle).typography;
-    expect(toPt(flap.recipient.namePx)).toBeCloseTo(14);
+    expect(toPt(flap.recipient.namePx)).toBeCloseTo(15);
     expect(toPt(flap.recipient.linePx)).toBeCloseTo(12);
-    expect(toPt(flap.sender.namePx)).toBeCloseTo(14 * FLAP_FACTOR);
+    expect(toPt(flap.sender.namePx)).toBeCloseTo(15 * FLAP_FACTOR);
     expect(toPt(flap.sender.linePx)).toBeCloseTo(12 * FLAP_FACTOR);
-    expect(toPt(corner.sender.namePx)).toBeCloseTo(14 * CORNER_FACTOR);
+    expect(toPt(corner.sender.namePx)).toBeCloseTo(15 * CORNER_FACTOR);
     expect(toPt(corner.sender.linePx)).toBeCloseTo(12 * CORNER_FACTOR);
   });
 

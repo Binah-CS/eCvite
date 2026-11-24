@@ -28,12 +28,14 @@ const TRIANGLE_SIDE_INSET_MM = 2;
 const PX_PER_PT = 96 / 72;
 const pt = (value) => value * PX_PER_PT;
 const REFERENCE_HEIGHT_MM = 133; // גובה המעטפה הסטנדרטית, שלפיו נקבע גודל הכתב הבסיסי
-const BASE_NAME_PX = pt(14);
+const BASE_NAME_PX = pt(15);
 const BASE_LINE_PX = pt(12);
 const MIN_FONT_RATIO = 0.6;
 const MAX_FONT_RATIO = 1.4;
 export const RECIPIENT_MIN_LINE_PX = pt(10); // שורות הכתובת של הנמען לא קטנות מזה
-export const RECIPIENT_MAX_NAME_PX = pt(18); // שם הנמען לא גדל מעבר לזה
+// שם הנמען לא גדל מעבר לזה. 18pt היה התקרה כשהשם בבסיס היה 14pt; היא גדלה יחד עם השם,
+// כך שהגודל המקסימלי במונה לא ירד בגלל שהשם גדל ביחס לכתובת
+export const RECIPIENT_MAX_NAME_PX = pt((18 * 15) / 14);
 export const SENDER_MIN_LINE_PX = pt(8); // שורות השולח לא קטנות מזה, גם כשהוא לא נכנס (אז יש אזהרה)
 // ריווח השורות במעטפה. נפרד מהמדבקות (LABEL_LINE_HEIGHT), כדי ששינוי כאן לא יזיז אותן
 export const ENVELOPE_LINE_HEIGHT = 1.25;
