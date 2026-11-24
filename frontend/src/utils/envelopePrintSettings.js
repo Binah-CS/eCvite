@@ -6,12 +6,12 @@
 // כל גישה עטופה ב-try/catch - אחסון חסום, מלא או ערך פגום לא יכולים לשבור את ההדפסה
 import {
   CORNER_SIDES,
-  FLAP_SHAPES,
   MAX_SENDERS,
   SENDER_FIELDS,
   SENDER_PLACEMENTS,
   createDefaultEnvelopeSettings,
   createEmptySender,
+  isFlapShape,
   isKnownEnvelopeSize,
 } from './envelopeFormats';
 
@@ -66,7 +66,7 @@ function sanitizeSettings(raw) {
     senderPlacement: SENDER_PLACEMENTS.includes(raw.senderPlacement) ? raw.senderPlacement : defaults.senderPlacement,
     cornerSide: CORNER_SIDES.includes(raw.cornerSide) ? raw.cornerSide : defaults.cornerSide,
     flapDepthMm: raw.flapDepthMm ?? defaults.flapDepthMm,
-    flapShape: FLAP_SHAPES.includes(raw.flapShape) ? raw.flapShape : defaults.flapShape,
+    flapShape: isFlapShape(raw.flapShape) ? raw.flapShape : defaults.flapShape,
   };
 }
 

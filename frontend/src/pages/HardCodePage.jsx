@@ -23,6 +23,10 @@ export const MODAL_TEXTS = {
   FONT_WEIGHT_INPUT_LABEL: "עובי כתב",
   FONT_WEIGHT_REGULAR: "רגיל",
   FONT_WEIGHT_BOLD: "מודגש",
+  LETTER_SPACING_INPUT_LABEL: "ריווח אותיות",
+  LETTER_SPACING_OPTIONS: { normal: "רגיל", wide: "מרווח", wider: "מרווח מאוד" },
+  LETTER_SPACING_UNAVAILABLE: "לא זמין בכתב יד מחובר",
+  LETTER_SPACING_NOT_FOR: { he: "לא יחול על כתובות בעברית (כתב יד מחובר)", en: "לא יחול על כתובות באנגלית (כתב יד מחובר)" },
   SIZE_INPUT_LABEL: "בחירת גודל מדבקה",
   PRINTER_INPUT_LABEL: "בחירת מדפסת",
   
@@ -95,6 +99,7 @@ export const MODAL_TEXTS = {
     return `${where} לא נכנסת במלואה, בדרך כלל בגלל שורה ארוכה שנשברה. כדאי להקטין את הכתב או לקצר את השורה. ההדפסה אפשרית גם כך.`;
   },
   ENVELOPE_ONE_SENDER_NOTE: "בפינה העליונה מודפס השולח הראשון בלבד. להדפסת שני השולחים, בחרו \"על הלשונית\".",
+  ENVELOPE_ONE_SENDER_TRIANGULAR_NOTE: "בלשונית משולשת מודפס השולח הראשון בלבד. להדפסת שני השולחים, בחרו לשונית ישרה.",
   ENVELOPE_PREVIEW_OPEN: "מעטפה פתוחה",
   ENVELOPE_PREVIEW_SINGLE: "מעטפה",
   ENVELOPE_PREVIEW_FRONT: "חזית",

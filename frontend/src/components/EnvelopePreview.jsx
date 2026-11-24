@@ -50,8 +50,8 @@ function overflows(box, contentSelector) {
 }
 
 // השולח זהה בכל המעטפות, ולכן מספיק לדעת אם הוא גולש. אצל הנמען סופרים את התיבות שגולשות:
-// בעמוד ההדפסה יש תיבת נמען אחת לכל מעטפה, ולכן זה מספר המעטפות
-function measureEnvelopeOverflow(container) {
+// בעמוד ההדפסה יש תיבת נמען אחת לכל מעטפה, ולכן זה מספר המעטפות. מיוצא לטסטים
+export function measureEnvelopeOverflow(container) {
   const boxes = (role) => Array.from(container.querySelectorAll(`[data-envelope-${role}-box]`));
   return {
     sender: boxes('sender').some((box) => overflows(box, '[data-envelope-sender-content]')),
@@ -73,7 +73,8 @@ export function useEnvelopeOverflow({ layout, senders, textOptions, content }) {
   return [ref, overflow];
 }
 
-// ההערות שמתחת למעטפה: גלישת השולח (לפי המצב), גלישת נמען, ושולח שני שמצב הפינה לא מדפיס.
+// ההערות שמתחת למעטפה: גלישת השולח (לפי המצב), גלישת נמען, ושולח שני שלא מודפס - בפינה או
+// בלשונית משולשת (ר' getMaxSenders).
 // countRecipients: בעמוד ההדפסה ההודעה על הנמען אומרת בכמה מעטפות. בחלון יש נמען אחד
 export function EnvelopeNotices({ layout, overflow = NO_OVERFLOW, countRecipients = false }) {
   return (
@@ -88,7 +89,11 @@ export function EnvelopeNotices({ layout, overflow = NO_OVERFLOW, countRecipient
           {MODAL_TEXTS.ENVELOPE_RECIPIENT_OVERFLOW(countRecipients ? overflow.recipients : null)}
         </Alert>
       )}
-      {layout?.omittedSenderCount > 0 && <Alert severity="info" sx={{ mt: 1 }}>{MODAL_TEXTS.ENVELOPE_ONE_SENDER_NOTE}</Alert>}
+      {layout?.omittedSenderCount > 0 && (
+        <Alert severity="info" sx={{ mt: 1 }}>
+          {layout.senderMode === 'frontCorner' ? MODAL_TEXTS.ENVELOPE_ONE_SENDER_NOTE : MODAL_TEXTS.ENVELOPE_ONE_SENDER_TRIANGULAR_NOTE}
+        </Alert>
+      )}
     </>
   );
 }

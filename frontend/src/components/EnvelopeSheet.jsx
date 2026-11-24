@@ -5,7 +5,6 @@
 // כל הקואורדינטות כאן ב-style רגיל ולא ב-sx בכוונה: מטמון ה-RTL של MUI (rtl.js) הופך
 // left/right ו-translate ב-sx, אבל לא נוגע ב-style של האלמנט. הסיבוב ב-180° הוא על
 // המיכל של השולחים ולא על כל שורה, ולכן סדר התווים והכיווניות נשמרים.
-import { LABEL_LINE_HEIGHT } from '../utils/labelSheetLayout';
 import { parseColumnPreferences, PRINT_DEFAULT_FIELDS } from '../utils/columnPreferences';
 import {
   EXTRA_PRINT_FIELDS,
@@ -18,8 +17,8 @@ import {
   hasHebrewEnglishSalutation,
   splitHebrewGreeting,
 } from '../pages/PrintPreviewPage';
-import { REFERENCE_RECIPIENT_LINES } from '../utils/envelopeLayout';
-import { getAddressFontFamily } from '../fonts/fonts';
+import { ENVELOPE_LINE_HEIGHT, REFERENCE_RECIPIENT_LINES } from '../utils/envelopeLayout';
+import { getAddressFontFamily, getAddressTextStyle } from '../fonts/fonts';
 
 // השורות של נמען, לפי הסדר שבו הן מודפסות. kind קובע את הגודל: salutation, greeting ו-name
 // בגודל שם, detail בגודל פרטים. המקום היחיד שמחליט אילו שורות יש - גם הרינדור וגם ספירת
@@ -90,12 +89,24 @@ function boxStyle(rect) {
   return { position: 'absolute', left: mm(rect.x), top: mm(rect.y), width: mm(rect.width), height: mm(rect.height) };
 }
 
-function textLineStyle(fontSizePx, fontWeight, color, textAlign = 'center') {
+// הסגנון של כתובת אחת (צבע, font-synthesis וריווח אותיות) לפי השפה שלה - getAddressTextStyle
+// ב-fonts.js, המקום המשותף לכל כתובת מודפסת
+function addressStyleFor(printLanguage, typography) {
+  return getAddressTextStyle({
+    language: printLanguage,
+    fontType: typography.fontType,
+    englishFontType: typography.englishFontType,
+    letterSpacing: typography.letterSpacing,
+  });
+}
+
+// הריווח ב-em, ולכן הוא חל על כל שורה ביחס לגודל שלה
+function textLineStyle(addressStyle, fontSizePx, fontWeight, textAlign = 'center') {
   return {
+    ...addressStyle,
     fontSize: `${fontSizePx}px`,
     fontWeight,
-    color,
-    lineHeight: LABEL_LINE_HEIGHT,
+    lineHeight: ENVELOPE_LINE_HEIGHT,
     textAlign,
     unicodeBidi: 'plaintext',
   };
@@ -107,8 +118,9 @@ function RecipientText({ row, typography, textOptions, getPrintFlag, verticalAli
   const { printLanguage, lines } = getRecipientLines(row, getPrintFlag, textOptions);
   const { greetingAlign } = textOptions;
 
-  const nameStyle = { ...textLineStyle(typography.namePx, typography.fontWeight, '#000000'), marginBottom: 2 };
-  const detailStyle = textLineStyle(typography.linePx, typography.fontWeight, '#333333');
+  const addressStyle = addressStyleFor(printLanguage, typography);
+  const nameStyle = { ...textLineStyle(addressStyle, typography.namePx, typography.fontWeight), marginBottom: 2 };
+  const detailStyle = textLineStyle(addressStyle, typography.linePx, typography.fontWeight);
   const lineStyles = {
     salutation: { ...nameStyle, marginBottom: 0 },
     greeting: {
@@ -157,8 +169,9 @@ function SenderText({ sender, typography, textAlign }) {
   const addressLine = buildAddressLine1(sender, printEverything, printLanguage);
   const cityLine = [sender.city, sender.zip].map((part) => String(part ?? '').trim()).filter(Boolean).join(' ');
   const countryLine = String(sender.country ?? '').trim();
-  const nameStyle = textLineStyle(typography.namePx, typography.fontWeight, '#000000', textAlign);
-  const detailStyle = textLineStyle(typography.linePx, typography.fontWeight, '#333333', textAlign);
+  const addressStyle = addressStyleFor(printLanguage, typography);
+  const nameStyle = textLineStyle(addressStyle, typography.namePx, typography.fontWeight, textAlign);
+  const detailStyle = textLineStyle(addressStyle, typography.linePx, typography.fontWeight, textAlign);
 
   return (
     <div

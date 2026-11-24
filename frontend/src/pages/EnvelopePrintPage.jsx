@@ -8,9 +8,10 @@ import { buildEnvelopeLayout } from '../utils/envelopeLayout';
 import { getSenderMode } from '../utils/envelopeFormats';
 import { loadInitialEnvelopeSettings, saveEnvelopeSettingsForReturn } from '../utils/envelopePrintSettings';
 import { FONT_SCALE_DEFAULT } from '../utils/labelSheetLayout';
+import { saveFontWeightForReturn } from '../utils/labelPrintSettings';
 import { detectPrintLanguage, getSavedSelectedRows, saveSelectedRows } from './PrintPreviewPage';
 import { MODAL_TEXTS } from './HardCodePage';
-import { normalizeFontPair, printWhenFontsReady } from '../fonts/fonts';
+import { normalizeFontPair, normalizeLetterSpacing, printWhenFontsReady, resolveFontWeight } from '../fonts/fonts';
 
 const SHEET_CLASS = 'envelope-print-sheet';
 const PREVIEW_WIDTH = 640;
@@ -37,7 +38,9 @@ export default function EnvelopePrintPage() {
     fontType: receivedFontType,
     englishFontType: receivedEnglishFontType,
     fontScale = FONT_SCALE_DEFAULT,
-    fontWeight = 'regular',
+    fontWeight: receivedFontWeight,
+    fontWeightChoice = null,
+    letterSpacing: receivedLetterSpacing,
     englishSalutation = '',
     emptyLineWhenNoAddress = true,
     greetingShow = true,
@@ -49,10 +52,13 @@ export default function EnvelopePrintPage() {
   } = location.state || {};
   // ids מ-fonts.js: כתב לעברית וכתב לאנגלית. ערך ישן או חסר מתורגם (ר' normalizeFontPair)
   const { fontType, englishFontType } = normalizeFontPair(receivedFontType, receivedEnglishFontType);
+  // בלי עובי (כניסה ישירה לעמוד) - ברירת המחדל של מעטפות
+  const fontWeight = resolveFontWeight(receivedFontWeight, 'envelopes');
 
   const rows = selectedItems.length > 0 ? selectedItems : getSavedSelectedRows();
   const settings = envelopeSettings ?? loadInitialEnvelopeSettings();
-  const textStyle = { fontType, englishFontType, fontScale, fontWeight };
+  const letterSpacing = normalizeLetterSpacing(receivedLetterSpacing);
+  const textStyle = { fontType, englishFontType, fontScale, fontWeight, letterSpacing };
   const textOptions = { englishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
   const getPrintFlag = createPrintFlagGetter();
   // הכתב אחד לכל ההדפסה, לפי השורות של כל הנמענים. הפריסה של כל מעטפה נבנית לפי הנמען
@@ -95,7 +101,9 @@ export default function EnvelopePrintPage() {
     sessionStorage.setItem('savedFontType', fontType);
     sessionStorage.setItem('savedEnglishFontType', englishFontType);
     sessionStorage.setItem('savedFontScale', String(fontScale));
-    sessionStorage.setItem('savedFontWeight', fontWeight);
+    // רק עובי שנבחר במפורש, ולא ברירת המחדל שהודפסה (ר' saveFontWeightForReturn)
+    saveFontWeightForReturn(fontWeightChoice);
+    sessionStorage.setItem('savedLetterSpacing', letterSpacing);
     sessionStorage.setItem('savedEnglishSalutation', englishSalutation);
     sessionStorage.setItem('savedEmptyLineWhenNoAddress', String(emptyLineWhenNoAddress));
     sessionStorage.setItem('savedGreetingShow', String(greetingShow));

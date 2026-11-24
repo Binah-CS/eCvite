@@ -2,16 +2,19 @@ import {
   CORNER_GAP_MM,
   CORNER_MIN_SENDER_WIDTH_MM,
   CORNER_STAMP_MIN_MM,
+  RECIPIENT_MAX_NAME_PX,
+  RECIPIENT_MIN_LINE_PX,
   REFERENCE_RECIPIENT_LINES,
-  SENDER_FONT_FACTOR,
+  SENDER_MIN_LINE_PX,
   SENDER_MODES,
   buildEnvelopeLayout,
   estimateRecipientHeightMm,
   estimateSenderHeightMm,
   getCornerBottomGap,
   getEffectiveEnvelopeFontScale,
-  getEnvelopeFontScaleLimit,
+  getEnvelopeFontScaleRange,
   getEnvelopeMargin,
+  getMaxSenders,
   getSenderTypographyLimit,
   isEnvelopeSettingsReady,
   normalizeEnvelopeFontScale,
@@ -45,6 +48,9 @@ const recipientContent = (layout, lines = REFERENCE_RECIPIENT_LINES) => {
   const top = block.verticalAlign === 'top' ? block.rect.y : block.rect.y + (block.rect.height - height) / 2;
   return { top, bottom: top + height };
 };
+const toPt = (px) => px * 0.75;
+const FLAP_FACTOR = SENDER_MODES.openFlap.senderFontFactor;
+const CORNER_FACTOR = SENDER_MODES.frontCorner.senderFontFactor;
 const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 describe('recipient only', () => {
@@ -141,6 +147,27 @@ describe('open flap', () => {
     expect(40 - (triangular.y + triangular.height)).toBeCloseTo(3);
   });
 
+  // במשולשת הרוחב צר מדי לשתי עמודות: מודפס רק הראשון, ברוחב המלא, כמו בפינה
+  test('a triangular flap prints only the first sender, across the whole width, and reports the second', () => {
+    const two = [sender, { ...sender, name: 'לוי' }];
+    const layout = buildEnvelopeLayout(openFlap({ flapShape: 'triangular', senders: two }), textStyle);
+    const block = blockOf(layout.passes[0], 'senders');
+    expect(block.items.map((item) => item.senderIndex)).toEqual([0]);
+    expect(block.items[0].rect.width).toBeCloseTo(block.rect.width);
+    expect(layout.omittedSenderCount).toBe(1);
+    expect(getMaxSenders(openFlap({ flapShape: 'triangular' }))).toBe(1);
+
+    const straight = buildEnvelopeLayout(openFlap({ senders: two }), textStyle);
+    expect(blockOf(straight.passes[0], 'senders').items).toHaveLength(2);
+    expect(straight.omittedSenderCount).toBe(0);
+  });
+
+  test('on a triangular flap an incomplete second sender does not block printing', () => {
+    const partial = [sender, { ...createEmptySender(), name: 'חלקי' }];
+    expect(isEnvelopeSettingsReady(openFlap({ flapShape: 'triangular', senders: partial }))).toBe(true);
+    expect(isEnvelopeSettingsReady(openFlap({ senders: partial }))).toBe(false);
+  });
+
   test('the fold line is a dashed guide at the flap depth', () => {
     const [pass] = buildEnvelopeLayout(openFlap(), textStyle).passes;
     expect(pass.guides.find((guide) => guide.dashed).points).toEqual([[0, 40], [184, 40]]);
@@ -201,136 +228,159 @@ describe('the font size limit', () => {
     frontCorner: (size) => frontCorner(size),
   };
 
-  // הערכים מחושבים מראש לפי הנוסחאות (ר' התוכנית): בלשונית ובלי שולח רק הנמען מגביל,
-  // ובפינה גם השולח והרווח מהתחתית
+  // הערכים מחושבים מראש: המינימום והמקסימום לפי הגבולות ב-pt (תלויים רק בגובה), והמקסימום
+  // יורד כשהתוכן של החזית לא נכנס - בלשונית ובלי שולח רק הנמען, ובפינה גם השולח
   test.each([
-    ['a7', { sizeId: 'a7' }, { none: [200, 200, 200], openFlap: [200, 200, 200], frontCorner: [200, 200, 140] }],
-    ['c6', { sizeId: 'c6' }, { none: [200, 200, 200], openFlap: [200, 200, 200], frontCorner: [200, 200, 140] }],
-    ['110x80', custom(110, 80), { none: [200, 200, 195], openFlap: [200, 200, 195], frontCorner: [200, 200, 135] }],
-  ])('%s: the limit for each mode and recipient lines', (_, size, expected) => {
+    ['a7', { sizeId: 'a7' }, { none: [125, 125, 125], openFlap: [125, 125, 125], frontCorner: [125, 125, 125] }, 85],
+    ['c6', { sizeId: 'c6' }, { none: [150, 150, 150], openFlap: [150, 150, 150], frontCorner: [150, 150, 125] }, 100],
+    ['110x80', custom(110, 80), { none: [200, 200, 170], openFlap: [200, 200, 170], frontCorner: [200, 200, 140] }, 140],
+    ['350x260', custom(350, 260), { none: [90, 90, 90], openFlap: [90, 90, 90], frontCorner: [90, 90, 90] }, 70],
+  ])('%s: the range for each mode and recipient lines', (_, size, expectedMax, expectedMin) => {
     Object.entries(modes).forEach(([mode, build]) => {
-      const limits = [LINES.reference, LINES.hebrewTypical, LINES.worst]
-        .map((lines) => getEnvelopeFontScaleLimit(build(size), lines));
-      expect({ mode, limits }).toEqual({ mode, limits: expected[mode] });
+      const ranges = [LINES.reference, LINES.hebrewTypical, LINES.worst]
+        .map((lines) => getEnvelopeFontScaleRange(build(size), lines));
+      expect({ mode, max: ranges.map((range) => range.max) }).toEqual({ mode, max: expectedMax[mode] });
+      expect(ranges.every((range) => range.min === expectedMin)).toBe(true);
     });
   });
 
-  // הדרישה: בלי הקטנה מתחת למינימום, ובטווח המידות זה תמיד מספיק - גם במקרה הגרוע
-  test.each([[110, 80], [350, 80], [260, 260], [350, 260]])(
-    '%sx%smm at the minimum font: everything fits in height, also with the most lines and a sender in the corner',
-    (widthMm, heightMm) => {
-      const dimensions = { widthMm, heightMm };
-      const margin = getEnvelopeMargin(dimensions);
-      const corner = buildEnvelopeLayout(
-        frontCorner({ ...custom(widthMm, heightMm), senders: [fullSender] }),
-        { ...textStyle, fontScale: 70 },
-        { recipientLines: LINES.worst, runRecipientLines: LINES.worst },
-      );
-      const senders = blockOf(corner.passes[0], 'senders').rect;
-      const content = recipientContent(corner, LINES.worst);
-      expect(content.top).toBeGreaterThanOrEqual(senders.y + senders.height + CORNER_GAP_MM - 1e-9);
-      expect(content.bottom).toBeLessThanOrEqual(heightMm - getCornerBottomGap(dimensions) + 1e-9);
-
-      const alone = buildEnvelopeLayout(settings(custom(widthMm, heightMm)), { ...textStyle, fontScale: 70 });
-      expect(estimateRecipientHeightMm(alone.typography.recipient, LINES.worst)).toBeLessThanOrEqual(heightMm - 2 * margin);
-      expect(getEnvelopeFontScaleLimit(frontCorner(custom(widthMm, heightMm)), LINES.worst)).toBeGreaterThan(70);
+  // הגבולות של הדרישה: נמען לפחות 10pt בשורות ועד RECIPIENT_MAX_NAME_PX (כ-19.3pt) בשם, שולח לפחות 8pt - בכל גודל שנבחר
+  test.each([['a7', { sizeId: 'a7' }], ['c6', { sizeId: 'c6' }], ['110x80', custom(110, 80)], ['350x260', custom(350, 260)]])(
+    '%s: at any chosen size the recipient stays between 10pt and its name maximum and the sender is at least 8pt',
+    (_, size) => {
+      [1, 70, 100, 150, 5000].forEach((fontScale) => {
+        [openFlap(size), frontCorner(size)].forEach((envelope) => {
+          const { recipient, sender: senderTypography } = buildEnvelopeLayout(envelope, { ...textStyle, fontScale }).typography;
+          expect(recipient.linePx).toBeGreaterThanOrEqual(RECIPIENT_MIN_LINE_PX - 1e-9);
+          expect(recipient.namePx).toBeLessThanOrEqual(RECIPIENT_MAX_NAME_PX + 1e-9);
+          expect(senderTypography.linePx).toBeGreaterThanOrEqual(SENDER_MIN_LINE_PX - 1e-9);
+        });
+      });
     },
   );
 
-  test('the limit goes below 100% when that is what fits, and stops at the minimum', () => {
-    const many = { nameLines: 2, detailLines: 25 };
-    const limit = getEnvelopeFontScaleLimit(settings(custom(110, 80)), many);
-    expect(limit).toBeLessThan(100);
-    expect(limit).toBeGreaterThan(70);
-    const layout = buildEnvelopeLayout(settings(custom(110, 80)), { ...textStyle, fontScale: 200 }, { runRecipientLines: many });
-    expect(estimateRecipientHeightMm(layout.typography.recipient, many)).toBeLessThanOrEqual(80 - 2 * 5);
-
-    expect(getEnvelopeFontScaleLimit(settings(custom(110, 80)), { nameLines: 2, detailLines: 60 })).toBe(70);
+  test('the standard envelope at 100%: recipient 15pt/12pt, sender 90% on the flap and 80% in the corner', () => {
+    const flap = buildEnvelopeLayout(openFlap(), textStyle).typography;
+    const corner = buildEnvelopeLayout(frontCorner(), textStyle).typography;
+    expect(toPt(flap.recipient.namePx)).toBeCloseTo(15);
+    expect(toPt(flap.recipient.linePx)).toBeCloseTo(12);
+    expect(toPt(flap.sender.namePx)).toBeCloseTo(15 * FLAP_FACTOR);
+    expect(toPt(flap.sender.linePx)).toBeCloseTo(12 * FLAP_FACTOR);
+    expect(toPt(corner.sender.namePx)).toBeCloseTo(15 * CORNER_FACTOR);
+    expect(toPt(corner.sender.linePx)).toBeCloseTo(12 * CORNER_FACTOR);
   });
 
+  // כתובת רגילה (עד שם + 4 שורות) נכנסת בגודל המינימלי בכל המידות, גם עם שולח מלא בפינה
+  test.each([[110, 80], [350, 80], [260, 260], [350, 260]])(
+    '%sx%smm at the minimum font: a regular address fits in height with a sender in the corner',
+    (widthMm, heightMm) => {
+      const dimensions = { widthMm, heightMm };
+      [LINES.reference, LINES.hebrewTypical].forEach((lines) => {
+        const corner = buildEnvelopeLayout(
+          frontCorner({ ...custom(widthMm, heightMm), senders: [fullSender] }),
+          { ...textStyle, fontScale: 1 },
+          { recipientLines: lines, runRecipientLines: lines },
+        );
+        const senders = blockOf(corner.passes[0], 'senders').rect;
+        const content = recipientContent(corner, lines);
+        expect(content.top).toBeGreaterThanOrEqual(senders.y + senders.height + CORNER_GAP_MM - 1e-9);
+        expect(content.bottom).toBeLessThanOrEqual(heightMm - getCornerBottomGap(dimensions) + 1e-9);
+      });
+    },
+  );
+
+  test('the maximum goes down to what fits, and stops at the minimum', () => {
+    expect(getEnvelopeFontScaleRange(settings(), { nameLines: 2, detailLines: 20 })).toEqual({ min: 85, max: 100 });
+    const layout = buildEnvelopeLayout(settings(), { ...textStyle, fontScale: 200 }, { runRecipientLines: { nameLines: 2, detailLines: 20 } });
+    expect(estimateRecipientHeightMm(layout.typography.recipient, { nameLines: 2, detailLines: 20 }))
+      .toBeLessThanOrEqual(133 - 2 * getEnvelopeMargin({ widthMm: 184, heightMm: 133 }));
+
+    expect(getEnvelopeFontScaleRange(settings(), { nameLines: 2, detailLines: 40 })).toEqual({ min: 85, max: 85 });
+  });
+
+  // מעטפה נמוכה עם הרבה שורות: לא מקטינים מתחת למינימום. התוכן גולש, והגלישה נמדדת ב-DOM
+  // ומקבלת אזהרה (measureEnvelopeOverflow)
+  test('when even the minimum does not fit, the font stays at the minimum and the recipient overflows', () => {
+    const small = frontCorner({ ...custom(110, 80), senders: [fullSender] });
+    expect(getEnvelopeFontScaleRange(small, LINES.worst)).toEqual({ min: 140, max: 140 });
+    const layout = buildEnvelopeLayout(small, { ...textStyle, fontScale: 200 }, { recipientLines: LINES.worst, runRecipientLines: LINES.worst });
+    expect(layout.typography.recipient.linePx).toBeGreaterThanOrEqual(RECIPIENT_MIN_LINE_PX - 1e-9);
+    expect(recipientContent(layout, LINES.worst).bottom).toBeGreaterThan(80 - getCornerBottomGap({ widthMm: 110, heightMm: 80 }));
+  });
 });
 
 // הלשונית והחזית הם שטחים נפרדים: עומק הלשונית מגביל רק את כתב השולח, והנמען נשאר בגודל
 // שנבחר (עד התקרה של החזית)
 describe('the sender on a shallow flap', () => {
-  const at200 = { ...textStyle, fontScale: 200 };
+  const atMax = { ...textStyle, fontScale: 200 };
   const flapSpace = (flapDepthMm) => flapDepthMm - 3 - getEnvelopeMargin({ widthMm: 184, heightMm: 133 });
-  const recipientAlone = buildEnvelopeLayout(settings(), at200).typography.recipient;
-  const senderWhenRecipientAt = (scale) => buildEnvelopeLayout(openFlap(), { ...textStyle, fontScale: scale }).typography.sender;
-  // אותו גודל, גם כשהחישוב עבר בסדר פעולות אחר
-  const sameSize = (actual, expected) => {
-    expect(actual.namePx).toBeCloseTo(expected.namePx);
-    expect(actual.linePx).toBeCloseTo(expected.linePx);
-  };
+  const recipientAlone = buildEnvelopeLayout(settings(), atMax).typography.recipient;
 
-  test('a 25mm flap leaves the recipient at 200%, and only the sender gets smaller to fit the flap', () => {
-    const shallow = openFlap({ flapDepthMm: 25 });
-    expect(getEnvelopeFontScaleLimit(shallow)).toBe(200);
-    const { recipient, sender: shallowSender } = buildEnvelopeLayout(shallow, at200).typography;
+  test('a 30mm flap leaves the recipient at its maximum, and only the sender gets smaller to fill the flap', () => {
+    const shallow = openFlap({ flapDepthMm: 30 });
+    expect(getEnvelopeFontScaleRange(shallow).max).toBe(125);
+    const { recipient, sender: shallowSender } = buildEnvelopeLayout(shallow, atMax).typography;
     expect(recipient).toEqual(recipientAlone);
 
-    const deepSender = buildEnvelopeLayout(openFlap({ flapDepthMm: 40 }), at200).typography.sender;
+    const deepSender = buildEnvelopeLayout(openFlap({ flapDepthMm: 40 }), atMax).typography.sender;
     expect(shallowSender.namePx).toBeLessThan(deepSender.namePx);
-    expect(estimateSenderHeightMm(shallowSender)).toBeLessThanOrEqual(flapSpace(25));
-    // השולח בגודל של צעד במונה (85%), והצעד הבא כבר לא היה נכנס בלשונית
-    sameSize(shallowSender, senderWhenRecipientAt(85));
-    expect(estimateSenderHeightMm(senderWhenRecipientAt(90))).toBeGreaterThan(flapSpace(25));
+    expect(shallowSender.namePx).toBeLessThan(recipient.namePx * FLAP_FACTOR);
+    // הגודל הגדול ביותר שנכנס: ממלא את הלשונית בדיוק
+    expect(estimateSenderHeightMm(shallowSender)).toBeCloseTo(flapSpace(30));
   });
 
   test('a 12mm flap gives the sender the minimum, the recipient does not change, and the warning stays', () => {
-    const tooShallow = openFlap({ flapDepthMm: 12 });
-    const layout = buildEnvelopeLayout(tooShallow, at200);
+    const layout = buildEnvelopeLayout(openFlap({ flapDepthMm: 12 }), atMax);
     expect(layout).not.toBeNull();
-    expect(getEnvelopeFontScaleLimit(tooShallow)).toBe(200);
     expect(layout.typography.recipient).toEqual(recipientAlone);
-    sameSize(layout.typography.sender, senderWhenRecipientAt(70));
+    expect(layout.typography.sender.linePx).toBeCloseTo(SENDER_MIN_LINE_PX);
     // גם במינימום הוא לא נכנס - הגלישה נמדדת ב-DOM ומקבלת אזהרה
     expect(estimateSenderHeightMm(layout.typography.sender)).toBeGreaterThan(flapSpace(12));
   });
 
-  test('a small recipient keeps the sender at 80% of it, also on a shallow flap', () => {
-    const layout = buildEnvelopeLayout(openFlap({ flapDepthMm: 25 }), { ...textStyle, fontScale: 70 });
-    expect(layout.typography.sender.namePx).toBeCloseTo(layout.typography.recipient.namePx * SENDER_FONT_FACTOR);
+  test('when the flap has room the sender is exactly 90% of the recipient', () => {
+    const layout = buildEnvelopeLayout(openFlap(), { ...textStyle, fontScale: 1 });
+    expect(layout.typography.sender.namePx).toBeCloseTo(layout.typography.recipient.namePx * FLAP_FACTOR);
+    expect(layout.typography.sender.linePx).toBeCloseTo(layout.typography.recipient.linePx * FLAP_FACTOR);
   });
 
   test('the flap limit depends on the depth, not on the shape', () => {
-    const senderOf = (flapShape) => buildEnvelopeLayout(openFlap({ flapDepthMm: 25, flapShape }), at200).typography.sender;
+    const senderOf = (flapShape) => buildEnvelopeLayout(openFlap({ flapDepthMm: 30, flapShape }), atMax).typography.sender;
     expect(senderOf('triangular')).toEqual(senderOf('straight'));
   });
 
   test('the flap does not limit the sender in the corner', () => {
-    const corner = buildEnvelopeLayout(frontCorner({ flapDepthMm: 12 }), at200).typography.sender;
-    expect(corner.namePx).toBeCloseTo(getSenderTypographyLimit({ widthMm: 184, heightMm: 133 }).namePx);
+    const { recipient, sender: corner } = buildEnvelopeLayout(frontCorner({ flapDepthMm: 12 }), atMax).typography;
+    expect(corner.namePx).toBeCloseTo(recipient.namePx * CORNER_FACTOR);
+    expect(getSenderTypographyLimit({ widthMm: 184, heightMm: 133 })).toBeNull();
   });
 });
 
 describe('the chosen font size', () => {
-  test('changing the height to 1 and back to 150 brings back the chosen font size', () => {
-    const chosen = 150;
-    // אותה בחירה בכל שלב - שינוי המידות לא כותב לתוכה, רק הכתב בפועל משתנה
-    const effective = [100, 1, '', 150].map((heightMm) => getEffectiveEnvelopeFontScale(chosen, settings(custom(184, heightMm))));
-    expect(effective[0]).toBeLessThanOrEqual(chosen);
-    expect(effective[1]).toBe(100);
-    expect(effective[2]).toBe(100);
-    expect(effective[3]).toBe(chosen);
-    expect(chosen).toBe(150);
+  test('changing the height to 1 and back brings back the chosen font size', () => {
+    const chosen = 110;
+    // אותה בחירה בכל שלב - שינוי המידות לא כותב לתוכה, רק הכתב בפועל משתנה. בגובה 100
+    // המינימום (10pt) מעל הבחירה, ולכן הכתב בפועל גדל
+    const effective = [133, 100, 1, '', 133].map((heightMm) => getEffectiveEnvelopeFontScale(chosen, settings(custom(184, heightMm))));
+    expect(effective).toEqual([110, 115, 100, 100, 110]);
+    expect(chosen).toBe(110);
   });
 
   test('the effective size follows the sender placement and the recipient lines', () => {
-    const small = custom(110, 80);
-    expect(getEffectiveEnvelopeFontScale(200, frontCorner(small), LINES.worst)).toBe(135);
-    expect(getEffectiveEnvelopeFontScale(200, { ...frontCorner(small), printSender: false }, LINES.worst)).toBe(195);
-    expect(getEffectiveEnvelopeFontScale(200, frontCorner(small))).toBe(200);
+    const many = { nameLines: 2, detailLines: 15 };
+    expect(getEffectiveEnvelopeFontScale(200, frontCorner(), many)).toBe(95);
+    expect(getEffectiveEnvelopeFontScale(200, { ...frontCorner(), printSender: false }, many)).toBe(125);
+    expect(getEffectiveEnvelopeFontScale(200, frontCorner())).toBe(125);
   });
 
   test('the layout prints the effective size, the same for every envelope of the run', () => {
-    const small = frontCorner(custom(110, 80));
-    const atCap = buildEnvelopeLayout(small, { ...textStyle, fontScale: 135 }).typography.recipient;
-    const short = buildEnvelopeLayout(small, { ...textStyle, fontScale: 200 }, {
-      recipientLines: LINES.reference, runRecipientLines: LINES.worst,
+    const many = { nameLines: 2, detailLines: 15 };
+    const atCap = buildEnvelopeLayout(frontCorner(), { ...textStyle, fontScale: 95 }).typography.recipient;
+    const short = buildEnvelopeLayout(frontCorner(), { ...textStyle, fontScale: 200 }, {
+      recipientLines: LINES.reference, runRecipientLines: many,
     }).typography.recipient;
-    const long = buildEnvelopeLayout(small, { ...textStyle, fontScale: 200 }, {
-      recipientLines: LINES.worst, runRecipientLines: LINES.worst,
+    const long = buildEnvelopeLayout(frontCorner(), { ...textStyle, fontScale: 200 }, {
+      recipientLines: many, runRecipientLines: many,
     }).typography.recipient;
     expect(short).toEqual(atCap);
     expect(long).toEqual(atCap);
@@ -342,10 +392,12 @@ describe('the chosen font size', () => {
     expect(normalizeEnvelopeFontScale(value)).toBe(expected);
   });
 
-  test('the effective size is the choice up to the limit, and never below the minimum', () => {
-    const limit = getEnvelopeFontScaleLimit(settings());
-    expect(getEffectiveEnvelopeFontScale(5000, settings())).toBe(limit);
-    expect(getEffectiveEnvelopeFontScale(1, settings())).toBe(70);
+  test('the effective size is the choice inside the range of the envelope', () => {
+    const { min, max } = getEnvelopeFontScaleRange(settings());
+    expect(getEffectiveEnvelopeFontScale(5000, settings())).toBe(max);
+    expect(getEffectiveEnvelopeFontScale(1, settings())).toBe(min);
+    // בחירה שמורה של 70% (למשל מהמדבקות) עולה למינימום של המעטפה
+    expect(getEffectiveEnvelopeFontScale(70, settings())).toBe(85);
     expect(getEffectiveEnvelopeFontScale('abc', settings())).toBe(100);
   });
 });
@@ -421,17 +473,19 @@ describe('front corner', () => {
     const short = buildEnvelopeLayout(size, { ...textStyle, fontScale: 200 }, {
       recipientLines: LINES.reference, runRecipientLines: LINES.worst,
     });
-    const alone = buildEnvelopeLayout(settings(custom(110, 80)), { ...textStyle, fontScale: 135 });
+    const runScale = getEffectiveEnvelopeFontScale(200, size, LINES.worst);
+    const alone = buildEnvelopeLayout(settings(custom(110, 80)), { ...textStyle, fontScale: runScale });
     expect(blockOf(short.passes[0], 'recipient')).toEqual(blockOf(alone.passes[0], 'recipient'));
   });
 
+  // 110x80 עם המקרה הגרוע לא נכנס גם במינימום - ר' 'when even the minimum does not fit'
   test.each([
-    ['a7', { sizeId: 'a7' }],
-    ['c6', { sizeId: 'c6' }],
-    ['110x80', custom(110, 80)],
-    ['350x260', custom(350, 260)],
-  ])('%s: at the maximum font no overlap and the gap from the bottom is kept, for every number of lines', (_, size) => {
-    Object.values(LINES).forEach((lines) => {
+    ['a7', { sizeId: 'a7' }, Object.values(LINES)],
+    ['c6', { sizeId: 'c6' }, Object.values(LINES)],
+    ['110x80', custom(110, 80), [LINES.reference, LINES.hebrewTypical]],
+    ['350x260', custom(350, 260), Object.values(LINES)],
+  ])('%s: at the maximum font no overlap and the gap from the bottom is kept, for every number of lines that fits', (_, size, lineProfiles) => {
+    lineProfiles.forEach((lines) => {
       const layout = buildEnvelopeLayout(
         frontCorner({ ...size, senders: [fullSender] }),
         { ...textStyle, fontScale: 5000 },
@@ -483,20 +537,40 @@ describe('front corner', () => {
 });
 
 describe('typography', () => {
-  test('the sender uses the recipient font at 80%', () => {
-    const { typography } = buildEnvelopeLayout(openFlap(), { ...textStyle, fontWeight: 'bold' });
+  test.each([
+    ['openFlap', openFlap, 0.9],
+    ['frontCorner', frontCorner, 0.8],
+  ])('%s: the sender uses the recipient font at the ratio of the mode', (_, build, factor) => {
+    const { typography } = buildEnvelopeLayout(build(), { ...textStyle, fontWeight: 'bold' });
     expect(typography.sender.fontType).toBe(textStyle.fontType);
     expect(typography.sender.englishFontType).toBe(textStyle.englishFontType);
     expect(typography.sender.fontWeight).toBe('bold');
-    expect(typography.sender.namePx).toBeCloseTo(typography.recipient.namePx * SENDER_FONT_FACTOR);
-    expect(typography.sender.linePx).toBeCloseTo(typography.recipient.linePx * SENDER_FONT_FACTOR);
+    expect(typography.sender.namePx).toBeCloseTo(typography.recipient.namePx * factor);
+    expect(typography.sender.linePx).toBeCloseTo(typography.recipient.linePx * factor);
+  });
+
+  test('the chosen letter spacing level is passed to the recipient and the sender, and a bad value is normal', () => {
+    const spaced = buildEnvelopeLayout(openFlap(), { ...textStyle, letterSpacing: 'wide' }).typography;
+    expect(spaced.recipient.letterSpacing).toBe('wide');
+    expect(spaced.sender.letterSpacing).toBe('wide');
+    expect(buildEnvelopeLayout(openFlap(), { ...textStyle, letterSpacing: 'huge' }).typography.recipient.letterSpacing).toBe('normal');
+    expect(buildEnvelopeLayout(openFlap(), textStyle).typography.recipient.letterSpacing).toBe('normal');
   });
 
   test('a future sender override replaces only what it sets', () => {
-    const recipient = { fontFamily: 'Arial', fontWeight: 'normal', namePx: 20, linePx: 10 };
-    expect(resolveSenderTypography(recipient, { fontFamily: 'David' })).toEqual({
-      fontFamily: 'David', fontWeight: 'normal', namePx: 16, linePx: 8,
+    const recipient = { fontFamily: 'Arial', fontWeight: 'normal', namePx: 20, linePx: 15 };
+    expect(resolveSenderTypography(recipient, { factor: 0.8, override: { fontFamily: 'David' } })).toEqual({
+      fontFamily: 'David', fontWeight: 'normal', namePx: 16, linePx: 12,
     });
+  });
+
+  test('the sender is raised to 8pt when the ratio or the flap would make it smaller, keeping its proportions', () => {
+    const recipient = { namePx: 16, linePx: 13.5 };
+    const raised = resolveSenderTypography(recipient, { factor: 0.5 });
+    expect(raised.linePx).toBeCloseTo(SENDER_MIN_LINE_PX);
+    expect(raised.namePx / raised.linePx).toBeCloseTo(16 / 13.5);
+    const limited = resolveSenderTypography(recipient, { factor: 0.9, limit: { namePx: 4, linePx: 3 } });
+    expect(limited.linePx).toBeCloseTo(SENDER_MIN_LINE_PX);
   });
 
   test('the text scales with the envelope', () => {
@@ -505,35 +579,22 @@ describe('typography', () => {
     expect(small.namePx).toBeLessThan(large.namePx);
   });
 
-  test('the sender limit is what the sender gets with the recipient at 140%', () => {
-    const at140 = buildEnvelopeLayout(openFlap(), { ...textStyle, fontScale: 140 }).typography.sender;
-    expect(getSenderTypographyLimit({ widthMm: 184, heightMm: 133 })).toEqual({
-      namePx: expect.closeTo(at140.namePx),
-      linePx: expect.closeTo(at140.linePx),
-    });
+  test('the flap limit is the largest sender that fits the flap depth', () => {
+    const dimensions = { widthMm: 184, heightMm: 133 };
+    const limit = getSenderTypographyLimit(dimensions, 40);
+    expect(estimateSenderHeightMm(limit)).toBeCloseTo(40 - 3 - getEnvelopeMargin(dimensions));
   });
 
-  test.each([['openFlap'], ['frontCorner']])(
-    '%s: with the recipient at 200%% the sender does not grow past its limit',
-    (senderPlacement) => {
-      const layout = buildEnvelopeLayout(
-        settings({ printSender: true, senderPlacement, senders: [sender] }),
-        { ...textStyle, fontScale: 200 },
-      );
-      const limit = getSenderTypographyLimit({ widthMm: 184, heightMm: 133 });
-      expect(layout.typography.recipient.namePx).toBeGreaterThan(limit.namePx / SENDER_FONT_FACTOR);
-      expect(layout.typography.sender.namePx).toBeCloseTo(limit.namePx);
-      expect(layout.typography.sender.linePx).toBeCloseTo(limit.linePx);
-      expect(layout.typography.sender.fontType).toBe(textStyle.fontType);
-    },
-  );
-
-  test('the sender is never larger than the recipient, at any font size', () => {
-    for (let scale = 70; scale <= 200; scale += 5) {
-      const { recipient, sender: senderTypography } = buildEnvelopeLayout(openFlap(), { ...textStyle, fontScale: scale }).typography;
-      expect(senderTypography.namePx).toBeLessThan(recipient.namePx);
-      expect(senderTypography.linePx).toBeLessThan(recipient.linePx);
-    }
+  test('the sender is never larger than the recipient, at any font size and in any envelope', () => {
+    [{}, { sizeId: 'c6' }, custom(110, 80), custom(350, 260)].forEach((size) => {
+      [openFlap(size), frontCorner(size)].forEach((envelope) => {
+        for (let scale = 70; scale <= 200; scale += 5) {
+          const { recipient, sender: senderTypography } = buildEnvelopeLayout(envelope, { ...textStyle, fontScale: scale }).typography;
+          expect(senderTypography.namePx).toBeLessThan(recipient.namePx);
+          expect(senderTypography.linePx).toBeLessThan(recipient.linePx);
+        }
+      });
+    });
   });
 });
 

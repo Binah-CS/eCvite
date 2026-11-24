@@ -13,7 +13,7 @@ import { detectPrintLanguage } from '../pages/PrintPreviewPage';
 import {
   buildEnvelopeLayout,
   getEffectiveEnvelopeFontScale,
-  getEnvelopeFontScaleLimit,
+  getEnvelopeFontScaleRange,
   isEnvelopeSettingsReady,
   normalizeEnvelopeFontScale,
 } from '../utils/envelopeLayout';
@@ -26,7 +26,19 @@ import {
 // 🌟 ייבוא הקבועים החדשים מהעמוד הייעודי
 import { MODAL_TEXTS } from '../pages/HardCodePage';
 import FontSelect from './FontSelect';
-import { DEFAULT_FONT_ID, getFontScriptWarning, normalizeEnglishFontId, normalizeFontId, normalizeFontPair } from '../fonts/fonts';
+import {
+  DEFAULT_FONT_ID,
+  DEFAULT_LETTER_SPACING,
+  LETTER_SPACING_LEVELS,
+  getFontScriptWarning,
+  getLetterSpacingAvailability,
+  isFontWeight,
+  isLetterSpacing,
+  normalizeEnglishFontId,
+  normalizeFontId,
+  normalizeFontPair,
+  resolveFontWeight,
+} from '../fonts/fonts';
 import { getSenderMode } from '../utils/envelopeFormats';
 import {
   getScaledLabelSizes,
@@ -258,9 +270,14 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     initialLabelSize === 'custom' ? getCustomLabelLayout(customFormat)?.height : undefined
   ));
 
-  // 6. עובי כתב לכל המדבקה, כולל השם - "רגיל" או "מודגש"
+  // 6. עובי כתב לכל הכתובת, כולל השם - "רגיל" או "מודגש". null = עוד לא נבחר ואין ערך שמור:
+  // אז העובי בפועל הוא ברירת המחדל של סוג ההדפסה (effectiveFontWeight, ר' resolveFontWeight)
   const [fontWeight, setFontWeight] = useState(() =>
-    initialChoice('savedFontWeight', 'fontWeight', (v) => v === 'regular' || v === 'bold', 'regular'));
+    initialChoice('savedFontWeight', 'fontWeight', isFontWeight, null));
+
+  // 6.1 ריווח אותיות - רק במעטפות. לא חל על כתב יד מחובר (ר' getLetterSpacingAvailability)
+  const [letterSpacing, setLetterSpacing] = useState(() =>
+    initialChoice('savedLetterSpacing', 'letterSpacing', isLetterSpacing, DEFAULT_LETTER_SPACING));
 
   const [englishSalutation, setEnglishSalutation] = useState(() => {
     const saved = typeof window !== 'undefined' ? sessionStorage.getItem('savedEnglishSalutation') || '' : '';
@@ -305,7 +322,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
   // אפילו עובר למשתמשת אחרת שמתחברת באותה לשונית
   useEffect(() => {
-    ['savedPrintType', SAVED_ENVELOPE_SETTINGS_KEY, 'savedLabelSize', 'savedCustomFormat', 'savedPrinter', 'savedFontType', 'savedEnglishFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight']
+    ['savedPrintType', SAVED_ENVELOPE_SETTINGS_KEY, 'savedLabelSize', 'savedCustomFormat', 'savedPrinter', 'savedFontType', 'savedEnglishFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight', 'savedLetterSpacing']
       .forEach((key) => sessionStorage.removeItem(key));
     sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
     ['savedGreetingShow', 'savedGreetingSeparateLine', 'savedGreetingAlign'].forEach((key) => sessionStorage.removeItem(key));
@@ -313,8 +330,10 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
   // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
   // ייפתח אצלה עם הבחירות האלה. לא מחכים לתשובה - ההדפסה לא תלויה בשמירה
+  // fontWeight נשמר כפי שנבחר: null כשלא נבחר, כדי שמשתמשת שלא בחרה עובי תקבל גם בפעם
+  // הבאה את ברירת המחדל של סוג ההדפסה (ולא את 'regular' של המדבקות גם במעטפות)
   const rememberChoices = () => {
-    saveLabelPrintSettings({ fontType, englishFontType, labelSize, customFormat, printer, deliveryMethod, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign });
+    saveLabelPrintSettings({ fontType, englishFontType, labelSize, customFormat, printer, deliveryMethod, fontScale, fontWeight, letterSpacing, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign });
   };
 
   // מעבר לגודל מדבקה קטן יותר מוריד גודל כתב שכבר לא נכנס בו למקסימום החדש
@@ -329,6 +348,13 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
   const [printType, setPrintType] = useState(returningToEnvelopes ? 'envelopes' : 'labels');
   const isEnvelopes = printType === 'envelopes';
+  const effectiveFontWeight = resolveFontWeight(fontWeight, printType);
+  // ההערה ליד ריווח האותיות: מושבת כשאף שפה לא מקבלת ריווח, הערה כשרק אחת לא מקבלת
+  const spacingAvailability = getLetterSpacingAvailability(fontType, englishFontType);
+  const letterSpacingDisabled = !spacingAvailability.he && !spacingAvailability.en;
+  const letterSpacingNote = letterSpacingDisabled
+    ? MODAL_TEXTS.LETTER_SPACING_UNAVAILABLE
+    : ['he', 'en'].filter((language) => !spacingAvailability[language]).map((language) => MODAL_TEXTS.LETTER_SPACING_NOT_FOR[language])[0] ?? null;
   const [notification, setNotification] = useState('');
 
   // גודל הכתב משותף לשני סוגי ההדפסה, אבל התקרה שלו נגזרת ממה שמדפיסים עליו
@@ -338,7 +364,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const envelopePrintFlag = createPrintFlagGetter();
   const envelopeRows = rowsToPrint.length > 0 ? rowsToPrint : [ENVELOPE_PREVIEW_SAMPLE_ROW];
   const envelopeRecipientLines = isEnvelopes ? countRecipientLines(envelopeRows, envelopePrintFlag, envelopeTextOptions) : null;
-  const envelopeFontLimit = isEnvelopes ? getEnvelopeFontScaleLimit(envelopeSettings, envelopeRecipientLines) : null;
+  const envelopeFontRange = isEnvelopes ? getEnvelopeFontScaleRange(envelopeSettings, envelopeRecipientLines) : null;
 
   // אזהרה על הכתבים רק לפי השפות של הכתובות שבאמת יודפסו (detectPrintLanguage): הנמענים,
   // ובמעטפות עם שולח - גם השולחים (כמו ב-SenderText). בלי נמענים אין אזהרה
@@ -350,20 +376,23 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   }
   const fontScriptWarning = getFontScriptWarning(fontType, englishFontType, [...printedLanguages]);
 
-  const clampCurrentFontScale = (scale) => (isEnvelopes
-    ? Math.min(Math.max(scale, FONT_SCALE_MIN), envelopeFontLimit)
-    : clampFontScale(scale, labelSize, labelSize === 'custom' ? customLayout?.height : undefined));
+  const clampLabelFontScale = (scale) => clampFontScale(scale, labelSize, labelSize === 'custom' ? customLayout?.height : undefined);
+  const minCurrentFontScale = isEnvelopes ? envelopeFontRange.min : FONT_SCALE_MIN;
   const maxCurrentFontScale = isEnvelopes
-    ? envelopeFontLimit
+    ? envelopeFontRange.max
     : getMaxFontScale(labelSize, labelSize === 'custom' ? customLayout?.height : undefined);
-  // במעטפות fontScale הוא הבחירה, והמונה מציג את מה שבאמת מודפס: הבחירה עד התקרה של
-  // המעטפה הנוכחית. כשהתקרה עולה שוב, הכתב חוזר לבחירה. במדבקות שני הערכים זהים
+  // במעטפות fontScale הוא הבחירה, והמונה מציג את מה שבאמת מודפס: הבחירה בתוך הטווח של
+  // המעטפה הנוכחית (גבולות ב-pt ומה שנכנס). כשהטווח משתנה, הכתב חוזר לבחירה. +/- זזים
+  // מהגודל המוצג, כך שבחירה שמורה מתחת למינימום (למשל 70%) עולה כבר בלחיצה הראשונה.
+  // במדבקות שני הערכים זהים
   const displayedFontScale = isEnvelopes
     ? getEffectiveEnvelopeFontScale(fontScale, envelopeSettings, envelopeRecipientLines)
     : fontScale;
-  const decreaseFontScale = () => setFontScale((s) => (isEnvelopes
-    ? Math.max(FONT_SCALE_MIN, getEffectiveEnvelopeFontScale(s, envelopeSettings, envelopeRecipientLines) - FONT_SCALE_STEP)
-    : clampCurrentFontScale(s - FONT_SCALE_STEP)));
+  const stepFontScale = (delta) => setFontScale((s) => {
+    if (!isEnvelopes) return clampLabelFontScale(s + delta);
+    const next = getEffectiveEnvelopeFontScale(s, envelopeSettings, envelopeRecipientLines) + delta;
+    return Math.min(Math.max(next, envelopeFontRange.min), envelopeFontRange.max);
+  });
 
   const printDisabled = isEnvelopes
     ? !isEnvelopeSettingsReady(envelopeSettings)
@@ -384,10 +413,12 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   const goToEnvelopes = (autoPrint) => {
     // בחירת המדפסת נזכרת כמו במדבקות. שאר הבחירות השמורות של המדבקות נשארות כמו שהן
     saveLabelPrintSettings({ ...loadLabelPrintSettings(), printer, deliveryMethod });
-    const textStyle = { fontType, englishFontType, fontScale, fontWeight, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
+    const textStyle = { fontType, englishFontType, fontScale, fontWeight: effectiveFontWeight, letterSpacing, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
     saveSelectedRows(rowsToPrint);
     navigate('/print-envelopes', {
-      state: { selectedItems: rowsToPrint, envelopeSettings, ...textStyle, printer, deliveryMethod, englishSalutation: selectedEnglishSalutation, autoPrint },
+      // fontWeightChoice: הבחירה עצמה (null = לא נבחר), כדי ש"שינוי הגדרות הדפסה" לא ישמור
+      // את ברירת המחדל כאילו נבחרה (ר' saveFontWeightForReturn)
+      state: { selectedItems: rowsToPrint, envelopeSettings, ...textStyle, fontWeightChoice: fontWeight, printer, deliveryMethod, englishSalutation: selectedEnglishSalutation, autoPrint },
     });
   };
 
@@ -419,7 +450,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     // ההדפסה של הדפדפן מיד בכניסה, בלי לחכות שילחצו שוב על "הדפס" שם
     saveSelectedRows(rowsToPrint);
     navigate('/print-preview', {
-      state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, englishFontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, autoPrint: true },
+      state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, englishFontType, deliveryMethod, fontScale, fontWeight: effectiveFontWeight, fontWeightChoice: fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, autoPrint: true },
     });
 
     sessionStorage.removeItem('fromPreview');
@@ -438,6 +469,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     sessionStorage.removeItem('savedGreetingAlign');
     sessionStorage.removeItem('savedFontScale');
     sessionStorage.removeItem('savedFontWeight');
+    sessionStorage.removeItem('savedLetterSpacing');
 
     onClose();
     setStep(1);
@@ -450,7 +482,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     }
     rememberChoices();
     saveSelectedRows(rowsToPrint);
-    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, englishFontType, deliveryMethod, fontScale, fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign } });
+    navigate('/print-preview', { state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, englishFontType, deliveryMethod, fontScale, fontWeight: effectiveFontWeight, fontWeightChoice: fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign } });
   };
 
   return (
@@ -518,8 +550,8 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <IconButton
                     size="small"
-                    onClick={decreaseFontScale}
-                    disabled={displayedFontScale <= FONT_SCALE_MIN}
+                    onClick={() => stepFontScale(-FONT_SCALE_STEP)}
+                    disabled={displayedFontScale <= minCurrentFontScale}
                   >
                     <RemoveIcon fontSize="small" />
                   </IconButton>
@@ -528,7 +560,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <IconButton
                     size="small"
-                    onClick={() => setFontScale((s) => clampCurrentFontScale(s + FONT_SCALE_STEP))}
+                    onClick={() => stepFontScale(FONT_SCALE_STEP)}
                     disabled={displayedFontScale >= maxCurrentFontScale}
                   >
                     <AddIcon fontSize="small" />
@@ -541,7 +573,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                   </Typography>
                   <RadioGroup
                     row
-                    value={fontWeight}
+                    value={effectiveFontWeight}
                     onChange={(e) => setFontWeight(e.target.value)}
                     sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
                   >
@@ -549,6 +581,40 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                     <FormControlLabel value="bold" control={<Radio size="small" />} label={MODAL_TEXTS.FONT_WEIGHT_BOLD} sx={{ mr: 0 }} />
                   </RadioGroup>
                 </Stack>
+
+                {/* ריווח אותיות - רק במעטפות. מושבת כשכל הכתבים שנבחרו מחוברים, ועם הערה
+                    כשרק אחד מהם מחובר (הריווח נקבע לכל כתובת לפי הכתב של השפה שלה) */}
+                {isEnvelopes && (
+                  <>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+                        {MODAL_TEXTS.LETTER_SPACING_INPUT_LABEL}
+                      </Typography>
+                      <RadioGroup
+                        row
+                        value={letterSpacing}
+                        onChange={(e) => setLetterSpacing(e.target.value)}
+                        sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                      >
+                        {LETTER_SPACING_LEVELS.map(({ id }, index) => (
+                          <FormControlLabel
+                            key={id}
+                            value={id}
+                            disabled={letterSpacingDisabled}
+                            control={<Radio size="small" />}
+                            label={MODAL_TEXTS.LETTER_SPACING_OPTIONS[id]}
+                            sx={index === LETTER_SPACING_LEVELS.length - 1 ? { mr: 0 } : undefined}
+                          />
+                        ))}
+                      </RadioGroup>
+                    </Stack>
+                    {letterSpacingNote && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.4 }}>
+                        {letterSpacingNote}
+                      </Typography>
+                    )}
+                  </>
+                )}
                 </Box>
 
                 {/* "לכבוד" במדבקה בעברית - המיקום רלוונטי רק כשהוא בשורה נפרדת */}
@@ -710,7 +776,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                     width={ENVELOPE_PREVIEW_WIDTH}
                     layout={buildEnvelopeLayout(
                       envelopeSettings,
-                      { fontType, englishFontType, fontScale, fontWeight },
+                      { fontType, englishFontType, fontScale, fontWeight: effectiveFontWeight, letterSpacing },
                       {
                         recipientLanguage: detectPrintLanguage(previewRow, envelopePrintFlag),
                         recipientLines: countRecipientLines([previewRow], envelopePrintFlag, envelopeTextOptions),

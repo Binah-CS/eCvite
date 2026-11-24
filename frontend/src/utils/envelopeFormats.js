@@ -4,8 +4,19 @@
 
 export const MM_TO_PX = 96 / 25.4;
 
-export const FLAP_SHAPES = ['straight', 'triangular'];
+export const MAX_SENDERS = 2;
+
+// צורות הלשונית. maxSenders - כמה שולחים נכנסים בה, כמו maxSenders ב-SENDER_MODES: במשולשת
+// הרוחב צר מדי לשתי עמודות, ולכן מודפס רק הראשון
+export const FLAP_SHAPES = {
+  straight: { maxSenders: MAX_SENDERS },
+  triangular: { maxSenders: 1 },
+};
 export const DEFAULT_FLAP_SHAPE = 'straight';
+
+export function isFlapShape(value) {
+  return Object.prototype.hasOwnProperty.call(FLAP_SHAPES, value);
+}
 
 export const ENVELOPE_SIZES = [
   { id: 'a7', label: 'סטנדרטית', widthMm: 184, heightMm: 133, defaultFlapDepthMm: 40 },
@@ -15,8 +26,6 @@ export const ENVELOPE_SIZES = [
 export const CUSTOM_ENVELOPE_ID = 'custom';
 export const DEFAULT_CUSTOM_ENVELOPE = { widthMm: 184, heightMm: 133 };
 const DEFAULT_CUSTOM_FLAP_DEPTH_MM = 40;
-
-export const MAX_SENDERS = 2;
 
 // מיקום השולח כשמדפיסים אותו. כל ערך כאן הוא גם מפתח ב-SENDER_MODES (envelopeLayout)
 export const SENDER_PLACEMENTS = ['openFlap', 'frontCorner'];
@@ -80,8 +89,9 @@ function toPositiveNumber(value) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
-// טווח המידות המותאמות. המינימום מבטיח שהכתב המינימלי תמיד נכנס בגובה (גם עם שולח בפינה
-// והרבה שורות לנמען). המקסימום תופס בעיקר הקלדה שגויה (1840 במקום 184)
+// טווח המידות המותאמות. במינימום, כתובת רגילה (עד שם + 4 שורות) נכנסת בגודל הכתב המינימלי
+// גם עם שולח בפינה; נמען עם הרבה עמודות נוספות יכול לגלוש, ואז יש אזהרה (ר'
+// getEnvelopeFontScaleRange). המקסימום תופס בעיקר הקלדה שגויה (1840 במקום 184)
 export const MIN_ENVELOPE_WIDTH_MM = 110;
 export const MIN_ENVELOPE_HEIGHT_MM = 80;
 export const MAX_ENVELOPE_WIDTH_MM = 350;

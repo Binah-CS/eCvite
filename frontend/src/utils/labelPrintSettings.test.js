@@ -1,5 +1,32 @@
 import api from '../services/api';
-import { loadLabelPrintSettings, saveLabelPrintSettings } from './labelPrintSettings';
+import { loadLabelPrintSettings, saveFontWeightForReturn, saveLabelPrintSettings } from './labelPrintSettings';
+import { resolveFontWeight } from '../fonts/fonts';
+
+// "שינוי הגדרות הדפסה" ואז החלון: הערך שהחלון קורא מ-sessionStorage, והעובי שיוצא ממנו
+const weightAfterReturn = (choice, printType) => {
+  saveFontWeightForReturn(choice);
+  return resolveFontWeight(sessionStorage.getItem('savedFontWeight'), printType);
+};
+
+describe('font weight on returning to the print settings', () => {
+  beforeEach(() => sessionStorage.clear());
+
+  test('a default that was only printed is not saved, so switching print type gets its own default', () => {
+    expect(weightAfterReturn(null, 'envelopes')).toBe('bold'); // מדבקות (רגיל) ואז מעטפות
+    expect(weightAfterReturn(null, 'labels')).toBe('regular'); // מעטפות (מודגש) ואז מדבקות
+    expect(sessionStorage.getItem('savedFontWeight')).toBeNull();
+  });
+
+  test('an explicit choice is kept across print types', () => {
+    expect(weightAfterReturn('regular', 'envelopes')).toBe('regular');
+    expect(weightAfterReturn('bold', 'labels')).toBe('bold');
+  });
+
+  test('a leftover value from an earlier return is cleared when nothing was chosen', () => {
+    sessionStorage.setItem('savedFontWeight', 'regular');
+    expect(weightAfterReturn(undefined, 'envelopes')).toBe('bold');
+  });
+});
 
 jest.mock('../services/api', () => ({
   __esModule: true,

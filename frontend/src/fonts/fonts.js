@@ -7,6 +7,7 @@
 // family   - שם המשפחה בלבד, כמו שהוא ב-CSS
 // fallback - משפחה כללית למקרה שהכתב לא זמין
 // scripts  - באילו שפות יש בכתב אותיות: 'he' / 'en'
+// connected - כתב יד שהאותיות בו מחוברות. ריווח אותיות שובר את החיבורים, ולכן הוא לא חל עליו
 // hidden   - לא מוצע בתפריט, ונשאר רק כדי שמי שכבר שמר אותו ימשיך להדפיס בו
 // legacyValues - הערכים שנשמרו לפני שנשמר id (מחרוזת ה-CSS של הרשימה הישנה)
 
@@ -30,8 +31,8 @@ const FONT_ROWS = [
   { id: 'david', displayName: 'David', family: 'David', fallback: 'serif', category: 'festive', scripts: ['he', 'en'], hidden: true, legacyValues: ['David, serif'] },
 
   { id: 'playpen-sans-hebrew', displayName: 'Playpen Sans Hebrew', family: '"Playpen Sans Hebrew"', fallback: 'sans-serif', category: 'handwriting', scripts: ['he', 'en'] },
-  { id: 'parisienne', displayName: 'Parisienne', family: '"Parisienne"', fallback: 'serif', category: 'handwriting', scripts: ['en'] },
-  { id: 'dancing-script', displayName: 'Dancing Script', family: '"Dancing Script"', fallback: 'serif', category: 'handwriting', scripts: ['en'] },
+  { id: 'parisienne', displayName: 'Parisienne', family: '"Parisienne"', fallback: 'serif', category: 'handwriting', scripts: ['en'], connected: true },
+  { id: 'dancing-script', displayName: 'Dancing Script', family: '"Dancing Script"', fallback: 'serif', category: 'handwriting', scripts: ['en'], connected: true },
   { id: 'playfair-display', displayName: 'Playfair Display', family: '"Playfair Display"', fallback: 'serif', category: 'handwriting', scripts: ['en'] },
   { id: 'gveret-levin', displayName: 'גברת לוין', family: '"Gveret Levin"', fallback: 'sans-serif', category: 'handwriting', scripts: ['he'] },
   { id: 'noto-rashi-hebrew', displayName: 'רש"י', family: '"Noto Rashi Hebrew"', fallback: 'serif', category: 'handwriting', scripts: ['he'] },
@@ -90,6 +91,80 @@ export function getAddressFontFamily(language, primaryId, englishId = '') {
     : `${primary.family}, ${english.family}, ${primary.fallback}`;
 }
 
+// עובי הכתב שנבחר בחלון ההדפסה. בלי בחירה (ואין ערך שמור) - ברירת המחדל לפי סוג ההדפסה:
+// מעטפות מודגש, כדי שהכתובת תבלוט על המעטפה. מדבקות נשארות רגיל
+export const FONT_WEIGHTS = ['regular', 'bold'];
+const DEFAULT_FONT_WEIGHT_BY_PRINT_TYPE = { envelopes: 'bold' };
+
+export function isFontWeight(value) {
+  return FONT_WEIGHTS.includes(value);
+}
+
+export function getDefaultFontWeight(printType) {
+  return DEFAULT_FONT_WEIGHT_BY_PRINT_TYPE[printType] ?? 'regular';
+}
+
+// הבחירה אם יש (גם 'regular' שנשמר בעבר נשאר), ואחרת ברירת המחדל של סוג ההדפסה
+export function resolveFontWeight(chosen, printType) {
+  return isFontWeight(chosen) ? chosen : getDefaultFontWeight(printType);
+}
+
+// ריווח בין אותיות. ב-em, כדי שיגדל עם הכתב. נבחר בחלון ההדפסה (היום רק למעטפות)
+export const LETTER_SPACING_LEVELS = [
+  { id: 'normal', em: 0 },
+  { id: 'wide', em: 0.04 },
+  { id: 'wider', em: 0.08 },
+];
+export const DEFAULT_LETTER_SPACING = 'normal';
+const LETTER_SPACING_EM = new Map(LETTER_SPACING_LEVELS.map((level) => [level.id, level.em]));
+
+export function isLetterSpacing(value) {
+  return LETTER_SPACING_EM.has(value);
+}
+
+export function normalizeLetterSpacing(value) {
+  return isLetterSpacing(value) ? value : DEFAULT_LETTER_SPACING;
+}
+
+export function isConnectedFont(font) {
+  return Boolean(font?.connected);
+}
+
+// הכתב שמדפיס את האותיות של כתובת בשפה הזאת - הראשון בשרשרת של getAddressFontFamily
+function getAddressFont(language, primaryId, englishId = '') {
+  const english = getFont(normalizeEnglishFontId(englishId));
+  return language === 'en' && english ? english : getFont(normalizeFontId(primaryId));
+}
+
+// באילו שפות הריווח חל, לפי הכתב של כל שפה: { he, en }. כתב מחובר - לא חל
+export function getLetterSpacingAvailability(primaryId, englishId = '') {
+  return {
+    he: !isConnectedFont(getAddressFont('he', primaryId, englishId)),
+    en: !isConnectedFont(getAddressFont('en', primaryId, englishId)),
+  };
+}
+
+// ה-letter-spacing של כתובת אחת: לפי הכתב של השפה שלה, בדיוק כמו getAddressFontFamily. כך
+// כשרק הכתב לאנגלית מחובר, כתובות בעברית עדיין מקבלות ריווח. מילה בשפה השנייה בתוך הכתובת
+// מקבלת את מה שהשורה שלה מקבלת
+export function getAddressLetterSpacing(language, primaryId, englishId = '', level = DEFAULT_LETTER_SPACING) {
+  const em = LETTER_SPACING_EM.get(normalizeLetterSpacing(level));
+  if (!em || isConnectedFont(getAddressFont(language, primaryId, englishId))) return 'normal';
+  return `${em}em`;
+}
+
+// הסגנון המשותף לכל שורה של כתובת מודפסת (נמען ושולח, מעטפות ומדבקות), מעבר לגודל ולעובי.
+// שחור מלא - אפור יוצא במדפסת דיו כנקודות צבע וחיוור. font-synthesis: none - כתב בלי משקל 700
+// (Suez One, Secular One, Parisienne, גברת לוין) מודפס במשקל שלו ולא בהדגשה מלאכותית של הדפדפן.
+// letterSpacing רק כשמעבירים רמה (היום רק המעטפות). בלי רמה - אין ריווח בכלל בסגנון
+export const ADDRESS_TEXT_COLOR = '#000000';
+
+export function getAddressTextStyle({ language, fontType, englishFontType = '', letterSpacing } = {}) {
+  const style = { color: ADDRESS_TEXT_COLOR, fontSynthesis: 'none' };
+  if (letterSpacing === undefined) return style;
+  return { ...style, letterSpacing: getAddressLetterSpacing(language, fontType, englishFontType, letterSpacing) };
+}
+
 const SCRIPT_WARNINGS = {
   he: 'יש כתובות בעברית, ואף אחד מהכתבים שנבחרו לא תומך בעברית - הן יודפסו בכתב ברירת מחדל.',
   en: 'יש כתובות באנגלית, ואף אחד מהכתבים שנבחרו לא תומך באנגלית - הן יודפסו בכתב ברירת מחדל. אפשר לבחור "כתב לאנגלית".',
@@ -111,7 +186,7 @@ const FONT_LOAD_TIMEOUT_MS = 3000;
 
 // פותח את חלון ההדפסה רק אחרי שהכתבים של ההדפסה ירדו - אחרת הדפסה ישירה (autoPrint)
 // יוצאת בכתב ברירת מחדל. אם הטעינה נתקעת, מדפיסים בכל זאת אחרי FONT_LOAD_TIMEOUT_MS
-export function printWhenFontsReady({ fontType, englishFontType = '', fontWeight = 'regular' } = {}) {
+export function printWhenFontsReady({ fontType, englishFontType = '', fontWeight } = {}) {
   const fontSet = typeof document !== 'undefined' ? document.fonts : null;
   if (!fontSet) {
     window.print();
