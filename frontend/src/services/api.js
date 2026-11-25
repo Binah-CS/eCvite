@@ -102,6 +102,10 @@ const api = {
           { alias }
       ),
 
+  // הגדרות חלון "הדפסת מעטפות" של המשתמשת - נפרדות מאלה של המדבקות (ר' labelPrintSettings.js)
+  updateEnvelopePrintSettings: (phone, envelopePrintSettings) =>
+      apiClient.put('/auth/envelope-print-settings', { phone, envelopePrintSettings }),
+
   updateColumnPreferences: (phone, columnPreferences) =>
       apiClient.put('/auth/column-preferences', { phone, columnPreferences }),
 

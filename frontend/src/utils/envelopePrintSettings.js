@@ -70,26 +70,34 @@ function sanitizeSettings(raw) {
   };
 }
 
+// הגדרות המעטפה בלי השולחים (שנשמרים בנפרד) ובלי senderTypography (שעוד לא נבחר בחלון).
+// זה מה שנשמר - גם לחזרה מהתצוגה וגם בשרת אצל המשתמשת (ר' saveEnvelopePrintSettings)
+export function toStoredEnvelopeSettings(settings) {
+  const { senders, senderTypography, ...rest } = settings ?? {};
+  return rest;
+}
+
 // נקרא רק ב"שינוי הגדרות הדפסה". השולחים לא כאן, כי הם כבר שמורים בנפרד
 export function saveEnvelopeSettingsForReturn(settings) {
   try {
-    const { senders, ...rest } = settings;
-    sessionStorage.setItem(SAVED_ENVELOPE_SETTINGS_KEY, JSON.stringify(rest));
+    sessionStorage.setItem(SAVED_ENVELOPE_SETTINGS_KEY, JSON.stringify(toStoredEnvelopeSettings(settings)));
   } catch (err) {
     console.error('שמירת הגדרות המעטפה לחזרה מהתצוגה נכשלה:', err);
   }
 }
 
-// ההגדרות שהחלון נפתח איתן: ברירות המחדל, או בחזרה מהתצוגה המקדימה מה שנשמר לפני
-// היציאה אליה. בשני המקרים עם השולחים השמורים, כך שהשדות כבר מלאים כשמסמנים הדפסת שולח
-export function loadInitialEnvelopeSettings({ returning = false } = {}) {
-  let saved = null;
+// ההגדרות שהחלון נפתח איתן: בחזרה מהתצוגה המקדימה - מה שנשמר לפני היציאה אליה; אחרת
+// הבחירה השמורה של המשתמשת בשרת (saved, החלק envelope של הבחירות השמורות); ובלי אף אחד
+// מהם - ברירות המחדל. ערך לא תקין מוחלף בברירת המחדל שלו. בכל המקרים עם השולחים השמורים,
+// כך שהשדות כבר מלאים כשמסמנים הדפסת שולח
+export function loadInitialEnvelopeSettings({ returning = false, saved = null } = {}) {
+  let fromPreview = null;
   if (returning) {
     try {
-      saved = JSON.parse(sessionStorage.getItem(SAVED_ENVELOPE_SETTINGS_KEY) || 'null');
+      fromPreview = JSON.parse(sessionStorage.getItem(SAVED_ENVELOPE_SETTINGS_KEY) || 'null');
     } catch {
-      saved = null;
+      fromPreview = null;
     }
   }
-  return { ...sanitizeSettings(saved), senders: loadSavedSenders() };
+  return { ...sanitizeSettings(fromPreview ?? saved), senders: loadSavedSenders() };
 }

@@ -1,10 +1,17 @@
 // src/components/PrintModal.jsx
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal, Box, Typography, Button, RadioGroup, FormControlLabel, Radio, FormControl, InputLabel, Select, MenuItem, Stack, Divider, Snackbar, Alert, IconButton, Checkbox, TextField } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import { useNavigate } from 'react-router-dom';
-import { loadLabelPrintSettings, saveLabelPrintSettings } from '../utils/labelPrintSettings';
+import {
+  MAX_ENGLISH_SALUTATION_LENGTH,
+  loadEnvelopePrintSettings,
+  loadLabelPrintSettings,
+  saveEnvelopePrintSettings,
+  saveLabelPrintSettings,
+} from '../utils/labelPrintSettings';
+import { RETURN_CHOICE_KEYS, clampEnglishSalutation, resolveInitialChoices } from '../utils/printChoices';
 import { orderLikeTable } from '../utils/printOrder';
 import EnvelopeSettingsStep from './EnvelopeSettingsStep';
 import EnvelopePreview from './EnvelopePreview';
@@ -17,7 +24,7 @@ import {
   isEnvelopeSettingsReady,
   normalizeEnvelopeFontScale,
 } from '../utils/envelopeLayout';
-import { SAVED_ENVELOPE_SETTINGS_KEY, loadInitialEnvelopeSettings, saveSenders } from '../utils/envelopePrintSettings';
+import { SAVED_ENVELOPE_SETTINGS_KEY, loadInitialEnvelopeSettings, saveSenders, toStoredEnvelopeSettings } from '../utils/envelopePrintSettings';
 import {
   DEFAULT_CUSTOM_LABEL_FORMAT,
   getCustomLabelLayout,
@@ -27,16 +34,9 @@ import {
 import { MODAL_TEXTS } from '../pages/HardCodePage';
 import FontSelect from './FontSelect';
 import {
-  DEFAULT_FONT_ID,
-  DEFAULT_LETTER_SPACING,
   LETTER_SPACING_LEVELS,
   getFontScriptWarning,
   getLetterSpacingAvailability,
-  isFontWeight,
-  isLetterSpacing,
-  normalizeEnglishFontId,
-  normalizeFontId,
-  normalizeFontPair,
   resolveFontWeight,
 } from '../fonts/fonts';
 import { getSenderMode } from '../utils/envelopeFormats';
@@ -46,7 +46,6 @@ import {
   getMaxFontScale,
   clampFontScale,
   FONT_SCALE_MIN,
-  FONT_SCALE_DEFAULT,
   FONT_SCALE_STEP,
 } from '../utils/labelSheetLayout';
 
@@ -83,7 +82,6 @@ const SELECTED_ROW_IDS_STORAGE_KEY = 'dashboardSelectedIds';
 const SELECTED_ROWS_STORAGE_KEY = 'dashboardSelectedRows';
 const CUSTOM_ENGLISH_SALUTATION = '__custom__';
 const PRESET_ENGLISH_SALUTATIONS = ['', 'To:', 'Dear'];
-const GREETING_ALIGNMENTS = ['right', 'center', 'left'];
 const ENVELOPE_PREVIEW_WIDTH = PREVIEW_PANEL_WIDTH;
 const ENVELOPE_PREVIEW_SAMPLE_ROW = { man: 'ישראל', woman: 'שרה', lastName: 'ישראלי', street: 'הרצל', houseNo: '1', city: 'ירושלים' };
 
@@ -203,21 +201,37 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
     return 1;
   });
 
-  // הבחירות השמורות של המשתמשת המחוברת (בשרת אצלה, ר' labelPrintSettings.js) - אחרי
-  // הפעם הראשונה אלה ברירות המחדל שלה. נקרא פעם אחת, כשהחלון נטען
+  // הבחירות השמורות של המשתמשת המחוברת, לכל סוג הדפסה בנפרד (בשרת אצלה, ר'
+  // labelPrintSettings.js) - אחרי הפעם הראשונה אלה ברירות המחדל שלה. נקרא פעם אחת,
+  // כשהחלון נטען. נשמר רק במעבר לתצוגה/להדפסה, שמוציא מהעמוד, ולכן העותק הזה לא מתיישן
   const [userLabelSettings] = useState(loadLabelPrintSettings);
+  const [userEnvelopeSettings] = useState(loadEnvelopePrintSettings);
+  // הבחירות של סוג ההדפסה, והבחירות של הסוג השני כ-fallback לכל מפתח (ר' printChoices.js)
+  const savedChoicesFor = (type) => (type === 'envelopes'
+    ? { primary: userEnvelopeSettings, fallback: userLabelSettings }
+    : { primary: userLabelSettings, fallback: userEnvelopeSettings });
 
   // חזרה מ"שינוי הגדרות הדפסה" בעמוד המעטפות. נקרא פעם אחת, לפני שהמפתחות נמחקים
   const [returningToEnvelopes] = useState(() => sessionStorage.getItem('fromPreview') === 'true'
     && sessionStorage.getItem('savedPrintType') === 'envelopes');
-  // ברירות המחדל, או מה שנבחר לפני המעבר לתצוגה המקדימה. פרטי השולחים תמיד מהשמירה
+  // מה שנבחר לפני המעבר לתצוגה המקדימה, או הבחירה השמורה בשרת, או ברירות המחדל.
+  // פרטי השולחים תמיד מהשמירה שלהם (ר' envelopePrintSettings.js)
   const [envelopeSettings, setEnvelopeSettings] = useState(
-    () => loadInitialEnvelopeSettings({ returning: returningToEnvelopes }),
+    () => loadInitialEnvelopeSettings({ returning: returningToEnvelopes, saved: userEnvelopeSettings.envelope }),
   );
 
-  // ערך התחלתי לכל בחירה: קודם מה שנשמר בחזרה מהתצוגה המקדימה ("שינוי הגדרות
-  // הדפסה"), אחר כך הבחירה השמורה של המשתמשת, ורק אז ברירת המחדל. ערך לא תקין
-  // (כמו "printer1" מגרסה קודמת, או כתב שכבר לא ברשימה) מדולג
+  // סוג ההדפסה שהבחירות שבחלון שייכות לו כרגע. בהתחלה מדבקות, או מעטפות בחזרה מעמוד
+  // המעטפות. במעבר לסוג אחר בשלב 1 הבחירות מוחלפות (ר' switchChoicesTo)
+  const loadedTypeRef = useRef(returningToEnvelopes ? 'envelopes' : 'labels');
+  // שינויים שלא נשמרו (לא עברו לתצוגה/להדפסה), לכל סוג - כדי שמעבר למעטפות וחזרה
+  // למדבקות לא יאבד אותם. בזיכרון בלבד: לא נשמרים לשום מקום
+  const choiceDraftsRef = useRef({});
+  const [initialChoices] = useState(() => resolveInitialChoices({
+    session: (key) => sessionStorage.getItem(key),
+    ...savedChoicesFor(loadedTypeRef.current),
+  }));
+
+  // בחירות ייחודיות למדבקות (גודל המדבקה) - רק מהחזרה מהתצוגה או מהשמירה של המדבקות
   const initialChoice = (sessionKey, prefKey, isValid, fallback) => {
     const fromPreview = typeof window !== 'undefined' ? sessionStorage.getItem(sessionKey) : null;
     if (fromPreview !== null && isValid(fromPreview)) return fromPreview;
@@ -244,96 +258,103 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
   // 2. גודל המדבקה
   const [labelSize, setLabelSize] = useState(initialLabelSize);
 
-  // 3. המדפסת
-  const [printer, setPrinter] = useState(() =>
-    initialChoice('savedPrinter', 'printer', (v) => v === 'home' || v === 'office', 'home'));
+  // גודל הכתב מוגבל לפי סוג ההדפסה: במדבקות - עד המקסימום שנכנס בגודל המדבקה שנבחר (ר'
+  // getMaxFontScale); במעטפות - הבחירה עצמה, בלי התקרה של המעטפה (היא מוחלת רק בחישוב,
+  // ר' getEffectiveEnvelopeFontScale)
+  const fontScaleFor = (type, scale, size = labelSize, format = customFormat) => (type === 'envelopes'
+    ? normalizeEnvelopeFontScale(scale)
+    : clampFontScale(scale, size, size === 'custom' ? getCustomLabelLayout(format)?.height : undefined));
 
-  // 3.1 אופן קבלת ההדפסה (רלוונטי רק כשבוחרים במדפסת המשרד)
-  const [deliveryMethod, setDeliveryMethod] = useState(() =>
-    initialChoice('savedDeliveryMethod', 'deliveryMethod', (v) => v === 'courier' || v === 'pickup', 'courier'));
+  // 3. המדפסת. 3.1 אופן קבלת ההדפסה (רלוונטי רק כשבוחרים במדפסת המשרד)
+  const [printer, setPrinter] = useState(initialChoices.printer);
+  const [deliveryMethod, setDeliveryMethod] = useState(initialChoices.deliveryMethod);
 
-  // 4. סוג הכתב - id מ-fonts.js. ערך ישן (מחרוזת CSS מהרשימה הקודמת) מתורגם ל-id שלו
-  // 4.1 כתב לאנגלית - אופציונלי, '' = "כמו העברית". שני השדות עוברים יחד דרך
-  // normalizeFontPair, שמעבירה כתב בלי עברית שנשמר פעם כראשי לשדה האנגלית
-  const [initialFonts] = useState(() => normalizeFontPair(
-    initialChoice('savedFontType', 'fontType', (v) => normalizeFontId(v, null) !== null, DEFAULT_FONT_ID),
-    initialChoice('savedEnglishFontType', 'englishFontType', (v) => v === '' || normalizeEnglishFontId(v) !== '', ''),
-  ));
-  const [fontType, setFontType] = useState(initialFonts.fontType);
-  const [englishFontType, setEnglishFontType] = useState(initialFonts.englishFontType);
+  // 4. סוג הכתב - id מ-fonts.js. 4.1 כתב לאנגלית - אופציונלי, '' = "כמו העברית"
+  const [fontType, setFontType] = useState(initialChoices.fontType);
+  const [englishFontType, setEnglishFontType] = useState(initialChoices.englishFontType);
 
-  // 5. גודל כתב (אחוז מהגודל הרגיל, 100 = כמו היום) - חופשי, אבל רק עד המקסימום
-  // שנכנס בגודל המדבקה שנבחר (ר' getMaxFontScale)
-  const [fontScale, setFontScale] = useState(() => clampFontScale(
-    initialChoice('savedFontScale', 'fontScale', (v) => v.trim() !== '' && Number.isFinite(Number(v)), String(FONT_SCALE_DEFAULT)),
-    initialLabelSize,
-    initialLabelSize === 'custom' ? getCustomLabelLayout(customFormat)?.height : undefined
-  ));
+  // 5. גודל כתב (אחוז מהגודל הרגיל, 100 = כמו היום)
+  const [fontScale, setFontScale] = useState(() =>
+    fontScaleFor(loadedTypeRef.current, initialChoices.fontScale, initialLabelSize));
 
   // 6. עובי כתב לכל הכתובת, כולל השם - "רגיל" או "מודגש". null = עוד לא נבחר ואין ערך שמור:
   // אז העובי בפועל הוא ברירת המחדל של סוג ההדפסה (effectiveFontWeight, ר' resolveFontWeight)
-  const [fontWeight, setFontWeight] = useState(() =>
-    initialChoice('savedFontWeight', 'fontWeight', isFontWeight, null));
+  const [fontWeight, setFontWeight] = useState(initialChoices.fontWeight);
 
   // 6.1 ריווח אותיות - רק במעטפות. לא חל על כתב יד מחובר (ר' getLetterSpacingAvailability)
-  const [letterSpacing, setLetterSpacing] = useState(() =>
-    initialChoice('savedLetterSpacing', 'letterSpacing', isLetterSpacing, DEFAULT_LETTER_SPACING));
+  const [letterSpacing, setLetterSpacing] = useState(initialChoices.letterSpacing);
 
-  const [englishSalutation, setEnglishSalutation] = useState(() => {
-    const saved = typeof window !== 'undefined' ? sessionStorage.getItem('savedEnglishSalutation') || '' : '';
-    return PRESET_ENGLISH_SALUTATIONS.includes(saved) ? saved : CUSTOM_ENGLISH_SALUTATION;
-  });
-  const [customEnglishSalutation, setCustomEnglishSalutation] = useState(() => {
-    const saved = typeof window !== 'undefined' ? sessionStorage.getItem('savedEnglishSalutation') || '' : '';
-    return PRESET_ENGLISH_SALUTATIONS.includes(saved) ? '' : saved;
-  });
+  // הפנייה באנגלית: ערך מהרשימה, או "מותאמת אישית" עם הטקסט שלה
+  const splitEnglishSalutation = (value) => (PRESET_ENGLISH_SALUTATIONS.includes(value)
+    ? { select: value, custom: '' }
+    : { select: CUSTOM_ENGLISH_SALUTATION, custom: value });
+  const [englishSalutation, setEnglishSalutation] = useState(
+    () => splitEnglishSalutation(initialChoices.englishSalutation).select);
+  const [customEnglishSalutation, setCustomEnglishSalutation] = useState(
+    () => splitEnglishSalutation(initialChoices.englishSalutation).custom);
   const selectedEnglishSalutation = englishSalutation === CUSTOM_ENGLISH_SALUTATION
-    ? customEnglishSalutation.trim()
+    ? clampEnglishSalutation(customEnglishSalutation.trim())
     : englishSalutation;
 
-  // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - מסומן כברירת מחדל. ערך
-  // שמור (חזרה מ"שינוי הגדרות" בתצוגה המקדימה) גובר, ואחריו הבחירה השמורה של
-  // המשתמשת - כולל אם הורידו את הסימון
-  const [emptyLineWhenNoAddress, setEmptyLineWhenNoAddress] = useState(() =>
-    initialChoice('savedEmptyLineWhenNoAddress', 'emptyLineWhenNoAddress', (v) => v === 'true' || v === 'false', 'true') === 'true');
+  // 5. שורה ריקה במקום הכתובת כשלנמען אין רחוב/מספר בית - מסומן כברירת מחדל
+  const [emptyLineWhenNoAddress, setEmptyLineWhenNoAddress] = useState(initialChoices.emptyLineWhenNoAddress);
 
   // 7. "לכבוד" במדבקה בעברית - האם להדפיס אותו, האם בשורה נפרדת מעל השם (ברירת
   // המחדל), ואם כן באיזה צד. נשמר למשתמשת כמו שאר הבחירות
-  const isBooleanString = (v) => v === 'true' || v === 'false';
-  const [greetingShow, setGreetingShow] = useState(() =>
-    initialChoice('savedGreetingShow', 'greetingShow', isBooleanString, 'true') === 'true');
-  const [greetingSeparateLine, setGreetingSeparateLine] = useState(() =>
-    initialChoice('savedGreetingSeparateLine', 'greetingSeparateLine', isBooleanString, 'true') === 'true');
-  const [greetingAlign, setGreetingAlign] = useState(() =>
-    initialChoice('savedGreetingAlign', 'greetingAlign', (v) => GREETING_ALIGNMENTS.includes(v), 'center'));
-
-  // גודל הכתב ההתחלתי מוגבל לפי גודל המדבקה. בחזרה ממעטפות מחזירים את הגודל שנבחר שם -
-  // הבחירה עצמה, בלי התקרה של המעטפה (היא מוחלת רק בחישוב, ר' getEffectiveEnvelopeFontScale)
-  useEffect(() => {
-    const savedFontScale = sessionStorage.getItem('savedFontScale');
-    if (returningToEnvelopes && savedFontScale !== null) {
-      setFontScale(normalizeEnvelopeFontScale(savedFontScale));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [greetingShow, setGreetingShow] = useState(initialChoices.greetingShow);
+  const [greetingSeparateLine, setGreetingSeparateLine] = useState(initialChoices.greetingSeparateLine);
+  const [greetingAlign, setGreetingAlign] = useState(initialChoices.greetingAlign);
 
   // הערכים שנשמרו בחזרה מהתצוגה המקדימה ("שינוי הגדרות הדפסה") נקראים פעם אחת - כבר
   // נקלטו למעלה - ונמחקים מיד. בלי זה, ערך שנשאר (למשל אחרי הדפסה מהתצוגה המקדימה
   // עצמה, או אחרי התנתקות) היה גובר בפעם הבאה על הבחירות השמורות של המשתמשת - או
   // אפילו עובר למשתמשת אחרת שמתחברת באותה לשונית
   useEffect(() => {
-    ['savedPrintType', SAVED_ENVELOPE_SETTINGS_KEY, 'savedLabelSize', 'savedCustomFormat', 'savedPrinter', 'savedFontType', 'savedEnglishFontType', 'savedDeliveryMethod', 'savedFontScale', 'savedFontWeight', 'savedLetterSpacing']
+    ['savedPrintType', SAVED_ENVELOPE_SETTINGS_KEY, 'savedLabelSize', 'savedCustomFormat', ...RETURN_CHOICE_KEYS]
       .forEach((key) => sessionStorage.removeItem(key));
-    sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
-    ['savedGreetingShow', 'savedGreetingSeparateLine', 'savedGreetingAlign'].forEach((key) => sessionStorage.removeItem(key));
   }, []);
+
+  // הבחירות המשותפות כפי שהן עכשיו בחלון - מה שנשמר לכל סוג, ומה שנשמר כטיוטה במעבר בין
+  // סוגים. fontWeight נשמר כפי שנבחר: null כשלא נבחר, כדי שמשתמשת שלא בחרה עובי תקבל גם
+  // בפעם הבאה את ברירת המחדל של סוג ההדפסה
+  const currentChoices = () => ({
+    fontType, englishFontType, printer, deliveryMethod, fontScale, fontWeight, letterSpacing,
+    englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign,
+  });
 
   // נשמר אצל המשתמשת בשרת בכל מעבר לתצוגה המקדימה/להדפסה - כדי שבפעם הבאה החלון
   // ייפתח אצלה עם הבחירות האלה. לא מחכים לתשובה - ההדפסה לא תלויה בשמירה
-  // fontWeight נשמר כפי שנבחר: null כשלא נבחר, כדי שמשתמשת שלא בחרה עובי תקבל גם בפעם
-  // הבאה את ברירת המחדל של סוג ההדפסה (ולא את 'regular' של המדבקות גם במעטפות)
   const rememberChoices = () => {
-    saveLabelPrintSettings({ fontType, englishFontType, labelSize, customFormat, printer, deliveryMethod, fontScale, fontWeight, letterSpacing, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign });
+    saveLabelPrintSettings({ ...currentChoices(), labelSize, customFormat });
+  };
+
+  // מעבר לסוג הדפסה אחר בשלב 1: הבחירות של הסוג הקודם נשמרות כטיוטה, והחלון מקבל את
+  // הטיוטה של הסוג החדש אם יש (חזרה אליו באותו חלון), ואחרת את הבחירות השמורות שלו
+  const switchChoicesTo = (type) => {
+    if (loadedTypeRef.current === type) return;
+    choiceDraftsRef.current[loadedTypeRef.current] = {
+      ...currentChoices(),
+      englishSalutationSelect: englishSalutation,
+      customEnglishSalutation,
+    };
+    const next = choiceDraftsRef.current[type] ?? resolveInitialChoices(savedChoicesFor(type));
+    const salutation = next.englishSalutationSelect !== undefined
+      ? { select: next.englishSalutationSelect, custom: next.customEnglishSalutation }
+      : splitEnglishSalutation(next.englishSalutation);
+    setFontType(next.fontType);
+    setEnglishFontType(next.englishFontType);
+    setPrinter(next.printer);
+    setDeliveryMethod(next.deliveryMethod);
+    setFontScale(fontScaleFor(type, next.fontScale));
+    setFontWeight(next.fontWeight);
+    setLetterSpacing(next.letterSpacing);
+    setEnglishSalutation(salutation.select);
+    setCustomEnglishSalutation(salutation.custom);
+    setEmptyLineWhenNoAddress(next.emptyLineWhenNoAddress);
+    setGreetingShow(next.greetingShow);
+    setGreetingSeparateLine(next.greetingSeparateLine);
+    setGreetingAlign(next.greetingAlign);
+    loadedTypeRef.current = type;
   };
 
   // מעבר לגודל מדבקה קטן יותר מוריד גודל כתב שכבר לא נכנס בו למקסימום החדש
@@ -411,8 +432,9 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
   // המעבר לעמוד המעטפות. הזרימה של המדבקות למטה לא עוברת כאן בכלל
   const goToEnvelopes = (autoPrint) => {
-    // בחירת המדפסת נזכרת כמו במדבקות. שאר הבחירות השמורות של המדבקות נשארות כמו שהן
-    saveLabelPrintSettings({ ...loadLabelPrintSettings(), printer, deliveryMethod });
+    // כל הבחירות נזכרות כמו במדבקות, אבל בשדה של המעטפות - הבחירות של המדבקות לא משתנות.
+    // השולחים לא כאן (ר' toStoredEnvelopeSettings)
+    saveEnvelopePrintSettings({ ...currentChoices(), envelope: toStoredEnvelopeSettings(envelopeSettings) });
     const textStyle = { fontType, englishFontType, fontScale, fontWeight: effectiveFontWeight, letterSpacing, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign };
     saveSelectedRows(rowsToPrint);
     navigate('/print-envelopes', {
@@ -424,6 +446,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
 
   // פונקציה שמטפלת במעבר משלב 1 לשלב 2
   const handleNextStep = () => {
+    if (printType === 'labels' || printType === 'envelopes') switchChoicesTo(printType);
     if (printType === 'labels') {
       // הכתב משותף, ואם קודם נבחר כתב גדול למעטפה הוא צריך להיכנס גם במדבקה
       setFontScale((current) => clampFontScale(current, labelSize, labelSize === 'custom' ? customLayout?.height : undefined));
@@ -453,23 +476,8 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
       state: { selectedItems: rowsToPrint, labelSize, customFormat, printer, fontType, englishFontType, deliveryMethod, fontScale, fontWeight: effectiveFontWeight, fontWeightChoice: fontWeight, englishSalutation: selectedEnglishSalutation, emptyLineWhenNoAddress, greetingShow, greetingSeparateLine, greetingAlign, autoPrint: true },
     });
 
-    sessionStorage.removeItem('fromPreview');
-    sessionStorage.removeItem('savedLabelSize');
-    sessionStorage.removeItem('savedCustomFormat');
-    sessionStorage.removeItem('savedPrinter');
-    sessionStorage.removeItem('savedFontType');
-    sessionStorage.removeItem('savedEnglishFontType');
-    sessionStorage.removeItem('savedDeliveryMethod');
-    sessionStorage.removeItem('savedFontScale');
-    sessionStorage.removeItem('savedFontWeight');
-    sessionStorage.removeItem('savedEnglishSalutation');
-    sessionStorage.removeItem('savedEmptyLineWhenNoAddress');
-    sessionStorage.removeItem('savedGreetingShow');
-    sessionStorage.removeItem('savedGreetingSeparateLine');
-    sessionStorage.removeItem('savedGreetingAlign');
-    sessionStorage.removeItem('savedFontScale');
-    sessionStorage.removeItem('savedFontWeight');
-    sessionStorage.removeItem('savedLetterSpacing');
+    ['fromPreview', 'savedLabelSize', 'savedCustomFormat', ...RETURN_CHOICE_KEYS]
+      .forEach((key) => sessionStorage.removeItem(key));
 
     onClose();
     setStep(1);
@@ -665,7 +673,7 @@ export default function PrintModal({ open, onClose, selectedRows, records: allRe
                     value={customEnglishSalutation}
                     onChange={(e) => setCustomEnglishSalutation(e.target.value)}
                     placeholder="למשל: Attention:"
-                    inputProps={{ dir: 'ltr' }}
+                    inputProps={{ dir: 'ltr', maxLength: MAX_ENGLISH_SALUTATION_LENGTH }}
                   />
                 )}
 
