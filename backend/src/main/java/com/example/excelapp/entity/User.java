@@ -58,6 +58,13 @@ public class User {
     @Column(name = "label_print_settings", length = 1000)
     private String labelPrintSettings;
 
+    // אותו דבר לחלון "הדפסת מעטפות" (כתב, גודל ועובי כתב, ריווח, מדפסת, גודל המעטפה,
+    // הלשונית ומיקום השולח). עמודה נפרדת: לכל סוג הדפסה הבחירות שלו, וגם כי
+    // ddl-auto=update לא מרחיב עמודה קיימת. nullable - כך שההוספה לטבלה קיימת מצליחה,
+    // ומשתמשות קיימות פשוט מתחילות בלי ערך שמור. השולחים לא כאן (ר' envelopePrintSettings.js)
+    @Column(name = "envelope_print_settings", length = 2000)
+    private String envelopePrintSettings;
+
     @PrePersist
     public void onCreate() {
         createdAt = LocalDateTime.now();

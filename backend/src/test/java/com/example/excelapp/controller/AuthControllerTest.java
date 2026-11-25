@@ -190,6 +190,71 @@ class AuthControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    // ---------- PUT /api/auth/envelope-print-settings ----------
+
+    @Test
+    void updateEnvelopePrintSettings_savesPerUser_withoutTouchingLabelSettings() throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(buildValidUser("0505454545"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(buildValidUser("0505555556"))))
+                .andExpect(status().isOk());
+
+        String labelSettings = "{\"fontScale\":100}";
+        mockMvc.perform(put("/api/auth/label-print-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0505454545", "labelPrintSettings", labelSettings))))
+                .andExpect(status().isOk());
+
+        String settings = "{\"fontScale\":130,\"envelope\":{\"sizeId\":\"c6\"}}";
+        mockMvc.perform(put("/api/auth/envelope-print-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0505454545", "envelopePrintSettings", settings))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.envelopePrintSettings").value(settings))
+                .andExpect(jsonPath("$.labelPrintSettings").value(labelSettings));
+
+        assertThat(userRepository.findByPhone("0505454545").getEnvelopePrintSettings()).isEqualTo(settings);
+        assertThat(userRepository.findByPhone("0505454545").getLabelPrintSettings()).isEqualTo(labelSettings);
+        assertThat(userRepository.findByPhone("0505555556").getEnvelopePrintSettings()).isNull();
+    }
+
+    @Test
+    void updateEnvelopePrintSettings_upTo2000_ok_longer_returns400() throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(buildValidUser("0505656565"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/auth/envelope-print-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0505656565", "envelopePrintSettings", "x".repeat(2000)))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/auth/envelope-print-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0505656565", "envelopePrintSettings", "y".repeat(2001)))))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userRepository.findByPhone("0505656565").getEnvelopePrintSettings()).isEqualTo("x".repeat(2000));
+    }
+
+    @Test
+    void updateEnvelopePrintSettings_unknownPhone_returns404() throws Exception {
+        mockMvc.perform(put("/api/auth/envelope-print-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "phone", "0590000004", "envelopePrintSettings", "{}"))))
+                .andExpect(status().isNotFound());
+    }
+
     @Test
     void updateColumnPreferences_unknownPhone_returns404() throws Exception {
         mockMvc.perform(put("/api/auth/column-preferences")

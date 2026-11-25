@@ -4,6 +4,7 @@ import {
   loadSavedSenders,
   saveEnvelopeSettingsForReturn,
   saveSenders,
+  toStoredEnvelopeSettings,
 } from './envelopePrintSettings';
 import { createDefaultEnvelopeSettings, createEmptySender } from './envelopeFormats';
 
@@ -113,6 +114,31 @@ describe('initial envelope settings', () => {
     });
     sessionStorage.setItem(SAVED_ENVELOPE_SETTINGS_KEY, '{not json');
     expect(loadInitialEnvelopeSettings({ returning: true }).sizeId).toBe('a7');
+  });
+
+  test('a new entry starts from the settings saved for the user on the server', () => {
+    saveSenders([sender]);
+    expect(loadInitialEnvelopeSettings({ saved: toStoredEnvelopeSettings(chosen) }))
+      .toEqual({ ...chosen, senders: [sender] });
+  });
+
+  test('returning from the preview wins over the settings saved on the server', () => {
+    saveEnvelopeSettingsForReturn(corner);
+    expect(loadInitialEnvelopeSettings({ returning: true, saved: toStoredEnvelopeSettings(chosen) }))
+      .toMatchObject({ senderPlacement: 'frontCorner', cornerSide: 'left' });
+  });
+
+  test('missing, null or invalid saved settings fall back to the defaults', () => {
+    [undefined, null, 'x', { sizeId: 'b5', flapShape: 'round' }].forEach((saved) => {
+      expect(loadInitialEnvelopeSettings({ saved })).toMatchObject({ sizeId: 'a7', flapShape: 'straight', printSender: false });
+    });
+  });
+
+  test('the stored settings never include the senders', () => {
+    const stored = toStoredEnvelopeSettings({ ...chosen, senders: [sender] });
+    expect(stored.senders).toBeUndefined();
+    expect(stored.senderTypography).toBeUndefined();
+    expect(stored.sizeId).toBe(chosen.sizeId);
   });
 
   test('blocked storage does not throw', () => {
